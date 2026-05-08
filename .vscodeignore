@@ -1,0 +1,15 @@
+**/.vscode/**
+**/node_modules/**
+**/.git/**
+**/*.map
+**/src/**
+**/webview-src/**
+**/out/**
+**/out-webview/**
+**/java-server/src/**
+**/java-server/target/**
+tsconfig*.json
+esbuild.mjs
+.eslintrc*
+vitest.config*
+**/*.test.ts

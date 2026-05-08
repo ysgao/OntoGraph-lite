@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<Ontology xmlns="http://www.w3.org/2002/07/owl#"
+          xml:base="http://example.org/animals#"
+          ontologyIRI="http://example.org/animals"
+          versionIRI="http://example.org/animals/1.0">
+  <Prefix name="" IRI="http://example.org/animals#"/>
+  <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+  <Prefix name="owl" IRI="http://www.w3.org/2002/07/owl#"/>
+
+  <Declaration><Class IRI="http://example.org/animals#Animal"/></Declaration>
+  <Declaration><Class IRI="http://example.org/animals#Vertebrate"/></Declaration>
+  <Declaration><Class IRI="http://example.org/animals#Mammal"/></Declaration>
+  <Declaration><Class IRI="http://example.org/animals#Bird"/></Declaration>
+  <Declaration><Class IRI="http://example.org/animals#Marsupial"/></Declaration>
+  <Declaration><Class IRI="http://example.org/animals#Koala"/></Declaration>
+  <Declaration><Class IRI="http://example.org/animals#Habitat"/></Declaration>
+  <Declaration><Class IRI="http://example.org/animals#Forest"/></Declaration>
+  <Declaration><ObjectProperty IRI="http://example.org/animals#hasHabitat"/></Declaration>
+  <Declaration><ObjectProperty IRI="http://example.org/animals#hasParent"/></Declaration>
+  <Declaration><NamedIndividual IRI="http://example.org/animals#koko"/></Declaration>
+
+  <SubClassOf>
+    <Class IRI="http://example.org/animals#Vertebrate"/>
+    <Class IRI="http://example.org/animals#Animal"/>
+  </SubClassOf>
+  <SubClassOf>
+    <Class IRI="http://example.org/animals#Mammal"/>
+    <Class IRI="http://example.org/animals#Vertebrate"/>
+  </SubClassOf>
+  <SubClassOf>
+    <Class IRI="http://example.org/animals#Bird"/>
+    <Class IRI="http://example.org/animals#Vertebrate"/>
+  </SubClassOf>
+  <SubClassOf>
+    <Class IRI="http://example.org/animals#Marsupial"/>
+    <Class IRI="http://example.org/animals#Mammal"/>
+  </SubClassOf>
+  <SubClassOf>
+    <Class IRI="http://example.org/animals#Koala"/>
+    <Class IRI="http://example.org/animals#Marsupial"/>
+  </SubClassOf>
+  <SubClassOf>
+    <Class IRI="http://example.org/animals#Forest"/>
+    <Class IRI="http://example.org/animals#Habitat"/>
+  </SubClassOf>
+
+  <DisjointClasses>
+    <Class IRI="http://example.org/animals#Bird"/>
+    <Class IRI="http://example.org/animals#Mammal"/>
+  </DisjointClasses>
+
+  <ObjectPropertyDomain>
+    <ObjectProperty IRI="http://example.org/animals#hasHabitat"/>
+    <Class IRI="http://example.org/animals#Animal"/>
+  </ObjectPropertyDomain>
+  <ObjectPropertyRange>
+    <ObjectProperty IRI="http://example.org/animals#hasHabitat"/>
+    <Class IRI="http://example.org/animals#Habitat"/>
+  </ObjectPropertyRange>
+
+  <TransitiveObjectProperty>
+    <ObjectProperty IRI="http://example.org/animals#hasParent"/>
+  </TransitiveObjectProperty>
+
+  <ClassAssertion>
+    <Class IRI="http://example.org/animals#Koala"/>
+    <NamedIndividual IRI="http://example.org/animals#koko"/>
+  </ClassAssertion>
+
+  <AnnotationAssertion>
+    <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#label"/>
+    <IRI>http://example.org/animals#Animal</IRI>
+    <Literal xml:lang="en">Animal</Literal>
+  </AnnotationAssertion>
+  <AnnotationAssertion>
+    <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#label"/>
+    <IRI>http://example.org/animals#Mammal</IRI>
+    <Literal xml:lang="en">Mammal</Literal>
+  </AnnotationAssertion>
+  <AnnotationAssertion>
+    <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#label"/>
+    <IRI>http://example.org/animals#Koala</IRI>
+    <Literal xml:lang="en">Koala</Literal>
+  </AnnotationAssertion>
+  <AnnotationAssertion>
+    <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#label"/>
+    <IRI>http://example.org/animals#hasHabitat</IRI>
+    <Literal xml:lang="en">has habitat</Literal>
+  </AnnotationAssertion>
+</Ontology>

@@ -1,0 +1,67 @@
+Prefix: : <http://example.org/animals#>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+
+Ontology: <http://example.org/animals>
+
+AnnotationProperty: rdfs:label
+
+ObjectProperty: :hasHabitat
+    Annotations: rdfs:label "has habitat"@en
+    Domain: :Animal
+    Range: :Habitat
+
+ObjectProperty: :hasParent
+    Annotations: rdfs:label "has parent"@en
+    Domain: :Animal
+    Range: :Animal
+
+ObjectProperty: :hasPart
+    Annotations: rdfs:label "has part"@en
+    Characteristics: Transitive
+
+Class: :Animal
+    Annotations: rdfs:label "Animal"@en
+    SubClassOf: owl:Thing
+
+Class: :Vertebrate
+    Annotations: rdfs:label "Vertebrate"@en
+    SubClassOf: :Animal
+
+Class: :Mammal
+    Annotations: rdfs:label "Mammal"@en
+    SubClassOf: :Vertebrate
+    SubClassOf: :hasHabitat some :Habitat
+
+Class: :Bird
+    Annotations: rdfs:label "Bird"@en
+    SubClassOf: :Vertebrate
+    DisjointWith: :Mammal
+
+Class: :Marsupial
+    Annotations: rdfs:label "Marsupial"@en
+    SubClassOf: :Mammal
+
+Class: :Koala
+    Annotations: rdfs:label "Koala"@en
+    SubClassOf: :Marsupial
+    SubClassOf: :hasHabitat some :Forest
+
+Class: :Habitat
+    Annotations: rdfs:label "Habitat"@en
+
+Class: :Forest
+    Annotations: rdfs:label "Forest"@en
+    SubClassOf: :Habitat
+
+Class: :Ocean
+    Annotations: rdfs:label "Ocean"@en
+    SubClassOf: :Habitat
+
+DisjointClasses: :Forest, :Ocean
+
+Individual: :koko
+    Annotations: rdfs:label "Koko"@en
+    Types: :Koala
+    Facts: :hasHabitat :someForest
