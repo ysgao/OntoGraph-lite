@@ -93,6 +93,8 @@ public class OntologyService {
             if (consistent) {
                 OWLDataFactory df = ontology.getOWLOntologyManager().getOWLDataFactory();
                 OWLClass owlThing = df.getOWLThing();
+                @SuppressWarnings("unused")
+                OWLClass owlNothing = df.getOWLNothing(); // reserved for DL inconsistency reporting
 
                 // Find incoherent (unsatisfiable) named classes
                 Set<OWLClass> unsatisfiable = reasoner.getUnsatisfiableClasses().getEntities();
