@@ -50,7 +50,9 @@ public class OntologyService {
      * @param content  The ontology serialization.
      * @param format   One of "owl-xml", "functional", "turtle", "rdf-xml", or null for auto-detect.
      */
+    @SuppressWarnings("null")
     public OWLOntology loadFromString(String content, String format) throws OWLOntologyCreationException {
+        Objects.requireNonNull(content, "content");
         OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
         OWLDocumentFormat docFormat = mapFormat(format);
         StringDocumentSource source;
@@ -60,7 +62,7 @@ public class OntologyService {
         } else {
             source = new StringDocumentSource(
                 content,
-                IRI.create("urn:onto-editor:input"),
+                Objects.requireNonNull(IRI.create("urn:onto-editor:input")),
                 docFormat,
                 null
             );
@@ -71,6 +73,7 @@ public class OntologyService {
     /**
      * Classify the ontology: precompute hierarchy, detect incoherent classes.
      */
+    @SuppressWarnings("null")
     public ClassificationResult classify(OWLOntology ontology, String engine, int contentLength)
             throws Exception {
         boolean useElk = shouldUseElk(engine, contentLength);
@@ -90,7 +93,6 @@ public class OntologyService {
             if (consistent) {
                 OWLDataFactory df = ontology.getOWLOntologyManager().getOWLDataFactory();
                 OWLClass owlThing = df.getOWLThing();
-                OWLClass owlNothing = df.getOWLNothing();
 
                 // Find incoherent (unsatisfiable) named classes
                 Set<OWLClass> unsatisfiable = reasoner.getUnsatisfiableClasses().getEntities();

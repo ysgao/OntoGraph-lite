@@ -18,8 +18,8 @@
   "categories": [
     "Programming Languages",
     "Data Science",
-    "Ontologies",
-    "Semantic network"
+    "Visualization",
+    "Other"
   ],
   "repository": {
     "type": "git",
@@ -295,7 +295,11 @@
         },
         "ontograph.display.axiomEntityStyle": {
           "type": "string",
-          "enum": ["label", "shortIri", "fullIri"],
+          "enum": [
+            "label",
+            "shortIri",
+            "fullIri"
+          ],
           "default": "label",
           "enumDescriptions": [
             "Show rdfs:label (e.g. 'Koala'); multi-word labels use shortIri in the editor",
@@ -333,7 +337,7 @@
     "cytoscape": "^3.33.3",
     "cytoscape-dagre": "^2.5.0",
     "dagre": "^0.8.5",
-    "fast-xml-parser": "^4.4.1",
+    "fast-xml-parser": "^5.7.3",
     "n3": "^1.17.2",
     "sparqljs": "^3.7.4",
     "vscode-languageclient": "^9.0.1",

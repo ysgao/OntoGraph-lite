@@ -15,6 +15,7 @@ public class ElkAdapter {
     /**
      * Create an ELK reasoner for the given ontology.
      */
+    @SuppressWarnings("null")
     public static OWLReasoner createReasoner(OWLOntology ontology) {
         OWLReasonerFactory factory = new ElkReasonerFactory();
         return factory.createReasoner(ontology, new SimpleConfiguration());

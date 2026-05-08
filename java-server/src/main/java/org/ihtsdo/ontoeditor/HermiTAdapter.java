@@ -15,6 +15,7 @@ public class HermiTAdapter {
      * Create a HermiT reasoner for the given ontology.
      * Uses a silent Configuration to avoid spurious console output.
      */
+    @SuppressWarnings("null")
     public static OWLReasoner createReasoner(OWLOntology ontology) {
         Configuration config = new Configuration();
         config.ignoreUnsupportedDatatypes = true;
