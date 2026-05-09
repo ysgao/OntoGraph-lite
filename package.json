@@ -165,11 +165,6 @@
           "group": "1_copy"
         },
         {
-          "command": "ontograph.showEntityInfo",
-          "when": "view =~ /^ontograph\\./ && viewItem =~ /^owlEntity/",
-          "group": "1_copy"
-        },
-        {
           "command": "ontograph.openGraph",
           "when": "view =~ /^ontograph\\.(classes|inferredClasses|individuals)/ && viewItem =~ /^owlEntity/",
           "group": "2_navigate"

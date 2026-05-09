@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npm test *)",
-      "Bash(rsvg-convert -w 128 -h 128 /Users/yoga/JavaApp/OntoGraph/resources/icons/ontology.svg -o /Users/yoga/JavaApp/OntoGraph/resources/icons/ontology.png)"
+      "Bash(rsvg-convert -w 128 -h 128 /Users/yoga/JavaApp/OntoGraph/resources/icons/ontology.svg -o /Users/yoga/JavaApp/OntoGraph/resources/icons/ontology.png)",
+      "Bash(grep -E \"\\\\.ts$\")"
     ]
   }
 }

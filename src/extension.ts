@@ -11,8 +11,7 @@ import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
-import { showEntityInfo } from './views/EntityInfoPanel';
-import { openClassEditor } from './commands/openClassEditor';
+import { showEntityInfo } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import type { OntologyModel } from './model/OntologyModel';
 import { ParserRegistry } from './parser/ParserRegistry';
@@ -95,7 +94,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const iri = item?.iri;
       if (!iri) { void vscode.window.showWarningMessage('OntoGraph: Right-click a class to edit its description.'); return; }
       if (!activeModel) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
-      openClassEditor(context, activeModel, iri);
+      showEntityInfo(context, activeModel, iri);
     }),
 
     vscode.commands.registerCommand('ontograph.copyIri', (item?: { iri?: string }) => {

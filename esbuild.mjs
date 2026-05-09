@@ -41,11 +41,11 @@ const graphWebviewBuild = esbuild.build({
   target: 'es2020',
 });
 
-// Class editor webview bundle (browser)
+// Entity editor webview bundle (browser)
 const classEditorBuild = esbuild.build({
   ...baseConfig,
-  entryPoints: ['webview-src/class-editor/ClassEditorApp.ts'],
-  outfile: 'dist/class-editor-webview.js',
+  entryPoints: ['webview-src/entity-editor/EntityEditorApp.ts'],
+  outfile: 'dist/entity-editor-webview.js',
   platform: 'browser',
   format: 'iife',
   target: 'es2020',
