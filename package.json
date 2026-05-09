@@ -107,7 +107,7 @@
       },
       {
         "command": "ontograph.openGraph",
-        "title": "OntoGraph: Open Graph View",
+        "title": "Open Graph",
         "icon": "$(type-hierarchy-sub)"
       },
       {
@@ -127,7 +127,7 @@
       },
       {
         "command": "ontograph.copyIri",
-        "title": "OntoGraph: Copy IRI",
+        "title": "Copy Entity",
         "icon": "$(copy)"
       },
       {
@@ -140,8 +140,8 @@
         "title": "OntoGraph: Diagnose State"
       },
       {
-        "command": "ontograph.editClassDescription",
-        "title": "OntoGraph: Edit Class Description",
+        "command": "ontograph.entityEditor",
+        "title": "Entity Editor",
         "icon": "$(edit)"
       }
     ],
@@ -168,11 +168,6 @@
           "command": "ontograph.openGraph",
           "when": "view =~ /^ontograph\\.(classes|inferredClasses|individuals)/ && viewItem =~ /^owlEntity/",
           "group": "2_navigate"
-        },
-        {
-          "command": "ontograph.editClassDescription",
-          "when": "view =~ /^ontograph\\.(classes|inferredClasses)/ && viewItem =~ /^owlEntity/",
-          "group": "1_copy"
         }
       ],
       "commandPalette": [

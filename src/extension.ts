@@ -35,13 +35,32 @@ export function activate(context: vscode.ExtensionContext): void {
   const annotationPropProvider = new AnnotationPropertyProvider();
   const individualProvider = new IndividualBrowserProvider();
 
+  function onEntitySelected(item: unknown): void {
+    const iri = (item as { iri?: string } | undefined)?.iri;
+    if (!iri || !activeModel) { return; }
+    showEntityInfo(context, activeModel, iri);
+  }
+
+  const classView = vscode.window.createTreeView('ontograph.classes', { treeDataProvider: classProvider });
+  const inferredView = vscode.window.createTreeView('ontograph.inferredClasses', { treeDataProvider: inferredProvider });
+  const objectPropView = vscode.window.createTreeView('ontograph.objectProperties', { treeDataProvider: objectPropProvider });
+  const dataPropView = vscode.window.createTreeView('ontograph.dataProperties', { treeDataProvider: dataPropProvider });
+  const annotationPropView = vscode.window.createTreeView('ontograph.annotationProperties', { treeDataProvider: annotationPropProvider });
+  const individualView = vscode.window.createTreeView('ontograph.individuals', { treeDataProvider: individualProvider });
+
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('ontograph.classes', classProvider),
-    vscode.window.registerTreeDataProvider('ontograph.inferredClasses', inferredProvider),
-    vscode.window.registerTreeDataProvider('ontograph.objectProperties', objectPropProvider),
-    vscode.window.registerTreeDataProvider('ontograph.dataProperties', dataPropProvider),
-    vscode.window.registerTreeDataProvider('ontograph.annotationProperties', annotationPropProvider),
-    vscode.window.registerTreeDataProvider('ontograph.individuals', individualProvider),
+    classView,
+    inferredView,
+    objectPropView,
+    dataPropView,
+    annotationPropView,
+    individualView,
+    classView.onDidChangeSelection(e => onEntitySelected(e.selection[0])),
+    inferredView.onDidChangeSelection(e => onEntitySelected(e.selection[0])),
+    objectPropView.onDidChangeSelection(e => onEntitySelected(e.selection[0])),
+    dataPropView.onDidChangeSelection(e => onEntitySelected(e.selection[0])),
+    annotationPropView.onDidChangeSelection(e => onEntitySelected(e.selection[0])),
+    individualView.onDidChangeSelection(e => onEntitySelected(e.selection[0])),
   );
 
   // --- Reasoner bridge ---
@@ -90,9 +109,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ontograph.openSparqlEditor', () =>
       openSparqlEditor(context, activeModel)),
 
-    vscode.commands.registerCommand('ontograph.editClassDescription', (item?: { iri?: string }) => {
+    vscode.commands.registerCommand('ontograph.entityEditor', (item?: { iri?: string }) => {
       const iri = item?.iri;
-      if (!iri) { void vscode.window.showWarningMessage('OntoGraph: Right-click a class to edit its description.'); return; }
+      if (!iri) { void vscode.window.showWarningMessage('OntoGraph: Right-click an entity to open the editor.'); return; }
       if (!activeModel) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
       showEntityInfo(context, activeModel, iri);
     }),

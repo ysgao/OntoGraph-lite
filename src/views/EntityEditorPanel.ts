@@ -40,11 +40,7 @@ export function showEntityInfo(
 ): void {
   lastIri = iri;
 
-  const entity = findEntity(model, iri);
-  const label = entity ? getLabel(entity) : iri;
-
   if (panel) {
-    panel.title = `ℹ ${label}`;
     panel.reveal(vscode.ViewColumn.Beside);
     sendLoadEntity(panel, model, iri);
     return;
@@ -52,7 +48,7 @@ export function showEntityInfo(
 
   panel = vscode.window.createWebviewPanel(
     'ontograph.entityInfo',
-    `ℹ ${label}`,
+    'Entity Editor',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
