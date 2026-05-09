@@ -723,7 +723,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
         langInput.value = entry.lang ?? '';
         langInput.placeholder = 'lang';
         langInput.title = 'Language tag';
-        langInput.addEventListener('change', () => {
+        langInput.addEventListener('input', () => {
           annotationState[i] = { ...annotationState[i], lang: langInput.value.trim() || undefined };
         });
         tdLang.appendChild(langInput);
@@ -735,7 +735,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
       valueInput.type = 'text';
       valueInput.className = 'annotation-value-input';
       valueInput.value = entry.value;
-      valueInput.addEventListener('change', () => {
+      valueInput.addEventListener('input', () => {
         annotationState[i] = { ...annotationState[i], value: valueInput.value };
       });
       tdValue.appendChild(valueInput);

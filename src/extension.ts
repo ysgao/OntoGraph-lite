@@ -12,7 +12,7 @@ import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
-import { showEntityInfo } from './views/EntityEditorPanel';
+import { showEntityInfo, refreshEntityEditorIfOpen } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
@@ -242,33 +242,35 @@ export function activate(context: vscode.ExtensionContext): void {
     return null;
   }
 
-  const parsedUris = new Set<string>();
+  // Track the last-parsed version of each document URI so we skip redundant parses.
+  // doc.version increments on every edit; switching tabs with no edits keeps it the same.
+  const parsedDocVersions = new Map<string, number>();
 
   async function handleDocument(doc: vscode.TextDocument): Promise<void> {
-    const isOwlExt = /\.(ofn|omn|owl|ttl)$/i.test(doc.uri.fsPath);
-    if (isOwlExt || supportedLanguages.has(doc.languageId)) {
-      outputChannel.appendLine(`[event] docOpened lang=${doc.languageId} file=${doc.uri.fsPath.split(/[\\/]/).pop()}`);
-    }
-
     const langId = resolveLanguageId(doc);
     if (!langId) { return; }
 
-    outputChannel.appendLine(`[handleDocument] lang=${langId} (reported: ${doc.languageId}) uri=${doc.uri.fsPath}`);
-    parsedUris.add(doc.uri.toString());
+    // Skip if the document content hasn't changed since the last parse.
+    const key = doc.uri.toString();
+    const version = doc.version;
+    if (parsedDocVersions.get(key) === version) { return; }
+    parsedDocVersions.set(key, version);
+
+    outputChannel.appendLine(`[handleDocument] lang=${langId} uri=${doc.uri.fsPath.split(/[\\/]/).pop()} v${version}`);
 
     const statusMsg = vscode.window.setStatusBarMessage(`$(loading~spin) OntoGraph: parsing…`);
 
     try {
-      const model = await ParserRegistry.parseAsync(doc.getText(), langId, doc.uri.toString());
+      const model = await ParserRegistry.parseAsync(doc.getText(), langId, key);
       activeModel = model;
       refreshAllViews(model);
+      refreshEntityEditorIfOpen(model);
 
       const { classes, objectProperties, dataProperties, individuals } = model;
       const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;
       outputChannel.appendLine(`  → parsed OK: ${stats}`);
       statusMsg.dispose();
       vscode.window.setStatusBarMessage(`$(check) OntoGraph: ${stats}`, 8000);
-      void vscode.window.showInformationMessage(`OntoGraph loaded: ${stats}`);
 
       statsBar.text = `$(type-hierarchy) ${classes.size} cls · ${objectProperties.size} prop · ${individuals.size} ind`;
       statsBar.tooltip = `OntoGraph: ${classes.size} classes · ${objectProperties.size} object properties · ${dataProperties.size} data properties · ${individuals.size} individuals\nClick for details`;
@@ -294,6 +296,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidOpenTextDocument(doc => { void handleDocument(doc); }),
     vscode.workspace.onDidSaveTextDocument(doc => { void handleDocument(doc); }),
     vscode.window.onDidChangeActiveTextEditor(editor => {
+      // Only parse if the document has actually changed — switching focus between
+      // the entity editor panel and the OWL file must not re-parse the same content.
       if (editor) { void handleDocument(editor.document); }
     }),
   );

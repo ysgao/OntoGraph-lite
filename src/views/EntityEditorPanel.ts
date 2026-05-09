@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type {
   OntologyModel,
+  OWLEntity,
   OWLClass,
   OWLObjectProperty,
   OWLDataProperty,
@@ -11,6 +12,7 @@ import { getLabel } from '../model/OntologyModel';
 import { OntologyIndex } from '../model/OntologyIndex';
 import { ManchesterParser } from '../parser/ManchesterParser';
 import { renderExpression, normalizeExpression, type AxiomDisplayStyle } from '../model/AxiomDisplay';
+import { syncAnnotationsToDocument } from '../sync/AnnotationSync';
 import type {
   EntityEditorExtToWebview,
   EntityEditorWebviewToExt,
@@ -24,6 +26,18 @@ import type {
 let panel: vscode.WebviewPanel | undefined;
 let lastIri = '';
 const refreshCallbacks: Array<() => void> = [];
+
+// Per-entity override cache: ensures edits made through the panel are always
+// displayed when navigating back, even if activeModel was re-parsed from the
+// old file before the applyEdit completed (race condition).
+const savedEntityState = new Map<string, {
+  labels: OWLEntity['labels'];
+  annotations: OWLEntity['annotations'];
+}>();
+
+// True while syncAnnotationsToDocument's applyEdit is still in flight.
+// Used by refreshEntityEditorIfOpen to decide whether to trust savedEntityState.
+let _annotationSyncActive = false;
 
 let _cachedIndexModel: OntologyModel | undefined;
 let _cachedIndex: OntologyIndex | undefined;
@@ -42,6 +56,22 @@ export function registerEntityEditorRefreshCallback(cb: () => void): void {
 
 function fireRefresh(): void {
   for (const cb of refreshCallbacks) { cb(); }
+}
+
+/**
+ * Called by the extension whenever a new model is available (after re-parsing).
+ * Pushes fresh entity data to the open panel so direct file edits are reflected.
+ * If an applyEdit from the entity editor is still in flight, savedEntityState is
+ * kept so its data wins over the potentially stale intermediate model.
+ */
+export function refreshEntityEditorIfOpen(model: OntologyModel): void {
+  if (!panel || !lastIri) { return; }
+  if (!_annotationSyncActive) {
+    // External model refresh (e.g. user edited the file directly) — drop any
+    // stale save cache so the panel shows what the file actually contains now.
+    savedEntityState.delete(lastIri);
+  }
+  sendLoadEntity(panel, model, lastIri);
 }
 
 export function showEntityInfo(
@@ -178,7 +208,29 @@ function handleMessage(
       if (msg.labels !== undefined)      { entity.labels = msg.labels; }
       if (msg.annotations !== undefined) { entity.annotations = msg.annotations; }
 
+      // Invalidate the index so label changes are reflected in autocomplete
+      _cachedIndex = undefined;
+
+      // Cache the saved state so sendLoadEntity always serves correct data
+      // even if activeModel is re-parsed before applyEdit completes (race condition).
+      savedEntityState.set(msg.iri, { labels: entity.labels, annotations: entity.annotations });
+
+      // Sync to the source OWL document if it's open.
+      // _annotationSyncActive guards refreshEntityEditorIfOpen so it knows not to
+      // clear savedEntityState during the in-flight applyEdit window.
+      _annotationSyncActive = true;
+      void (async () => {
+        const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+        if (doc) { await syncAnnotationsToDocument(doc, entity, model.sourceFormat); }
+        _annotationSyncActive = false;
+        // Safe to clear now: the file buffer has the updated annotations, so the
+        // next model re-parse (triggered by onDidSaveTextDocument) will have correct data.
+        savedEntityState.delete(msg.iri);
+      })();
+
       fireRefresh();
+      // Refresh the webview from the updated model to confirm the save
+      sendLoadEntity(p, model, msg.iri);
       vscode.window.setStatusBarMessage(`$(check) OntoGraph: Saved ${getLabel(entity)}`, 4000);
       break;
     }
@@ -231,13 +283,19 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
     iriLabels[i] = e ? getLabel(e, lang) : localName(i);
   }
 
+  // Prefer the in-panel saved state over the (possibly stale) model data.
+  // This handles the race where activeModel is re-parsed before applyEdit completes.
+  const saved = savedEntityState.get(iri);
+  const effectiveLabels = saved?.labels ?? entity.labels;
+  const effectiveAnnotations = saved?.annotations ?? entity.annotations;
+
   const msg: LoadEntityMessage = {
     type: 'loadEntity',
     entityType: entity.type,
     iri: entity.iri,
-    label: getLabel(entity, lang),
-    labels: entity.labels,
-    annotations: entity.annotations,
+    label: getLabel({ ...entity, labels: effectiveLabels }, lang),
+    labels: effectiveLabels,
+    annotations: effectiveAnnotations,
     displayStyle: style,
     iriLabels,
   };
