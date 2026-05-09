@@ -30,6 +30,8 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
   private readonly collator = new Intl.Collator(undefined, { sensitivity: 'base' });
   /** parent IRI → child IRIs pre-sorted by label */
   private sortedSubClasses = new Map<string, string[]>();
+  /** child IRI → first parent IRI (for getParent) */
+  private childToParent = new Map<string, string>();
 
   setModel(model: OntologyModel, preferredLang = 'en'): void {
     this.model = model;
@@ -40,6 +42,7 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
 
   private buildSortedIndex(): void {
     this.sortedSubClasses.clear();
+    this.childToParent.clear();
     if (!this.model?.isClassified) { return; }
     for (const [parent, children] of this.model.inferredSubClasses) {
       const sorted = [...children].sort((a, b) => {
@@ -51,6 +54,11 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
         );
       });
       this.sortedSubClasses.set(parent, sorted);
+      for (const child of children) {
+        if (!this.childToParent.has(child)) {
+          this.childToParent.set(child, parent);
+        }
+      }
     }
   }
 
@@ -61,6 +69,22 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
 
   getTreeItem(element: InferredClassTreeItem): vscode.TreeItem {
     return element;
+  }
+
+  getParent(element: InferredClassTreeItem): InferredClassTreeItem | undefined {
+    if (!this.model?.isClassified) { return undefined; }
+    const parentIri = this.childToParent.get(element.iri);
+    if (!parentIri || parentIri === OWL_THING) { return undefined; }
+    const cls = this.model.classes.get(parentIri);
+    const label = cls ? getLabel(cls, this.preferredLang) : parentIri;
+    return new InferredClassTreeItem(parentIri, label, (this.sortedSubClasses.get(parentIri)?.length ?? 0) > 0);
+  }
+
+  makeItem(iri: string): InferredClassTreeItem | undefined {
+    if (!this.model?.isClassified) { return undefined; }
+    const cls = this.model.classes.get(iri);
+    if (!cls) { return undefined; }
+    return new InferredClassTreeItem(iri, getLabel(cls, this.preferredLang), (this.sortedSubClasses.get(iri)?.length ?? 0) > 0);
   }
 
   getChildren(element?: InferredClassTreeItem): InferredClassTreeItem[] {

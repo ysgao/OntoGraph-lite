@@ -96,6 +96,23 @@ export function createEmptyModel(sourceUri: string): OntologyModel {
   };
 }
 
+const SKOS_PREF_LABEL = 'http://www.w3.org/2004/02/skos/core#prefLabel';
+const SKOS_ALT_LABEL  = 'http://www.w3.org/2004/02/skos/core#altLabel';
+
+function pickSkosLabel(values: string[], preferredLang: string): string | undefined {
+  // Prefer a value whose language tag matches preferredLang, then 'en', then any
+  let fallback: string | undefined;
+  for (const raw of values) {
+    const at = raw.lastIndexOf('@');
+    const text = at >= 0 ? raw.slice(0, at) : raw;
+    const lang = at >= 0 ? raw.slice(at + 1) : '';
+    if (lang === preferredLang) { return text; }
+    if (lang === 'en' || lang === '') { fallback ??= text; }
+    fallback ??= text;
+  }
+  return fallback;
+}
+
 export function getLabel(entity: OWLEntity, preferredLang = 'en'): string {
   const labels = entity.labels[preferredLang]
     ?? entity.labels['en']
@@ -104,7 +121,15 @@ export function getLabel(entity: OWLEntity, preferredLang = 'en'): string {
   if (labels?.length) {
     return labels[0];
   }
-  // Fall back to local name from IRI
+  // Fall back to SKOS prefLabel, then altLabel
+  for (const annotIri of [SKOS_PREF_LABEL, SKOS_ALT_LABEL]) {
+    const values = entity.annotations[annotIri];
+    if (values?.length) {
+      const picked = pickSkosLabel(values, preferredLang);
+      if (picked) { return picked; }
+    }
+  }
+  // Last resort: local name from IRI
   const hash = entity.iri.lastIndexOf('#');
   const slash = entity.iri.lastIndexOf('/');
   const pos = Math.max(hash, slash);

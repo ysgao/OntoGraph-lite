@@ -95,6 +95,27 @@ export class IndividualBrowserProvider implements vscode.TreeDataProvider<Indivi
 
   getTreeItem(element: IndividualTreeItem): vscode.TreeItem { return element; }
 
+  getParent(element: IndividualTreeItem): IndividualTreeItem | undefined {
+    if (element.node.kind === 'class') { return undefined; }
+    const ind = this.model?.individuals.get(element.iri);
+    if (!ind) { return undefined; }
+    if (ind.classIris.length === 0) {
+      return new IndividualTreeItem({ kind: 'class', iri: '_unclassified', label: '(no type)', count: this.unclassified.length });
+    }
+    const classIri = ind.classIris[0];
+    const indIris = this.byClass.get(classIri) ?? [];
+    const cls = this.model!.classes.get(classIri);
+    const label = cls ? getLabel(cls, this.preferredLang) : classIri;
+    return new IndividualTreeItem({ kind: 'class', iri: classIri, label, count: indIris.length });
+  }
+
+  makeItem(iri: string): IndividualTreeItem | undefined {
+    if (!this.model) { return undefined; }
+    const ind = this.model.individuals.get(iri);
+    if (!ind) { return undefined; }
+    return new IndividualTreeItem({ kind: 'individual', iri, label: getLabel(ind, this.preferredLang) });
+  }
+
   getChildren(element?: IndividualTreeItem): IndividualTreeItem[] {
     if (!this.model) { return []; }
 

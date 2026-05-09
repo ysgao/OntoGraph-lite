@@ -15,6 +15,7 @@ export class PropertyTreeItem extends vscode.TreeItem {
     super(label, hasChildren
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None);
+    this.id = `objectprop:${iri}`;
     this.tooltip = iri;
     this.contextValue = contextValue;
     this.iconPath = icon;
@@ -66,6 +67,34 @@ export class ObjectPropertyProvider implements vscode.TreeDataProvider<PropertyT
   refresh(): void { this._onDidChangeTreeData.fire(); }
 
   getTreeItem(element: PropertyTreeItem): vscode.TreeItem { return element; }
+
+  getParent(element: PropertyTreeItem): PropertyTreeItem | undefined {
+    if (!this.model) { return undefined; }
+    const prop = this.model.objectProperties.get(element.iri);
+    if (!prop || prop.superPropertyIris.length === 0) { return undefined; }
+    const parentIri = prop.superPropertyIris[0];
+    if (parentIri === TOP_OBJECT_PROPERTY) { return undefined; }
+    const parent = this.model.objectProperties.get(parentIri);
+    if (!parent) { return undefined; }
+    return new PropertyTreeItem(
+      parentIri,
+      getLabel(parent, this.preferredLang),
+      (this.childrenOf.get(parentIri)?.length ?? 0) > 0,
+      this.icon,
+    );
+  }
+
+  makeItem(iri: string): PropertyTreeItem | undefined {
+    if (!this.model) { return undefined; }
+    const prop = this.model.objectProperties.get(iri);
+    if (!prop) { return undefined; }
+    return new PropertyTreeItem(
+      iri,
+      getLabel(prop, this.preferredLang),
+      (this.childrenOf.get(iri)?.length ?? 0) > 0,
+      this.icon,
+    );
+  }
 
   getChildren(element?: PropertyTreeItem): PropertyTreeItem[] {
     if (!this.model) { return []; }

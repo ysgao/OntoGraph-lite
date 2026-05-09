@@ -91,6 +91,11 @@
     },
     "commands": [
       {
+        "command": "ontograph.searchEntity",
+        "title": "OntoGraph: Search Entity",
+        "icon": "$(search)"
+      },
+      {
         "command": "ontograph.refresh",
         "title": "OntoGraph: Refresh",
         "icon": "$(refresh)"
@@ -147,6 +152,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "ontograph.searchEntity",
+          "when": "view =~ /^ontograph\\./",
+          "group": "navigation@0"
+        },
         {
           "command": "ontograph.refresh",
           "when": "view =~ /^ontograph\\./",

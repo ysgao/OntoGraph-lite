@@ -88,6 +88,17 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
     });
   }
 
+  makeItem(iri: string): ClassTreeItem | undefined {
+    if (!this.model) { return undefined; }
+    const cls = this.model.classes.get(iri);
+    if (!cls) { return undefined; }
+    return new ClassTreeItem(
+      iri,
+      getLabel(cls, this.preferredLang),
+      (this.childrenOf.get(iri)?.length ?? 0) > 0,
+    );
+  }
+
   getParent(element: ClassTreeItem): ClassTreeItem | undefined {
     if (!this.model) { return undefined; }
     const cls = this.model.classes.get(element.iri);

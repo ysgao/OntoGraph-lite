@@ -5,6 +5,7 @@ import { ObjectPropertyProvider } from './views/ObjectPropertyProvider';
 import { DataPropertyProvider } from './views/DataPropertyProvider';
 import { AnnotationPropertyProvider } from './views/AnnotationPropertyProvider';
 import { IndividualBrowserProvider } from './views/IndividualBrowserProvider';
+import { getLabel } from './model/OntologyModel';
 import { ReasonerBridge } from './reasoner/ReasonerBridge';
 import { classifyOntology } from './commands/classifyOntology';
 import { checkConsistency } from './commands/checkConsistency';
@@ -13,12 +14,14 @@ import { addEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
 import { showEntityInfo } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
-import type { OntologyModel } from './model/OntologyModel';
+import type { OntologyModel, EntityType } from './model/OntologyModel';
+import { OntologyIndex } from './model/OntologyIndex';
 import { ParserRegistry } from './parser/ParserRegistry';
 
 export let outputChannel: vscode.OutputChannel;
 
 let activeModel: OntologyModel | undefined;
+let activeIndex: OntologyIndex | undefined;
 let lspStarted = false;
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -77,6 +80,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const preferredLang: string = config.get('display.preferredLabelLanguage') ?? 'en';
 
   function refreshAllViews(model: OntologyModel): void {
+    activeIndex = new OntologyIndex(model);
     classProvider.setModel(model, preferredLang);
     inferredProvider.setModel(model, preferredLang);
     objectPropProvider.setModel(model, preferredLang);
@@ -85,7 +89,82 @@ export function activate(context: vscode.ExtensionContext): void {
     individualProvider.setModel(model, preferredLang);
   }
 
+  function revealInTreeView(iri: string, entityType: EntityType): void {
+    const opts = { select: true, focus: false, expand: true };
+    try {
+      switch (entityType) {
+        case 'class': {
+          const item = classProvider.makeItem(iri);
+          if (item) { void classView.reveal(item, opts); }
+          if (activeModel?.isClassified) {
+            const inferredItem = inferredProvider.makeItem(iri);
+            if (inferredItem) { void inferredView.reveal(inferredItem, opts); }
+          }
+          break;
+        }
+        case 'objectProperty': {
+          const item = objectPropProvider.makeItem(iri);
+          if (item) { void objectPropView.reveal(item, opts); }
+          break;
+        }
+        case 'dataProperty': {
+          const item = dataPropProvider.makeItem(iri);
+          if (item) { void dataPropView.reveal(item, opts); }
+          break;
+        }
+        case 'annotationProperty': {
+          const item = annotationPropProvider.makeItem(iri);
+          if (item) { void annotationPropView.reveal(item, opts); }
+          break;
+        }
+        case 'individual': {
+          const item = individualProvider.makeItem(iri);
+          if (item) { void individualView.reveal(item, opts); }
+          break;
+        }
+      }
+    } catch {
+      // reveal() may fail if the view is not visible; ignore silently
+    }
+  }
+
+  interface SearchQuickPickItem extends vscode.QuickPickItem {
+    iri: string;
+    entityType: EntityType;
+  }
+
   context.subscriptions.push(
+    vscode.commands.registerCommand('ontograph.searchEntity', () => {
+      if (!activeModel || !activeIndex) {
+        void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.');
+        return;
+      }
+      const qp = vscode.window.createQuickPick<SearchQuickPickItem>();
+      qp.placeholder = 'Search by label, prefLabel, altLabel, or short IRI…';
+      qp.matchOnDescription = true;
+      qp.onDidChangeValue(value => {
+        if (!value.trim()) { qp.items = []; return; }
+        const entities = activeIndex!.searchByLabel(value.trim(), 100);
+        qp.items = entities.map(e => ({
+          label: getLabel(e, preferredLang),
+          description: e.type,
+          iri: e.iri,
+          entityType: e.type,
+        }));
+      });
+      qp.onDidAccept(() => {
+        const sel = qp.selectedItems[0];
+        if (sel && activeModel) {
+          showEntityInfo(context, activeModel, sel.iri);
+          revealInTreeView(sel.iri, sel.entityType);
+        }
+        qp.hide();
+        qp.dispose();
+      });
+      qp.onDidHide(() => qp.dispose());
+      qp.show();
+    }),
+
     vscode.commands.registerCommand('ontograph.refresh', () => {
       if (activeModel) { refreshAllViews(activeModel); }
     }),

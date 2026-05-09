@@ -4,8 +4,25 @@ import { getLabel } from '../model/OntologyModel';
 
 const TOP_DATA_PROPERTY = 'http://www.w3.org/2002/07/owl#topDataProperty';
 
-export class DataPropertyProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<vscode.TreeItem | undefined | void>();
+export class DataPropertyItem extends vscode.TreeItem {
+  constructor(
+    public readonly iri: string,
+    label: string,
+    hasChildren: boolean,
+    icon: vscode.ThemeIcon,
+  ) {
+    super(label, hasChildren
+      ? vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.None);
+    this.id = `dataprop:${iri}`;
+    this.tooltip = iri;
+    this.contextValue = 'owlEntity';
+    this.iconPath = icon;
+  }
+}
+
+export class DataPropertyProvider implements vscode.TreeDataProvider<DataPropertyItem> {
+  private _onDidChangeTreeData = new vscode.EventEmitter<DataPropertyItem | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private model: OntologyModel | undefined;
@@ -48,9 +65,37 @@ export class DataPropertyProvider implements vscode.TreeDataProvider<vscode.Tree
 
   refresh(): void { this._onDidChangeTreeData.fire(); }
 
-  getTreeItem(element: vscode.TreeItem): vscode.TreeItem { return element; }
+  getTreeItem(element: DataPropertyItem): vscode.TreeItem { return element; }
 
-  getChildren(element?: vscode.TreeItem & { iri?: string }): vscode.TreeItem[] {
+  getParent(element: DataPropertyItem): DataPropertyItem | undefined {
+    if (!this.model) { return undefined; }
+    const prop = this.model.dataProperties.get(element.iri);
+    if (!prop || prop.superPropertyIris.length === 0) { return undefined; }
+    const parentIri = prop.superPropertyIris[0];
+    if (parentIri === TOP_DATA_PROPERTY) { return undefined; }
+    const parent = this.model.dataProperties.get(parentIri);
+    if (!parent) { return undefined; }
+    return new DataPropertyItem(
+      parentIri,
+      getLabel(parent, this.preferredLang),
+      (this.childrenOf.get(parentIri)?.length ?? 0) > 0,
+      this.icon,
+    );
+  }
+
+  makeItem(iri: string): DataPropertyItem | undefined {
+    if (!this.model) { return undefined; }
+    const prop = this.model.dataProperties.get(iri);
+    if (!prop) { return undefined; }
+    return new DataPropertyItem(
+      iri,
+      getLabel(prop, this.preferredLang),
+      (this.childrenOf.get(iri)?.length ?? 0) > 0,
+      this.icon,
+    );
+  }
+
+  getChildren(element?: DataPropertyItem): DataPropertyItem[] {
     if (!this.model) { return []; }
     const parentIri = element?.iri ?? TOP_DATA_PROPERTY;
     const childIris = this.childrenOf.get(parentIri) ?? [];
@@ -58,14 +103,7 @@ export class DataPropertyProvider implements vscode.TreeDataProvider<vscode.Tree
       const prop = this.model!.dataProperties.get(iri);
       const label = prop ? getLabel(prop, this.preferredLang) : iri;
       const hasChildren = (this.childrenOf.get(iri)?.length ?? 0) > 0;
-      const item = new vscode.TreeItem(label, hasChildren
-        ? vscode.TreeItemCollapsibleState.Collapsed
-        : vscode.TreeItemCollapsibleState.None) as vscode.TreeItem & { iri: string };
-      item.tooltip = iri;
-      item.contextValue = 'owlEntity';
-      item.iconPath = this.icon;
-      (item as { iri: string }).iri = iri;
-      return item;
+      return new DataPropertyItem(iri, label, hasChildren, this.icon);
     });
   }
 }
