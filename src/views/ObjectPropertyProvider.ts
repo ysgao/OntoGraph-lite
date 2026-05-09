@@ -29,6 +29,7 @@ export class ObjectPropertyProvider implements vscode.TreeDataProvider<PropertyT
   private childrenOf = new Map<string, string[]>();
   private preferredLang = 'en';
   private readonly icon = new vscode.ThemeIcon('symbol-interface');
+  private readonly collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
   setModel(model: OntologyModel, preferredLang = 'en'): void {
     this.model = model;
@@ -50,6 +51,16 @@ export class ObjectPropertyProvider implements vscode.TreeDataProvider<PropertyT
         this.childrenOf.set(parent, siblings);
       }
     }
+    for (const [, children] of this.childrenOf) {
+      children.sort((a, b) => {
+        const pa = this.model!.objectProperties.get(a);
+        const pb = this.model!.objectProperties.get(b);
+        return this.collator.compare(
+          pa ? getLabel(pa, this.preferredLang) : a,
+          pb ? getLabel(pb, this.preferredLang) : b,
+        );
+      });
+    }
   }
 
   refresh(): void { this._onDidChangeTreeData.fire(); }
@@ -60,13 +71,11 @@ export class ObjectPropertyProvider implements vscode.TreeDataProvider<PropertyT
     if (!this.model) { return []; }
     const parentIri = element?.iri ?? TOP_OBJECT_PROPERTY;
     const childIris = this.childrenOf.get(parentIri) ?? [];
-    return childIris
-      .map(iri => {
-        const prop = this.model!.objectProperties.get(iri);
-        const label = prop ? getLabel(prop, this.preferredLang) : iri;
-        const hasChildren = (this.childrenOf.get(iri)?.length ?? 0) > 0;
-        return new PropertyTreeItem(iri, label, hasChildren, this.icon);
-      })
-      .sort((a, b) => a.label!.toString().localeCompare(b.label!.toString()));
+    return childIris.map(iri => {
+      const prop = this.model!.objectProperties.get(iri);
+      const label = prop ? getLabel(prop, this.preferredLang) : iri;
+      const hasChildren = (this.childrenOf.get(iri)?.length ?? 0) > 0;
+      return new PropertyTreeItem(iri, label, hasChildren, this.icon);
+    });
   }
 }

@@ -96,6 +96,23 @@ export class FunctionalParser {
   private model: OntologyModel;
   private lastStringLang: string | undefined;
 
+  // O(1) dedup sets, keyed by entity IRI — avoid O(n) .includes() on arrays
+  private readonly _superClassSets = new Map<string, Set<string>>();
+  private readonly _equivalentClassSets = new Map<string, Set<string>>();
+  private readonly _disjointClassSets = new Map<string, Set<string>>();
+  private readonly _superPropertySets = new Map<string, Set<string>>();
+  private readonly _domainSets = new Map<string, Set<string>>();
+  private readonly _rangeSets = new Map<string, Set<string>>();
+  private readonly _classIriSets = new Map<string, Set<string>>();
+
+  private addUnique(map: Map<string, Set<string>>, key: string, value: string): boolean {
+    let set = map.get(key);
+    if (!set) { set = new Set<string>(); map.set(key, set); }
+    if (set.has(value)) { return false; }
+    set.add(value);
+    return true;
+  }
+
   constructor(text: string, sourceUri: string) {
     this.toks = tokenize(text);
     this.model = createEmptyModel(sourceUri);
@@ -234,7 +251,7 @@ export class FunctionalParser {
     const subIri = this.asIri(subExpr); if (!subIri) return;
     const cls = this.getOrCreateClass(subIri);
     const supIri = this.asIri(supExpr);
-    if (supIri) { if (!cls.superClassIris.includes(supIri)) cls.superClassIris.push(supIri); }
+    if (supIri) { if (this.addUnique(this._superClassSets, subIri, supIri)) cls.superClassIris.push(supIri); }
     else cls.superClassExpressions.push(supExpr);
   }
 
@@ -250,7 +267,7 @@ export class FunctionalParser {
       for (let j = 0; j < exprs.length; j++) {
         if (i === j) continue;
         const otherIri = this.asIri(exprs[j]);
-        if (otherIri) { if (!cls.equivalentClassIris.includes(otherIri)) cls.equivalentClassIris.push(otherIri); }
+        if (otherIri) { if (this.addUnique(this._equivalentClassSets, iri, otherIri)) cls.equivalentClassIris.push(otherIri); }
         else cls.equivalentClassExpressions.push(exprs[j]);
       }
     }
@@ -268,7 +285,7 @@ export class FunctionalParser {
     for (const iri of iris) {
       const cls = this.getOrCreateClass(iri);
       for (const other of iris) {
-        if (other !== iri && !cls.disjointClassIris.includes(other)) cls.disjointClassIris.push(other);
+        if (other !== iri && this.addUnique(this._disjointClassSets, iri, other)) cls.disjointClassIris.push(other);
       }
     }
   }
@@ -284,7 +301,7 @@ export class FunctionalParser {
     }
     this.expectRParen();
     const cls = this.getOrCreateClass(classIri);
-    for (const m of members) if (!cls.disjointClassIris.includes(m)) cls.disjointClassIris.push(m);
+    for (const m of members) if (this.addUnique(this._disjointClassSets, classIri, m)) cls.disjointClassIris.push(m);
   }
 
   private parseAnnotationAssertion(): void {
@@ -322,7 +339,7 @@ export class FunctionalParser {
     const sub = this.readIri(); const sup = this.readIri();
     this.expectRParen();
     const p = this.getOrCreateObjectProp(sub);
-    if (!p.superPropertyIris.includes(sup)) p.superPropertyIris.push(sup);
+    if (this.addUnique(this._superPropertySets, sub, sup)) p.superPropertyIris.push(sup);
   }
 
   private parseSubDataPropertyOf(): void {
@@ -331,7 +348,7 @@ export class FunctionalParser {
     const sub = this.readIri(); const sup = this.readIri();
     this.expectRParen();
     const p = this.getOrCreateDataProp(sub);
-    if (!p.superPropertyIris.includes(sup)) p.superPropertyIris.push(sup);
+    if (this.addUnique(this._superPropertySets, sub, sup)) p.superPropertyIris.push(sup);
   }
 
   private parseSubAnnotationPropertyOf(): void {
@@ -340,7 +357,7 @@ export class FunctionalParser {
     const sub = this.readIri(); const sup = this.readIri();
     this.expectRParen();
     const p = this.getOrCreateAnnotationProp(sub);
-    if (!p.superPropertyIris.includes(sup)) p.superPropertyIris.push(sup);
+    if (this.addUnique(this._superPropertySets, sub, sup)) p.superPropertyIris.push(sup);
   }
 
   private parseObjectPropertyDomain(): void {
@@ -351,7 +368,7 @@ export class FunctionalParser {
     this.expectRParen();
     const p = this.getOrCreateObjectProp(propIri);
     const domIri = this.asIri(domExpr);
-    if (domIri && !p.domainIris.includes(domIri)) p.domainIris.push(domIri);
+    if (domIri && this.addUnique(this._domainSets, propIri, domIri)) p.domainIris.push(domIri);
   }
 
   private parseObjectPropertyRange(): void {
@@ -362,7 +379,7 @@ export class FunctionalParser {
     this.expectRParen();
     const p = this.getOrCreateObjectProp(propIri);
     const rangeIri = this.asIri(rangeExpr);
-    if (rangeIri && !p.rangeIris.includes(rangeIri)) p.rangeIris.push(rangeIri);
+    if (rangeIri && this.addUnique(this._rangeSets, propIri, rangeIri)) p.rangeIris.push(rangeIri);
   }
 
   private parseDataPropertyDomain(): void {
@@ -373,7 +390,7 @@ export class FunctionalParser {
     this.expectRParen();
     const p = this.getOrCreateDataProp(propIri);
     const domIri = this.asIri(domExpr);
-    if (domIri && !p.domainIris.includes(domIri)) p.domainIris.push(domIri);
+    if (domIri && this.addUnique(this._domainSets, propIri, domIri)) p.domainIris.push(domIri);
   }
 
   private parsePropCharacteristic(kind: 'objectProperty' | 'dataProperty', flag: string): void {
@@ -403,7 +420,7 @@ export class FunctionalParser {
     this.expectRParen();
     const ind = this.getOrCreateIndividual(indIri);
     const classIri = this.asIri(classExpr);
-    if (classIri && !ind.classIris.includes(classIri)) ind.classIris.push(classIri);
+    if (classIri && this.addUnique(this._classIriSets, indIri, classIri)) ind.classIris.push(classIri);
   }
 
   private parseObjectPropertyAssertion(): void {

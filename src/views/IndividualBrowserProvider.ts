@@ -31,11 +31,14 @@ export class IndividualBrowserProvider implements vscode.TreeDataProvider<Indivi
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private model: OntologyModel | undefined;
-  /** class IRI → individual IRIs */
+  /** class IRI → individual IRIs (pre-sorted by individual label) */
   private byClass = new Map<string, string[]>();
-  /** individuals with no class assertion */
+  /** class IRIs ordered by class label */
+  private sortedClassIris: string[] = [];
+  /** individuals with no class assertion (pre-sorted by label) */
   private unclassified: string[] = [];
   private preferredLang = 'en';
+  private readonly collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
   setModel(model: OntologyModel, preferredLang = 'en'): void {
     this.model = model;
@@ -46,6 +49,7 @@ export class IndividualBrowserProvider implements vscode.TreeDataProvider<Indivi
 
   private buildIndex(): void {
     this.byClass.clear();
+    this.sortedClassIris = [];
     this.unclassified = [];
     if (!this.model) { return; }
     for (const ind of this.model.individuals.values()) {
@@ -59,6 +63,32 @@ export class IndividualBrowserProvider implements vscode.TreeDataProvider<Indivi
         }
       }
     }
+    this.sortedClassIris = [...this.byClass.keys()].sort((a, b) => {
+      const ca = this.model!.classes.get(a);
+      const cb = this.model!.classes.get(b);
+      return this.collator.compare(
+        ca ? getLabel(ca, this.preferredLang) : a,
+        cb ? getLabel(cb, this.preferredLang) : b,
+      );
+    });
+    for (const [, indIris] of this.byClass) {
+      indIris.sort((a, b) => {
+        const ia = this.model!.individuals.get(a);
+        const ib = this.model!.individuals.get(b);
+        return this.collator.compare(
+          ia ? getLabel(ia, this.preferredLang) : a,
+          ib ? getLabel(ib, this.preferredLang) : b,
+        );
+      });
+    }
+    this.unclassified.sort((a, b) => {
+      const ia = this.model!.individuals.get(a);
+      const ib = this.model!.individuals.get(b);
+      return this.collator.compare(
+        ia ? getLabel(ia, this.preferredLang) : a,
+        ib ? getLabel(ib, this.preferredLang) : b,
+      );
+    });
   }
 
   refresh(): void { this._onDidChangeTreeData.fire(); }
@@ -69,33 +99,30 @@ export class IndividualBrowserProvider implements vscode.TreeDataProvider<Indivi
     if (!this.model) { return []; }
 
     if (!element) {
-      // Top level: one node per class that has individuals
-      const items: IndividualTreeItem[] = [];
-      for (const [classIri, indIris] of this.byClass) {
-        const cls = this.model.classes.get(classIri);
+      const items = this.sortedClassIris.map(classIri => {
+        const indIris = this.byClass.get(classIri)!;
+        const cls = this.model!.classes.get(classIri);
         const label = cls ? getLabel(cls, this.preferredLang) : classIri;
-        items.push(new IndividualTreeItem({ kind: 'class', iri: classIri, label, count: indIris.length }));
-      }
+        return new IndividualTreeItem({ kind: 'class', iri: classIri, label, count: indIris.length });
+      });
       if (this.unclassified.length > 0) {
         items.push(new IndividualTreeItem({
           kind: 'class', iri: '_unclassified', label: '(no type)',
           count: this.unclassified.length,
         }));
       }
-      return items.sort((a, b) => a.label!.toString().localeCompare(b.label!.toString()));
+      return items;
     }
 
     if (element.node.kind === 'class') {
       const indIris = element.node.iri === '_unclassified'
         ? this.unclassified
         : (this.byClass.get(element.node.iri) ?? []);
-      return indIris
-        .map(iri => {
-          const ind = this.model!.individuals.get(iri);
-          const label = ind ? getLabel(ind, this.preferredLang) : iri;
-          return new IndividualTreeItem({ kind: 'individual', iri, label });
-        })
-        .sort((a, b) => a.label!.toString().localeCompare(b.label!.toString()));
+      return indIris.map(iri => {
+        const ind = this.model!.individuals.get(iri);
+        const label = ind ? getLabel(ind, this.preferredLang) : iri;
+        return new IndividualTreeItem({ kind: 'individual', iri, label });
+      });
     }
     return [];
   }

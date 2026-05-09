@@ -20,6 +20,17 @@ const extensionBuild = esbuild.build({
   target: 'node18',
 });
 
+// Parser worker bundle (Node.js, CommonJS — runs in Worker Thread for large files)
+const parserWorkerBuild = esbuild.build({
+  ...baseConfig,
+  entryPoints: ['src/parser/parserWorker.ts'],
+  outfile: 'dist/parserWorker.js',
+  platform: 'node',
+  format: 'cjs',
+  external: ['vscode'],
+  target: 'node18',
+});
+
 // Language server bundle (Node.js, CommonJS)
 const serverBuild = esbuild.build({
   ...baseConfig,
@@ -63,6 +74,7 @@ const sparqlEditorBuild = esbuild.build({
 
 await Promise.all([
   extensionBuild,
+  parserWorkerBuild,
   serverBuild,
   graphWebviewBuild,
   classEditorBuild,

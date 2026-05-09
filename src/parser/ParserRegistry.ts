@@ -1,3 +1,5 @@
+import { Worker } from 'worker_threads';
+import * as path from 'path';
 import { OntologyModel } from '../model/OntologyModel';
 import { FunctionalParser } from './FunctionalParser';
 import { ManchesterParser } from './ManchesterParser';
@@ -5,7 +7,7 @@ import { TurtleParser } from './TurtleParser';
 import { OwlXmlParser } from './OwlXmlParser';
 import { RdfXmlParser } from './RdfXmlParser';
 
-const LARGE_FILE_BYTES = 5 * 1024 * 1024;
+export const LARGE_FILE_BYTES = 5 * 1024 * 1024;
 
 function detectOwlFormat(text: string): 'functional' | 'owlxml' | 'rdfxml' | 'unknown' {
   const t = text.trimStart();
@@ -18,10 +20,29 @@ function detectOwlFormat(text: string): 'functional' | 'owlxml' | 'rdfxml' | 'un
 }
 
 export class ParserRegistry {
-  static parse(text: string, languageId: string, uri: string): OntologyModel {
-    if (text.length > LARGE_FILE_BYTES) {
-      // TODO Phase 1.5: offload to Worker Thread for files > 5 MB
+  static parseAsync(text: string, languageId: string, uri: string): Promise<OntologyModel> {
+    if (text.length <= LARGE_FILE_BYTES) {
+      try {
+        return Promise.resolve(ParserRegistry.parse(text, languageId, uri));
+      } catch (err) {
+        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      }
     }
+    return new Promise<OntologyModel>((resolve, reject) => {
+      const workerPath = path.join(__dirname, 'parserWorker.js');
+      const worker = new Worker(workerPath, { workerData: { text, languageId, uri } });
+      worker.once('message', (msg: { success: boolean; model?: OntologyModel; error?: string }) => {
+        if (msg.success && msg.model) { resolve(msg.model); }
+        else { reject(new Error(msg.error ?? 'Parser worker returned no model')); }
+      });
+      worker.once('error', reject);
+      worker.once('exit', (code) => {
+        if (code !== 0) { reject(new Error(`Parser worker exited with code ${code}`)); }
+      });
+    });
+  }
+
+  static parse(text: string, languageId: string, uri: string): OntologyModel {
 
     let model: OntologyModel;
     let sourceFormat: string;

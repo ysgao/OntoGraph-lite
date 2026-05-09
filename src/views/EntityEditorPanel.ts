@@ -25,6 +25,17 @@ let panel: vscode.WebviewPanel | undefined;
 let lastIri = '';
 const refreshCallbacks: Array<() => void> = [];
 
+let _cachedIndexModel: OntologyModel | undefined;
+let _cachedIndex: OntologyIndex | undefined;
+
+function getIndex(model: OntologyModel): OntologyIndex {
+  if (model !== _cachedIndexModel || !_cachedIndex) {
+    _cachedIndexModel = model;
+    _cachedIndex = new OntologyIndex(model);
+  }
+  return _cachedIndex;
+}
+
 export function registerEntityEditorRefreshCallback(cb: () => void): void {
   refreshCallbacks.push(cb);
 }
@@ -88,7 +99,7 @@ function handleMessage(
       break;
 
     case 'requestCompletion': {
-      const index = new OntologyIndex(model);
+      const index = getIndex(model);
       const entities = index.searchByLabel(msg.prefix, 50);
       const response: CompletionResultMessage = {
         type: 'completionResult',
@@ -116,7 +127,7 @@ function handleMessage(
         void vscode.window.showWarningMessage(`OntoGraph: Entity not found: ${msg.iri}`);
         return;
       }
-      const index = new OntologyIndex(model);
+      const index = getIndex(model);
 
       switch (msg.entityType) {
         case 'class': {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { OntologyModel, OWLClass } from '../model/OntologyModel';
+import type { OntologyModel } from '../model/OntologyModel';
 import { getLabel } from '../model/OntologyModel';
 
 const OWL_THING = 'http://www.w3.org/2002/07/owl#Thing';
@@ -27,9 +27,10 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private model: OntologyModel | undefined;
-  /** parent IRI → child IRIs (asserted) */
+  /** parent IRI → child IRIs (asserted, pre-sorted by label) */
   private childrenOf = new Map<string, string[]>();
   private preferredLang = 'en';
+  private readonly collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
   setModel(model: OntologyModel, preferredLang = 'en'): void {
     this.model = model;
@@ -48,6 +49,16 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
         siblings.push(cls.iri);
         this.childrenOf.set(parent, siblings);
       }
+    }
+    for (const [, children] of this.childrenOf) {
+      children.sort((a, b) => {
+        const la = this.model!.classes.get(a);
+        const lb = this.model!.classes.get(b);
+        return this.collator.compare(
+          la ? getLabel(la, this.preferredLang) : a,
+          lb ? getLabel(lb, this.preferredLang) : b,
+        );
+      });
     }
   }
 
@@ -69,14 +80,12 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
     }
 
     const childIris = this.childrenOf.get(element.iri) ?? [];
-    return childIris
-      .map(iri => {
-        const cls = this.model!.classes.get(iri);
-        const label = cls ? getLabel(cls, this.preferredLang) : iri;
-        const hasChildren = (this.childrenOf.get(iri)?.length ?? 0) > 0;
-        return new ClassTreeItem(iri, label, hasChildren);
-      })
-      .sort((a, b) => a.label!.toString().localeCompare(b.label!.toString()));
+    return childIris.map(iri => {
+      const cls = this.model!.classes.get(iri);
+      const label = cls ? getLabel(cls, this.preferredLang) : iri;
+      const hasChildren = (this.childrenOf.get(iri)?.length ?? 0) > 0;
+      return new ClassTreeItem(iri, label, hasChildren);
+    });
   }
 
   getParent(element: ClassTreeItem): ClassTreeItem | undefined {

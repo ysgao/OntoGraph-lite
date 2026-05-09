@@ -15,7 +15,6 @@ import { showEntityInfo } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import type { OntologyModel } from './model/OntologyModel';
 import { ParserRegistry } from './parser/ParserRegistry';
-import { OntologyIndex } from './model/OntologyIndex';
 
 export let outputChannel: vscode.OutputChannel;
 
@@ -144,8 +143,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage('OntoGraph: No ontology loaded yet.');
         return;
       }
-      const index = new OntologyIndex(activeModel);
-      const msg = `[diagnose] Model loaded: ${index.classCount} classes, ${index.objectPropertyCount} obj props, ${index.dataPropertyCount} data props, ${index.individualCount} individuals — source: ${activeModel.sourceUri}`;
+      const msg = `[diagnose] Model loaded: ${activeModel.classes.size} classes, ${activeModel.objectProperties.size} obj props, ${activeModel.dataProperties.size} data props, ${activeModel.individuals.size} individuals — source: ${activeModel.sourceUri}`;
       outputChannel.appendLine(msg);
       void vscode.window.showInformationMessage(msg.replace('[diagnose] ', ''));
     }),
@@ -167,7 +165,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const parsedUris = new Set<string>();
 
-  function handleDocument(doc: vscode.TextDocument): void {
+  async function handleDocument(doc: vscode.TextDocument): Promise<void> {
     const isOwlExt = /\.(ofn|omn|owl|ttl)$/i.test(doc.uri.fsPath);
     if (isOwlExt || supportedLanguages.has(doc.languageId)) {
       outputChannel.appendLine(`[event] docOpened lang=${doc.languageId} file=${doc.uri.fsPath.split(/[\\/]/).pop()}`);
@@ -176,29 +174,25 @@ export function activate(context: vscode.ExtensionContext): void {
     const langId = resolveLanguageId(doc);
     if (!langId) { return; }
 
-    // Skip re-parsing the same URI unless it was explicitly saved
-    const isRepeat = parsedUris.has(doc.uri.toString());
-
-    outputChannel.show(true);
-    outputChannel.appendLine(`[handleDocument] lang=${langId} (reported: ${doc.languageId}) repeat=${isRepeat} uri=${doc.uri.fsPath}`);
+    outputChannel.appendLine(`[handleDocument] lang=${langId} (reported: ${doc.languageId}) uri=${doc.uri.fsPath}`);
     parsedUris.add(doc.uri.toString());
 
     const statusMsg = vscode.window.setStatusBarMessage(`$(loading~spin) OntoGraph: parsing…`);
 
     try {
-      const model = ParserRegistry.parse(doc.getText(), langId, doc.uri.toString());
+      const model = await ParserRegistry.parseAsync(doc.getText(), langId, doc.uri.toString());
       activeModel = model;
-      const index = new OntologyIndex(model);
       refreshAllViews(model);
 
-      const stats = `${index.classCount} classes, ${index.objectPropertyCount} obj props, ${index.individualCount} individuals`;
+      const { classes, objectProperties, dataProperties, individuals } = model;
+      const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;
       outputChannel.appendLine(`  → parsed OK: ${stats}`);
       statusMsg.dispose();
       vscode.window.setStatusBarMessage(`$(check) OntoGraph: ${stats}`, 8000);
       void vscode.window.showInformationMessage(`OntoGraph loaded: ${stats}`);
 
-      statsBar.text = `$(type-hierarchy) ${index.classCount} cls · ${index.objectPropertyCount} prop · ${index.individualCount} ind`;
-      statsBar.tooltip = `OntoGraph: ${index.classCount} classes · ${index.objectPropertyCount} object properties · ${index.dataPropertyCount} data properties · ${index.individualCount} individuals\nClick for details`;
+      statsBar.text = `$(type-hierarchy) ${classes.size} cls · ${objectProperties.size} prop · ${individuals.size} ind`;
+      statsBar.tooltip = `OntoGraph: ${classes.size} classes · ${objectProperties.size} object properties · ${dataProperties.size} data properties · ${individuals.size} individuals\nClick for details`;
       statsBar.show();
     } catch (err) {
       statusMsg.dispose();
@@ -218,19 +212,16 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument(handleDocument),
-    vscode.workspace.onDidSaveTextDocument(handleDocument),
+    vscode.workspace.onDidOpenTextDocument(doc => { void handleDocument(doc); }),
+    vscode.workspace.onDidSaveTextDocument(doc => { void handleDocument(doc); }),
     vscode.window.onDidChangeActiveTextEditor(editor => {
-      if (editor) { handleDocument(editor.document); }
+      if (editor) { void handleDocument(editor.document); }
     }),
   );
 
-  // Process any already-open documents (including the active one)
+  // Process any already-open documents
   for (const doc of vscode.workspace.textDocuments) {
-    handleDocument(doc);
-  }
-  if (vscode.window.activeTextEditor) {
-    handleDocument(vscode.window.activeTextEditor.document);
+    void handleDocument(doc);
   }
 
   outputChannel.appendLine('OntoGraph ready. Open an .ofn, .omn, or .owl file to begin.');
