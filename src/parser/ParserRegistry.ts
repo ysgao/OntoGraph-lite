@@ -23,26 +23,39 @@ export class ParserRegistry {
       // TODO Phase 1.5: offload to Worker Thread for files > 5 MB
     }
 
+    let model: OntologyModel;
+    let sourceFormat: string;
+
     switch (languageId) {
       case 'owl-functional':
-        return new FunctionalParser(text, uri).parse();
+        model = new FunctionalParser(text, uri).parse();
+        sourceFormat = 'functional';
+        break;
 
       case 'manchester':
-        return new ManchesterParser(text, uri).parse();
+        model = new ManchesterParser(text, uri).parse();
+        sourceFormat = 'manchester';
+        break;
 
       case 'turtle':
-        return new TurtleParser(text, uri).parse();
+        model = new TurtleParser(text, uri).parse();
+        sourceFormat = 'turtle';
+        break;
 
       case 'owl-xml': {
         const fmt = detectOwlFormat(text);
-        if (fmt === 'functional') { return new FunctionalParser(text, uri).parse(); }
-        if (fmt === 'owlxml')     { return new OwlXmlParser(text, uri).parse(); }
-        if (fmt === 'rdfxml') { return new RdfXmlParser(text, uri).parse(); }
+        if (fmt === 'functional') { model = new FunctionalParser(text, uri).parse(); sourceFormat = 'functional'; break; }
+        if (fmt === 'owlxml')     { model = new OwlXmlParser(text, uri).parse();     sourceFormat = 'owl-xml';    break; }
+        if (fmt === 'rdfxml')     { model = new RdfXmlParser(text, uri).parse();     sourceFormat = 'rdf-xml';    break; }
         throw new Error(`Could not detect OWL serialisation format for: ${uri}`);
       }
 
       default:
         throw new Error(`No parser registered for language: ${languageId}`);
     }
+
+    model.rawContent = text;
+    model.sourceFormat = sourceFormat;
+    return model;
   }
 }

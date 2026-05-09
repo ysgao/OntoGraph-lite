@@ -70,6 +70,10 @@ export interface OntologyModel {
   individuals: Map<string, OWLIndividual>;
   /** Source file URI this model was parsed from */
   sourceUri: string;
+  /** Original raw file content, used to pass the full ontology to the reasoner */
+  rawContent: string;
+  /** Format string for the Java reasoner: 'functional' | 'rdf-xml' | 'owl-xml' | 'turtle' | 'manchester' */
+  sourceFormat: string;
   /** Inferred class hierarchy populated after reasoning; parent IRI → Set of child IRIs */
   inferredSubClasses: Map<string, Set<string>>;
   /** Whether the ontology has been classified by a reasoner */
@@ -85,6 +89,8 @@ export function createEmptyModel(sourceUri: string): OntologyModel {
     annotationProperties: new Map(),
     individuals: new Map(),
     sourceUri,
+    rawContent: '',
+    sourceFormat: 'functional',
     inferredSubClasses: new Map(),
     isClassified: false,
   };

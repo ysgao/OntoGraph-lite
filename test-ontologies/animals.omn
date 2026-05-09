@@ -61,6 +61,10 @@ Class: :Ocean
 
 DisjointClasses: :Forest, :Ocean
 
+Individual: :someForest
+    Annotations: rdfs:label "Some Forest"@en
+    Types: :Forest
+
 Individual: :koko
     Annotations: rdfs:label "Koko"@en
     Types: :Koala

@@ -3,7 +3,13 @@
     "allow": [
       "Bash(npm test *)",
       "Bash(rsvg-convert -w 128 -h 128 /Users/yoga/JavaApp/OntoGraph/resources/icons/ontology.svg -o /Users/yoga/JavaApp/OntoGraph/resources/icons/ontology.png)",
-      "Bash(grep -E \"\\\\.ts$\")"
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(xargs ls *)",
+      "Bash(node -e ' *)",
+      "Bash(npx tsx *)",
+      "Bash(npm run *)",
+      "Bash(xargs -I{} jar tf {})",
+      "Bash(mvn clean *)"
     ]
   }
 }

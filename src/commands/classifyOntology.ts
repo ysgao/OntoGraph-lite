@@ -23,7 +23,13 @@ export async function classifyOntology(
     ? (model.classes.size > threshold ? 'elk' : 'hermit')
     : engineSetting;
 
-  const content = serializeToFunctional(model);
+  // Use the original file content so complex class expressions (restrictions,
+  // equivalences) reach the reasoner intact. Fall back to functional
+  // serialization only for programmatically-constructed models that have no
+  // stored raw content.
+  const { content, format } = model.rawContent
+    ? { content: model.rawContent, format: model.sourceFormat }
+    : { content: serializeToFunctional(model), format: 'functional' };
 
   await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
@@ -31,7 +37,7 @@ export async function classifyOntology(
     cancellable: false,
   }, async () => {
     try {
-      const result = await bridge.classify('functional', content, resolvedEngine);
+      const result = await bridge.classify(format, content, resolvedEngine);
 
       // Populate inferred sub-class map on the model
       model.inferredSubClasses.clear();

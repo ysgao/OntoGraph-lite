@@ -48,7 +48,7 @@ public class OntologyService {
     /**
      * Load an ontology from string content using a fresh manager.
      * @param content  The ontology serialization.
-     * @param format   One of "owl-xml", "functional", "turtle", "rdf-xml", or null for auto-detect.
+     * @param format   One of "functional", "manchester", "turtle", "rdf-xml", "owl-xml", or null for auto-detect.
      */
     @SuppressWarnings("null")
     public OWLOntology loadFromString(String content, String format) throws OWLOntologyCreationException {
@@ -181,15 +181,17 @@ public class OntologyService {
 
     /**
      * Map format string to OWLAPI OWLDocumentFormat. Returns null for auto-detect.
+     * Supported values: "functional", "manchester", "turtle", "rdf-xml", "owl-xml".
      */
     static OWLDocumentFormat mapFormat(String format) {
         if (format == null) return null;
         switch (format.toLowerCase(Locale.ROOT)) {
-            case "owl-xml":   return new OWLXMLDocumentFormat();
-            case "functional": return new FunctionalSyntaxDocumentFormat();
-            case "turtle":    return new TurtleDocumentFormat();
-            case "rdf-xml":   return new RDFXMLDocumentFormat();
-            default:          return null; // auto-detect
+            case "functional":  return new FunctionalSyntaxDocumentFormat();
+            case "manchester":  return new ManchesterSyntaxDocumentFormat();
+            case "turtle":      return new TurtleDocumentFormat();
+            case "rdf-xml":     return new RDFXMLDocumentFormat();
+            case "owl-xml":     return new OWLXMLDocumentFormat();
+            default:            return null; // auto-detect
         }
     }
 }

@@ -4,3 +4,4 @@ dist/
 java-server/target/
 *.class
 .DS_Store
+test-ontologies/

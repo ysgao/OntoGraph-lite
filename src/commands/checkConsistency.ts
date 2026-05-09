@@ -15,13 +15,15 @@ export async function checkConsistency(
     return;
   }
 
-  const content = serializeToFunctional(model);
+  const { content, format } = model.rawContent
+    ? { content: model.rawContent, format: model.sourceFormat }
+    : { content: serializeToFunctional(model), format: 'functional' };
 
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'OntoGraph: Checking consistency…', cancellable: false },
     async () => {
       try {
-        const result = await bridge.checkConsistency('functional', content);
+        const result = await bridge.checkConsistency(format, content);
         if (result.consistent) {
           void vscode.window.showInformationMessage('OntoGraph: Ontology is consistent.');
         } else if (result.explanation?.length) {
