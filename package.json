@@ -262,14 +262,14 @@
             "type": "string"
           },
           "default": [
-            "-Xmx2g"
+            "-Xmx4g"
           ],
           "description": "Extra JVM arguments for the reasoner process"
         },
         "ontograph.reasoner.timeoutSeconds": {
           "type": "number",
-          "default": 120,
-          "description": "Timeout in seconds for reasoning operations"
+          "default": 600,
+          "description": "Timeout in seconds for reasoning operations (large ontologies may need 300–600 s)"
         },
         "ontograph.display.preferredLabelLanguage": {
           "type": "string",

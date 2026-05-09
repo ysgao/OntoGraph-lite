@@ -2,12 +2,14 @@ package org.ihtsdo.ontoeditor;
 
 import org.semanticweb.owlapi.apibinding.OWLManager;
 import org.semanticweb.owlapi.formats.*;
+import org.semanticweb.owlapi.io.FileDocumentSource;
 import org.semanticweb.owlapi.io.StringDocumentSource;
 import org.semanticweb.owlapi.io.StringDocumentTarget;
 import org.semanticweb.owlapi.model.*;
 import org.semanticweb.owlapi.reasoner.InferenceType;
 import org.semanticweb.owlapi.reasoner.OWLReasoner;
 
+import java.io.File;
 import java.util.*;
 
 /**
@@ -44,6 +46,22 @@ public class OntologyService {
     }
 
     // ---- public API ------------------------------------------------------------
+
+    /**
+     * Load an ontology from a file path using a fresh manager.
+     * Avoids the cost of JSON-encoding/decoding the file content over the IPC pipe.
+     */
+    @SuppressWarnings("null")
+    public OWLOntology loadFromFile(String filePath, String format) throws OWLOntologyCreationException {
+        OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
+        File file = new File(filePath);
+        OWLDocumentFormat docFormat = mapFormat(format);
+        if (docFormat == null) {
+            return manager.loadOntologyFromOntologyDocument(IRI.create(file.toURI()));
+        }
+        return manager.loadOntologyFromOntologyDocument(
+            new FileDocumentSource(file, docFormat, null));
+    }
 
     /**
      * Load an ontology from string content using a fresh manager.
@@ -88,7 +106,7 @@ public class OntologyService {
 
             boolean consistent = reasoner.isConsistent();
             List<String> incoherent = new ArrayList<>();
-            List<List<String>> hierarchy = new ArrayList<>();
+            List<List<String>> hierarchy = new ArrayList<>(ontology.getClassesInSignature().size());
 
             if (consistent) {
                 OWLDataFactory df = ontology.getOWLOntologyManager().getOWLDataFactory();

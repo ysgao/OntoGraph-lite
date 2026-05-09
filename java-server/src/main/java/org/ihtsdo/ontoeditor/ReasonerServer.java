@@ -84,11 +84,21 @@ public class ReasonerServer {
 
     private static ObjectNode classify(JsonNode params, OntologyService service) throws Exception {
         String format = params.path("format").asText(null);
-        String content = params.path("content").asText();
         String engine = params.path("engine").asText("auto");
 
-        org.semanticweb.owlapi.model.OWLOntology ontology = service.loadFromString(content, format);
-        OntologyService.ClassificationResult result = service.classify(ontology, engine, content.length());
+        org.semanticweb.owlapi.model.OWLOntology ontology;
+        int contentLength;
+        if (params.has("filePath")) {
+            String filePath = params.path("filePath").asText();
+            ontology = service.loadFromFile(filePath, format);
+            contentLength = (int) new java.io.File(filePath).length();
+        } else {
+            String content = params.path("content").asText();
+            ontology = service.loadFromString(content, format);
+            contentLength = content.length();
+        }
+
+        OntologyService.ClassificationResult result = service.classify(ontology, engine, contentLength);
 
         ObjectNode node = MAPPER.createObjectNode();
         node.put("consistent", result.consistent);
@@ -99,11 +109,20 @@ public class ReasonerServer {
 
     private static ObjectNode checkConsistency(JsonNode params, OntologyService service) throws Exception {
         String format = params.path("format").asText(null);
-        String content = params.path("content").asText();
         String engine = params.path("engine").asText("auto");
 
-        org.semanticweb.owlapi.model.OWLOntology ontology = service.loadFromString(content, format);
-        OntologyService.ConsistencyResult result = service.checkConsistency(ontology, engine, content.length());
+        org.semanticweb.owlapi.model.OWLOntology ontology;
+        int contentLength;
+        if (params.has("filePath")) {
+            String filePath = params.path("filePath").asText();
+            ontology = service.loadFromFile(filePath, format);
+            contentLength = (int) new java.io.File(filePath).length();
+        } else {
+            String content = params.path("content").asText();
+            ontology = service.loadFromString(content, format);
+            contentLength = content.length();
+        }
+        OntologyService.ConsistencyResult result = service.checkConsistency(ontology, engine, contentLength);
 
         ObjectNode node = MAPPER.createObjectNode();
         node.put("consistent", result.consistent);

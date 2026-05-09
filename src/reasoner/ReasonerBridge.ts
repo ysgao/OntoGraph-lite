@@ -1,4 +1,6 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as readline from 'readline';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -38,7 +40,7 @@ export class ReasonerBridge implements vscode.Disposable {
     if (this.proc) { return; }
     const config = vscode.workspace.getConfiguration('ontograph.reasoner');
     const javaPath: string = config.get('javaPath') ?? 'java';
-    const jvmArgs: string[] = config.get('jvmArgs') ?? ['-Xmx2g'];
+    const jvmArgs: string[] = config.get('jvmArgs') ?? ['-Xmx4g'];
     const jarPath = path.join(this.extensionPath, 'resources', 'java', 'onto-reasoner-server.jar');
 
     this.statusBarItem.text = '$(loading~spin) Reasoner: starting…';
@@ -96,7 +98,7 @@ export class ReasonerBridge implements vscode.Disposable {
         return;
       }
       const config = vscode.workspace.getConfiguration('ontograph.reasoner');
-      const timeoutMs = ((config.get('timeoutSeconds') as number) ?? 120) * 1000;
+      const timeoutMs = ((config.get('timeoutSeconds') as number) ?? 600) * 1000;
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -111,8 +113,9 @@ export class ReasonerBridge implements vscode.Disposable {
   async classify(format: string, content: string, engine = 'auto'): Promise<ClassificationResult> {
     if (!this.proc) { await this.start(); }
     this.statusBarItem.text = '$(loading~spin) Classifying…';
+    const { params, tempFile } = await this.buildParams({ format, content, engine });
     try {
-      const result = await this.request('classify', { format, content, engine }) as ClassificationResult;
+      const result = await this.request('classify', params) as ClassificationResult;
       this.statusBarItem.text = result.consistent
         ? '$(pass) Consistent'
         : `$(error) Inconsistent (${result.incoherentClasses.length} unsatisfiable)`;
@@ -120,12 +123,37 @@ export class ReasonerBridge implements vscode.Disposable {
     } catch (err) {
       this.statusBarItem.text = '$(error) Reasoning failed';
       throw err;
+    } finally {
+      if (tempFile) { await fs.promises.unlink(tempFile).catch(() => {}); }
     }
   }
 
   async checkConsistency(format: string, content: string): Promise<ConsistencyResult> {
     if (!this.proc) { await this.start(); }
-    return this.request('checkConsistency', { format, content }) as Promise<ConsistencyResult>;
+    const { params, tempFile } = await this.buildParams({ format, content });
+    try {
+      return await this.request('checkConsistency', params) as ConsistencyResult;
+    } finally {
+      if (tempFile) { await fs.promises.unlink(tempFile).catch(() => {}); }
+    }
+  }
+
+  /**
+   * For large content, writes it to a temp file and substitutes a filePath param
+   * to avoid JSON-encoding tens of MB over the stdin pipe.
+   */
+  private async buildParams(
+    base: Record<string, string | undefined>,
+  ): Promise<{ params: Record<string, string | undefined>; tempFile: string | undefined }> {
+    const content = base.content;
+    if (content && content.length > 512_000) {
+      const id = this.nextId;
+      const tempFile = path.join(os.tmpdir(), `ontograph-${id}.owl`);
+      await fs.promises.writeFile(tempFile, content, 'utf8');
+      const { content: _omit, ...rest } = base;
+      return { params: { ...rest, filePath: tempFile }, tempFile };
+    }
+    return { params: base, tempFile: undefined };
   }
 
   async convertFormat(content: string, fromFormat: string, toFormat: string): Promise<string> {
