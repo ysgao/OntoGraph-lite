@@ -4,6 +4,7 @@ import { test, expect } from 'vitest';
 import { ManchesterParser } from './ManchesterParser';
 import { OwlXmlParser } from './OwlXmlParser';
 import { TurtleParser } from './TurtleParser';
+import { RdfXmlParser } from './RdfXmlParser';
 
 const ROOT = join(__dirname, '../../test-ontologies');
 
@@ -105,4 +106,41 @@ test('Phase2: Turtle (animals.ttl)', () => {
   const ttKoko = tt.individuals.get('http://example.org/animals#koko');
   check(ttKoko?.classIris.includes('http://example.org/animals#Koala') ?? false, 'koko rdf:type Koala');
   check(ttKoko?.labels['en']?.[0] === 'Koko', `koko label = "${ttKoko?.labels['en']?.[0]}"`);
+});
+
+// ── RDF/XML ──────────────────────────────────────────────────────────────────
+
+test('Phase2: RDF/XML (pizza.owl)', () => {
+  const owl = readFileSync(join(ROOT, 'pizza.owl'), 'utf8');
+  const rx = new RdfXmlParser(owl, 'file:///pizza.owl').parse();
+
+  console.log('── RDF/XML (pizza.owl) ─────────────────────────────────────────');
+  console.log(`  Classes: ${rx.classes.size}  ObjProps: ${rx.objectProperties.size}  AnnProps: ${rx.annotationProperties.size}  Individuals: ${rx.individuals.size}`);
+
+  check(rx.metadata.iri === 'http://www.co-ode.org/ontologies/pizza', `ontology IRI = ${rx.metadata.iri}`);
+  check(rx.metadata.versionIri === 'http://www.co-ode.org/ontologies/pizza/2.0.0', `version IRI = ${rx.metadata.versionIri}`);
+  check(rx.classes.size >= 80, `>= 80 classes (got ${rx.classes.size})`);
+  check(rx.objectProperties.size >= 7, `>= 7 object properties (got ${rx.objectProperties.size})`);
+  check(rx.annotationProperties.size >= 7, `>= 7 annotation properties (got ${rx.annotationProperties.size})`);
+  check(rx.individuals.size >= 5, `>= 5 individuals (got ${rx.individuals.size})`);
+
+  const american = rx.classes.get('http://www.co-ode.org/ontologies/pizza/pizza.owl#American');
+  check(!!american, 'American class exists');
+  check(american?.superClassIris.includes('http://www.co-ode.org/ontologies/pizza/pizza.owl#NamedPizza') ?? false,
+    'American SubClassOf NamedPizza');
+  check((american?.superClassExpressions.length ?? 0) >= 4, `American has >= 4 restriction expressions (got ${american?.superClassExpressions.length})`);
+  if (american?.superClassExpressions[0]) {
+    console.log(`    expression[0]: ${american.superClassExpressions[0]}`);
+  }
+
+  const hasBase = rx.objectProperties.get('http://www.co-ode.org/ontologies/pizza/pizza.owl#hasBase');
+  check(!!hasBase, 'hasBase property exists');
+  check(hasBase?.isFunctional === true, 'hasBase isFunctional');
+  check(hasBase?.isInverseFunctional === true, 'hasBase isInverseFunctional');
+  check(hasBase?.inverseOfIri === 'http://www.co-ode.org/ontologies/pizza/pizza.owl#isBaseOf', 'hasBase inverseOf isBaseOf');
+
+  const america = rx.individuals.get('http://www.co-ode.org/ontologies/pizza/pizza.owl#America');
+  check(!!america, 'America individual exists');
+  check(america?.classIris.includes('http://www.co-ode.org/ontologies/pizza/pizza.owl#Country') ?? false,
+    'America rdf:type Country');
 });

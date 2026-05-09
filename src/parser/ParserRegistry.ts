@@ -3,6 +3,7 @@ import { FunctionalParser } from './FunctionalParser';
 import { ManchesterParser } from './ManchesterParser';
 import { TurtleParser } from './TurtleParser';
 import { OwlXmlParser } from './OwlXmlParser';
+import { RdfXmlParser } from './RdfXmlParser';
 
 const LARGE_FILE_BYTES = 5 * 1024 * 1024;
 
@@ -36,14 +37,7 @@ export class ParserRegistry {
         const fmt = detectOwlFormat(text);
         if (fmt === 'functional') { return new FunctionalParser(text, uri).parse(); }
         if (fmt === 'owlxml')     { return new OwlXmlParser(text, uri).parse(); }
-        if (fmt === 'rdfxml') {
-          // RDF/XML is an RDF serialisation — parse as Turtle-equivalent using N3.js
-          // N3.js does not natively support RDF/XML; fall back to Turtle with a note.
-          throw new Error(
-            'RDF/XML (.owl) is not yet supported. ' +
-            'Save the file as OWL Functional Syntax (.ofn), Turtle (.ttl), or OWL/XML using Protégé and reopen.'
-          );
-        }
+        if (fmt === 'rdfxml') { return new RdfXmlParser(text, uri).parse(); }
         throw new Error(`Could not detect OWL serialisation format for: ${uri}`);
       }
 
