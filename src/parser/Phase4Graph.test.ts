@@ -1,44 +1,19 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { test, expect } from 'vitest';
 import { TurtleParser } from './TurtleParser';
 import { ManchesterParser } from './ManchesterParser';
-
-// Import the internal buildGraphData function by extracting it via dynamic require
-// Since it's not exported, we re-implement a lightweight version here to verify the logic.
-// The real integration test is done in VS Code itself.
-
-const ROOT = join(__dirname, '../../test-ontologies');
-
-let pass = true;
-function check(cond: boolean, msg: string): void {
-  if (cond) { console.log(`  ✓ ${msg}`); }
-  else      { console.error(`  ✗ FAIL: ${msg}`); pass = false; }
-}
-
-// ── Verify FunctionalSerializer produces the right structure ──────────────────
 import { serializeToFunctional } from '../serializer/FunctionalSerializer';
 
-console.log('── FunctionalSerializer (animals.ttl) ────────────────────────────');
-const ttl = readFileSync(join(ROOT, 'animals.ttl'), 'utf8');
-const model = new TurtleParser(ttl, 'file:///animals.ttl').parse();
-const ofn = serializeToFunctional(model);
-
-// Simulate classification: Animal has inferred sub-class Koala (not a direct asserted child)
-model.inferredSubClasses.set('http://example.org/animals#Animal', new Set(['http://example.org/animals#Koala', 'http://example.org/animals#Vertebrate']));
-model.isClassified = true;
-
-check(model.classes.size === 9, `9 classes in model (got ${model.classes.size})`);
-check(model.objectProperties.size === 3, `3 object properties (got ${model.objectProperties.size})`);
-check(model.individuals.size === 1, `1 individual (got ${model.individuals.size})`);
-
-// ── Graph data extraction (inline re-implementation to test the algorithm) ────
-console.log('\n── Graph neighbourhood extraction ────────────────────────────────');
+const ROOT = join(__dirname, '../../test-ontologies');
 
 const OWL_THING = 'http://www.w3.org/2002/07/owl#Thing';
 const MAX_NODES = 200;
 
+type OntologyModel = ReturnType<TurtleParser['parse']>;
+
 function buildGraphData(
-  m: typeof model,
+  m: OntologyModel,
   focusIri: string | undefined,
   depth: number,
   opts: { showInferred: boolean; showDisjoint: boolean },
@@ -98,46 +73,80 @@ function buildGraphData(
   return { nodes: [...nodeIris], edges };
 }
 
-// Test 1: full graph (no focus)
-const full = buildGraphData(model, undefined, 4, { showInferred: false, showDisjoint: false });
-check(full.nodes.length === 9, `Full graph: 9 class nodes (got ${full.nodes.length})`);
-const subClassEdges = full.edges.filter(e => e.type === 'subClassOf');
-check(subClassEdges.length >= 6, `Full graph: >= 6 subClassOf edges (got ${subClassEdges.length})`);
+function loadModel() {
+  const ttl = readFileSync(join(ROOT, 'animals.ttl'), 'utf8');
+  const model = new TurtleParser(ttl, 'file:///animals.ttl').parse();
+  model.inferredSubClasses.set('http://example.org/animals#Animal', new Set(['http://example.org/animals#Koala', 'http://example.org/animals#Vertebrate']));
+  model.isClassified = true;
+  return model;
+}
 
-// Test 2: focus on Koala, depth 2
-const koalaIri = 'http://example.org/animals#Koala';
-const marsupialIri = 'http://example.org/animals#Marsupial';
-const mammalIri = 'http://example.org/animals#Mammal';
+// ── Verify FunctionalSerializer ───────────────────────────────────────────────
 
-const koalaView = buildGraphData(model, koalaIri, 2, { showInferred: false, showDisjoint: false });
-check(koalaView.nodes.includes(koalaIri), 'Focus=Koala: Koala in nodes');
-check(koalaView.nodes.includes(marsupialIri), 'Focus=Koala depth=2: Marsupial in nodes (1 hop up)');
-check(koalaView.nodes.includes(mammalIri), 'Focus=Koala depth=2: Mammal in nodes (2 hops up)');
-check(koalaView.edges.some(e => e.source === koalaIri && e.target === marsupialIri && e.type === 'subClassOf'),
-  'Focus=Koala: Koala→Marsupial subClassOf edge');
+test('Phase4: FunctionalSerializer (animals.ttl)', () => {
+  console.log('── FunctionalSerializer (animals.ttl) ────────────────────────────');
+  const model = loadModel();
+  const ofn = serializeToFunctional(model);
 
-// Test 3: inferred edges shown (Animal → Koala is inferred but not asserted direct)
-const inferredView = buildGraphData(model, 'http://example.org/animals#Animal', 1, { showInferred: true, showDisjoint: false });
-const inferredEdges = inferredView.edges.filter(e => e.type === 'inferred');
-// Koala is inferred under Animal but only asserted under Marsupial, so the inferred edge appears
-check(inferredEdges.some(e => e.source === 'http://example.org/animals#Koala' && e.target === 'http://example.org/animals#Animal'),
-  `Inferred view: Koala→Animal inferred edge present (total inferred: ${inferredEdges.length})`);
+  expect(model.classes.size, `9 classes in model (got ${model.classes.size})`).toBe(9);
+  expect(model.objectProperties.size, `3 object properties (got ${model.objectProperties.size})`).toBe(3);
+  expect(model.individuals.size, `1 individual (got ${model.individuals.size})`).toBe(1);
 
-// Test 4: depth 1 from Vertebrate (asserted children: Mammal + Bird)
-const vertView = buildGraphData(model, 'http://example.org/animals#Vertebrate', 1, { showInferred: false, showDisjoint: false });
-const birdIri = 'http://example.org/animals#Bird';
-check(vertView.nodes.includes(mammalIri), 'Vertebrate depth=1: Mammal in nodes');
-check(vertView.nodes.includes(birdIri), 'Vertebrate depth=1: Bird in nodes');
+  expect(ofn, 'Manchester → functional: has SubClassOf').toContain('SubClassOf(');
+  expect(ofn, 'Manchester → functional: has DisjointClasses').toContain('DisjointClasses(');
+});
 
-// ── Manchester parser produces correct model ────────────────────────────────
-console.log('\n── Manchester parser for graph use ─────────────────────────────');
-const omn = readFileSync(join(ROOT, 'animals.omn'), 'utf8');
-const mnModel = new ManchesterParser(omn, 'file:///animals.omn').parse();
-const mnOfn = serializeToFunctional(mnModel);
+// ── Graph neighbourhood extraction ────────────────────────────────────────────
 
-check(mnModel.classes.size >= 9, `Manchester: >= 9 classes (got ${mnModel.classes.size})`);
-check(mnOfn.includes('SubClassOf('), 'Manchester → functional: has SubClassOf');
-check(mnOfn.includes('DisjointClasses('), 'Manchester → functional: has DisjointClasses');
+test('Phase4: full graph extraction', () => {
+  console.log('── Graph neighbourhood extraction ────────────────────────────────');
+  const model = loadModel();
+  const full = buildGraphData(model, undefined, 4, { showInferred: false, showDisjoint: false });
+  expect(full.nodes.length, `Full graph: 9 class nodes (got ${full.nodes.length})`).toBe(9);
+  const subClassEdges = full.edges.filter(e => e.type === 'subClassOf');
+  expect(subClassEdges.length, `Full graph: >= 6 subClassOf edges (got ${subClassEdges.length})`).toBeGreaterThanOrEqual(6);
+});
 
-console.log(pass ? '\n✓ All Phase 4 assertions passed' : '\n✗ Some Phase 4 assertions failed');
-process.exit(pass ? 0 : 1);
+test('Phase4: focused graph on Koala depth=2', () => {
+  const model = loadModel();
+  const koalaIri = 'http://example.org/animals#Koala';
+  const marsupialIri = 'http://example.org/animals#Marsupial';
+  const mammalIri = 'http://example.org/animals#Mammal';
+
+  const koalaView = buildGraphData(model, koalaIri, 2, { showInferred: false, showDisjoint: false });
+  expect(koalaView.nodes, 'Focus=Koala: Koala in nodes').toContain(koalaIri);
+  expect(koalaView.nodes, 'Focus=Koala depth=2: Marsupial in nodes (1 hop up)').toContain(marsupialIri);
+  expect(koalaView.nodes, 'Focus=Koala depth=2: Mammal in nodes (2 hops up)').toContain(mammalIri);
+  expect(koalaView.edges.some(e => e.source === koalaIri && e.target === marsupialIri && e.type === 'subClassOf'),
+    'Focus=Koala: Koala→Marsupial subClassOf edge').toBe(true);
+});
+
+test('Phase4: inferred edges', () => {
+  const model = loadModel();
+  const inferredView = buildGraphData(model, 'http://example.org/animals#Animal', 1, { showInferred: true, showDisjoint: false });
+  const inferredEdges = inferredView.edges.filter(e => e.type === 'inferred');
+  expect(inferredEdges.some(e => e.source === 'http://example.org/animals#Koala' && e.target === 'http://example.org/animals#Animal'),
+    `Inferred view: Koala→Animal inferred edge present (total inferred: ${inferredEdges.length})`).toBe(true);
+});
+
+test('Phase4: depth=1 from Vertebrate', () => {
+  const model = loadModel();
+  const mammalIri = 'http://example.org/animals#Mammal';
+  const birdIri = 'http://example.org/animals#Bird';
+  const vertView = buildGraphData(model, 'http://example.org/animals#Vertebrate', 1, { showInferred: false, showDisjoint: false });
+  expect(vertView.nodes, 'Vertebrate depth=1: Mammal in nodes').toContain(mammalIri);
+  expect(vertView.nodes, 'Vertebrate depth=1: Bird in nodes').toContain(birdIri);
+});
+
+// ── Manchester parser for graph use ──────────────────────────────────────────
+
+test('Phase4: Manchester parser for graph use', () => {
+  console.log('── Manchester parser for graph use ─────────────────────────────');
+  const omn = readFileSync(join(ROOT, 'animals.omn'), 'utf8');
+  const mnModel = new ManchesterParser(omn, 'file:///animals.omn').parse();
+  const mnOfn = serializeToFunctional(mnModel);
+
+  expect(mnModel.classes.size, `Manchester: >= 9 classes (got ${mnModel.classes.size})`).toBeGreaterThanOrEqual(9);
+  expect(mnOfn, 'Manchester → functional: has SubClassOf').toContain('SubClassOf(');
+  expect(mnOfn, 'Manchester → functional: has DisjointClasses').toContain('DisjointClasses(');
+});

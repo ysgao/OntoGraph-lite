@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
+import { test, expect } from 'vitest';
 import { TurtleParser } from './TurtleParser';
 import { serializeToFunctional } from '../serializer/FunctionalSerializer';
 
@@ -9,12 +10,6 @@ const JAR = join(__dirname, '../../resources/java/onto-reasoner-server.jar');
 const JAVA = process.env.JAVA_HOME
   ? join(process.env.JAVA_HOME, 'bin', 'java')
   : 'java';
-
-let pass = true;
-function check(cond: boolean, msg: string): void {
-  if (cond) { console.log(`  ✓ ${msg}`); }
-  else      { console.error(`  ✗ FAIL: ${msg}`); pass = false; }
-}
 
 function rpc(requests: object[]): unknown[] {
   const input = requests.map(r => JSON.stringify(r)).join('\n') + '\n';
@@ -28,95 +23,94 @@ function rpc(requests: object[]): unknown[] {
   return lines.map(l => JSON.parse(l));
 }
 
-// ── Functional Serializer ────────────────────────────────────────────────────
-console.log('── Functional Serializer ─────────────────────────────────────────');
-const ttl = readFileSync(join(ROOT, 'animals.ttl'), 'utf8');
-const model = new TurtleParser(ttl, 'file:///animals.ttl').parse();
-const ofn = serializeToFunctional(model);
-
-check(ofn.includes('Prefix(:='), 'Has base prefix declaration');
-check(ofn.includes('Ontology(<http://example.org/animals>'), 'Has ontology IRI');
-check(ofn.includes('Declaration(Class('), 'Has class declarations');
-check(ofn.includes('SubClassOf(<http://example.org/animals#Koala>'), 'Has SubClassOf for Koala');
-check(ofn.includes('DisjointClasses('), 'Has DisjointClasses');
-check(ofn.includes('TransitiveObjectProperty('), 'Has TransitiveObjectProperty');
-check(ofn.includes('ClassAssertion('), 'Has ClassAssertion for individual');
-
-// ── Reasoner ping ────────────────────────────────────────────────────────────
-console.log('\n── Reasoner server ──────────────────────────────────────────────');
-let pingResult: { id: number; result: { pong: boolean } } | undefined;
-try {
-  const [r] = rpc([{ id: 1, method: 'ping', params: {} }]) as typeof pingResult[];
-  pingResult = r;
-  check(pingResult?.result?.pong === true, 'ping returns pong');
-} catch (e) {
-  check(false, `ping failed: ${e}`);
+function getOfn(): string {
+  const ttl = readFileSync(join(ROOT, 'animals.ttl'), 'utf8');
+  const model = new TurtleParser(ttl, 'file:///animals.ttl').parse();
+  return serializeToFunctional(model);
 }
 
+// ── Functional Serializer ────────────────────────────────────────────────────
+
+test('Phase3: FunctionalSerializer output', () => {
+  const ofn = getOfn();
+  console.log('── Functional Serializer ─────────────────────────────────────────');
+  expect(ofn, 'Has base prefix declaration').toContain('Prefix(:=');
+  expect(ofn, 'Has ontology IRI').toContain('Ontology(<http://example.org/animals>');
+  expect(ofn, 'Has class declarations').toContain('Declaration(Class(');
+  expect(ofn, 'Has SubClassOf for Koala').toContain('SubClassOf(<http://example.org/animals#Koala>');
+  expect(ofn, 'Has DisjointClasses').toContain('DisjointClasses(');
+  expect(ofn, 'Has TransitiveObjectProperty').toContain('TransitiveObjectProperty(');
+  expect(ofn, 'Has ClassAssertion for individual').toContain('ClassAssertion(');
+});
+
+// ── Reasoner ping ────────────────────────────────────────────────────────────
+
+test('Phase3: reasoner server ping', { timeout: 30_000 }, () => {
+  console.log('── Reasoner server ──────────────────────────────────────────────');
+  const [r] = rpc([{ id: 1, method: 'ping', params: {} }]) as { id: number; result: { pong: boolean } }[];
+  expect(r?.result?.pong, 'ping returns pong').toBe(true);
+});
+
 // ── HermiT classify ──────────────────────────────────────────────────────────
-console.log('\n── HermiT classify (animals.ttl) ────────────────────────────────');
-try {
+
+test('Phase3: HermiT classify (animals.ttl)', { timeout: 60_000 }, () => {
+  const ofn = getOfn();
+  console.log('── HermiT classify (animals.ttl) ────────────────────────────────');
   const [r] = rpc([{ id: 2, method: 'classify', params: { format: 'functional', content: ofn, engine: 'hermit' } }]) as {
     id: number;
     result: { consistent: boolean; incoherentClasses: string[]; hierarchy: string[][] };
   }[];
 
-  check(r.result.consistent === true, 'HermiT: ontology is consistent');
-  check(r.result.incoherentClasses.length === 0, 'HermiT: no incoherent classes');
-  check(r.result.hierarchy.length >= 9, `HermiT: >= 9 inferred edges (got ${r.result.hierarchy.length})`);
+  expect(r.result.consistent, 'HermiT: ontology is consistent').toBe(true);
+  expect(r.result.incoherentClasses.length, 'HermiT: no incoherent classes').toBe(0);
+  expect(r.result.hierarchy.length, `HermiT: >= 9 inferred edges (got ${r.result.hierarchy.length})`).toBeGreaterThanOrEqual(9);
 
   const koalaIri = 'http://example.org/animals#Koala';
   const marsupialIri = 'http://example.org/animals#Marsupial';
   const koalaEdge = r.result.hierarchy.find(([, c]) => c === koalaIri);
-  check(koalaEdge?.[0] === marsupialIri, `HermiT: Koala inferred under Marsupial`);
+  expect(koalaEdge?.[0], 'HermiT: Koala inferred under Marsupial').toBe(marsupialIri);
 
   const thingChildren = r.result.hierarchy
     .filter(([p]) => p === 'http://www.w3.org/2002/07/owl#Thing')
     .map(([, c]) => c);
-  check(thingChildren.includes('http://example.org/animals#Animal'), 'HermiT: Animal under owl:Thing');
-} catch (e) {
-  check(false, `HermiT classify failed: ${e}`);
-}
+  expect(thingChildren, 'HermiT: Animal under owl:Thing').toContain('http://example.org/animals#Animal');
+});
 
 // ── ELK classify ─────────────────────────────────────────────────────────────
-console.log('\n── ELK classify (animals.ttl) ────────────────────────────────────');
-try {
+
+test('Phase3: ELK classify (animals.ttl)', { timeout: 60_000 }, () => {
+  const ofn = getOfn();
+  console.log('── ELK classify (animals.ttl) ────────────────────────────────────');
   const [r] = rpc([{ id: 3, method: 'classify', params: { format: 'functional', content: ofn, engine: 'elk' } }]) as {
     id: number;
     result: { consistent: boolean; hierarchy: string[][] };
   }[];
 
-  check(r.result.consistent === true, 'ELK: ontology is consistent');
-  check(r.result.hierarchy.length >= 9, `ELK: >= 9 inferred edges (got ${r.result.hierarchy.length})`);
-} catch (e) {
-  check(false, `ELK classify failed: ${e}`);
-}
+  expect(r.result.consistent, 'ELK: ontology is consistent').toBe(true);
+  expect(r.result.hierarchy.length, `ELK: >= 9 inferred edges (got ${r.result.hierarchy.length})`).toBeGreaterThanOrEqual(9);
+});
 
 // ── checkConsistency ──────────────────────────────────────────────────────────
-console.log('\n── checkConsistency ─────────────────────────────────────────────');
-try {
+
+test('Phase3: checkConsistency', { timeout: 30_000 }, () => {
+  const ofn = getOfn();
+  console.log('── checkConsistency ─────────────────────────────────────────────');
   const [r] = rpc([{ id: 4, method: 'checkConsistency', params: { format: 'functional', content: ofn, engine: 'hermit' } }]) as {
     id: number;
     result: { consistent: boolean };
   }[];
-  check(r.result.consistent === true, 'checkConsistency: animals is consistent');
-} catch (e) {
-  check(false, `checkConsistency failed: ${e}`);
-}
+  expect(r.result.consistent, 'checkConsistency: animals is consistent').toBe(true);
+});
 
 // ── convertFormat ─────────────────────────────────────────────────────────────
-console.log('\n── convertFormat ────────────────────────────────────────────────');
-try {
+
+test('Phase3: convertFormat', { timeout: 30_000 }, () => {
+  const ofn = getOfn();
+  console.log('── convertFormat ────────────────────────────────────────────────');
   const [r] = rpc([{ id: 5, method: 'convertFormat', params: { content: ofn, fromFormat: 'functional', toFormat: 'owl-xml' } }]) as {
     id: number;
     result: { output: string };
   }[];
-  check(typeof r.result.output === 'string' && r.result.output.length > 100, 'convertFormat: returns OWL/XML string');
-  check(r.result.output.includes('<Ontology'), 'convertFormat: output contains <Ontology>');
-} catch (e) {
-  check(false, `convertFormat failed: ${e}`);
-}
-
-// ── Summary ───────────────────────────────────────────────────────────────────
-console.log(pass ? '\n✓ All Phase 3 assertions passed' : '\n✗ Some Phase 3 assertions failed');
-process.exit(pass ? 0 : 1);
+  expect(typeof r.result.output === 'string' && r.result.output.length > 100, 'convertFormat: returns OWL/XML string').toBe(true);
+  expect(r.result.output, 'convertFormat: output contains <Ontology>').toContain('<Ontology');
+});
