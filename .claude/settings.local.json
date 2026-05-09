@@ -9,7 +9,15 @@
       "Bash(npx tsx *)",
       "Bash(npm run *)",
       "Bash(xargs -I{} jar tf {})",
-      "Bash(mvn clean *)"
+      "Bash(mvn clean *)",
+      "Bash(unzip -p ontograph-0.1.0.vsix extension/package.json)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); vc=d.get\\('contributes',{}\\).get\\('viewsContainers',{}\\); print\\(json.dumps\\(vc, indent=2\\)\\)\")",
+      "Bash(unzip -p /Users/yoga/JavaApp/OntoGraph/ontograph-0.1.0.vsix extension/package.json)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); v=d.get\\('contributes',{}\\).get\\('views',{}\\); print\\(json.dumps\\(v, indent=2\\)\\)\")",
+      "Bash(unzip -l /Users/yoga/JavaApp/OntoGraph/ontograph-0.1.0.vsix)",
+      "Bash(python3 -m json.tool)",
+      "Bash(node *)",
+      "Bash(python3 *)"
     ]
   }
 }

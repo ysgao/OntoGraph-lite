@@ -36,7 +36,7 @@
   ],
   "contributes": {
     "viewsContainers": {
-      "activityBar": [
+      "activitybar": [
         {
           "id": "ontograph",
           "title": "OntoGraph",
