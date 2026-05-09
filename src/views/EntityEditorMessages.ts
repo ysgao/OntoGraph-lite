@@ -76,6 +76,8 @@ export interface SaveEntityMessage {
   classIris?: string[];
   objectPropertyAssertions?: { propertyIri: string; targetIri: string }[];
   dataPropertyAssertions?: { propertyIri: string; value: string; datatype?: string }[];
+  labels?: Record<string, string[]>;
+  annotations?: Record<string, string[]>;
 }
 
 export type EntityEditorExtToWebview = LoadEntityMessage | CompletionResultMessage | ValidationResultMessage;

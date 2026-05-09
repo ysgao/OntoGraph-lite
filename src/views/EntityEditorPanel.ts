@@ -175,6 +175,9 @@ function handleMessage(
         }
       }
 
+      if (msg.labels !== undefined)      { entity.labels = msg.labels; }
+      if (msg.annotations !== undefined) { entity.annotations = msg.annotations; }
+
       fireRefresh();
       vscode.window.setStatusBarMessage(`$(check) OntoGraph: Saved ${getLabel(entity)}`, 4000);
       break;

@@ -447,7 +447,15 @@ export class OwlXmlParser {
     const annPropEls = ax['AnnotationProperty'];
     if (!annPropEls?.length) return;
     const propIri = this.expandIri(annPropEls[0] as Record<string, string>);
-    if (propIri !== RDFS_LABEL) return;
+    if (!propIri) return;
+
+    // Ensure annotation property is registered in the model
+    if (!model.annotationProperties.has(propIri)) {
+      model.annotationProperties.set(propIri, {
+        iri: propIri, type: 'annotationProperty', labels: {}, annotations: {},
+        superPropertyIris: [], domainIris: [], rangeIris: [],
+      });
+    }
 
     const iriEls = ax['IRI'];
     if (!iriEls?.length) return;
@@ -493,9 +501,14 @@ export class OwlXmlParser {
 
     if (!entity) return;
 
-    if (!entity.labels[lang]) entity.labels[lang] = [];
-    if (!entity.labels[lang].includes(literalValue)) {
-      entity.labels[lang].push(literalValue);
+    if (propIri === RDFS_LABEL) {
+      if (!entity.labels[lang]) entity.labels[lang] = [];
+      if (!entity.labels[lang].includes(literalValue)) {
+        entity.labels[lang].push(literalValue);
+      }
+    } else {
+      const val = lang ? `${literalValue}@${lang}` : literalValue;
+      (entity.annotations[propIri] ??= []).push(val);
     }
   }
 }

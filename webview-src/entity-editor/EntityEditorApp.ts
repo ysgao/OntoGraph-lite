@@ -96,6 +96,17 @@ let nextReqId = 0;
 const pendingCompletions = new Map<number, (items: CompletionResultMessage['items']) => void>();
 const pendingValidations = new Map<number, (errors: ValidationResultMessage['errors']) => void>();
 
+// ── Annotation priority constants ─────────────────────────────────────────────
+
+const RDFS_LABEL      = 'http://www.w3.org/2000/01/rdf-schema#label';
+const SKOS_PREF_LABEL = 'http://www.w3.org/2004/02/skos/core#prefLabel';
+const SKOS_ALT_LABEL  = 'http://www.w3.org/2004/02/skos/core#altLabel';
+const SKOS_DEFINITION = 'http://www.w3.org/2004/02/skos/core#definition';
+const PRIORITY_IRIS   = [RDFS_LABEL, SKOS_PREF_LABEL, SKOS_ALT_LABEL, SKOS_DEFINITION];
+
+interface AnnotationEntry { propIri: string; value: string; lang?: string; }
+let annotationState: AnnotationEntry[] = [];
+
 // ── Manchester syntax ─────────────────────────────────────────────────────────
 
 const MANCHESTER_KEYWORDS = new Set([
@@ -222,6 +233,7 @@ function createIriInput(
   placeholder: string,
   onSelect: (iri: string, label: string) => void,
   onCancel?: () => void,
+  typeFilter?: string,
 ): HTMLInputElement {
   const input = document.createElement('input');
   input.type = 'text';
@@ -280,7 +292,8 @@ function createIriInput(
       const timer = setTimeout(() => { pendingCompletions.delete(reqId); }, 400);
       pendingCompletions.set(reqId, (items) => {
         clearTimeout(timer);
-        showDropdown(items.slice(0, 8));
+        const filtered = typeFilter ? items.filter(i => i.entityType === typeFilter) : items;
+        showDropdown(filtered.slice(0, 8));
       });
       vscode.postMessage({ type: 'requestCompletion', requestId: reqId, prefix: val });
     }, 200);
@@ -678,6 +691,150 @@ function renderDataAssertionSection(container: HTMLElement): void {
   container.appendChild(sec);
 }
 
+// ── Annotations section (editable) ───────────────────────────────────────────
+
+function renderAnnotationsSection(container: HTMLElement): void {
+  const sec = makeSectionEl('Annotations');
+  const body = sec.querySelector('.section-body') as HTMLElement;
+
+  function rerender(): void {
+    body.innerHTML = '';
+
+    const table = document.createElement('table');
+    table.className = 'annotation-table';
+
+    for (let i = 0; i < annotationState.length; i++) {
+      const entry = annotationState[i];
+      const tr = document.createElement('tr');
+
+      // Col 1: property local name
+      const tdProp = document.createElement('td');
+      tdProp.className = 'prop-iri-cell';
+      tdProp.title = entry.propIri;
+      tdProp.textContent = localNameFromIri(entry.propIri);
+
+      // Col 2: lang tag (only for rdfs:label or entries that already carry one)
+      const tdLang = document.createElement('td');
+      tdLang.className = 'lang-tag-cell';
+      if (entry.propIri === RDFS_LABEL || entry.lang !== undefined) {
+        const langInput = document.createElement('input');
+        langInput.type = 'text';
+        langInput.className = 'lang-tag-input';
+        langInput.value = entry.lang ?? '';
+        langInput.placeholder = 'lang';
+        langInput.title = 'Language tag';
+        langInput.addEventListener('change', () => {
+          annotationState[i] = { ...annotationState[i], lang: langInput.value.trim() || undefined };
+        });
+        tdLang.appendChild(langInput);
+      }
+
+      // Col 3: editable value
+      const tdValue = document.createElement('td');
+      const valueInput = document.createElement('input');
+      valueInput.type = 'text';
+      valueInput.className = 'annotation-value-input';
+      valueInput.value = entry.value;
+      valueInput.addEventListener('change', () => {
+        annotationState[i] = { ...annotationState[i], value: valueInput.value };
+      });
+      tdValue.appendChild(valueInput);
+
+      // Col 4: delete button
+      const tdDel = document.createElement('td');
+      const delBtn = document.createElement('button');
+      delBtn.className = 'chip-remove inline-remove';
+      delBtn.textContent = '×';
+      delBtn.title = 'Delete';
+      delBtn.addEventListener('click', () => {
+        annotationState.splice(i, 1);
+        rerender();
+      });
+      tdDel.appendChild(delBtn);
+
+      tr.appendChild(tdProp);
+      tr.appendChild(tdLang);
+      tr.appendChild(tdValue);
+      tr.appendChild(tdDel);
+      table.appendChild(tr);
+    }
+    body.appendChild(table);
+
+    // Add annotation row
+    const addDiv = document.createElement('div');
+    addDiv.className = 'add-assertion-row';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'add-btn';
+    addBtn.textContent = '+ Add annotation';
+    addBtn.addEventListener('click', () => {
+      addBtn.style.display = 'none';
+      let newPropIri = '';
+
+      const row = document.createElement('div');
+      row.className = 'new-assertion-inputs';
+
+      const w1 = document.createElement('div');
+      w1.className = 'add-iri-input-wrapper';
+
+      const valueInput = document.createElement('input');
+      valueInput.type = 'text';
+      valueInput.className = 'iri-input';
+      valueInput.placeholder = 'Value…';
+
+      const langInput = document.createElement('input');
+      langInput.type = 'text';
+      langInput.className = 'lang-tag-input';
+      langInput.placeholder = 'lang';
+      langInput.title = 'Language tag (optional)';
+
+      const okBtn = document.createElement('button');
+      okBtn.className = 'add-btn';
+      okBtn.textContent = 'Add';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'add-btn cancel-btn';
+      cancelBtn.textContent = 'Cancel';
+
+      const propInput = createIriInput(w1, 'Annotation property…', (iri, _lbl) => {
+        newPropIri = iri;
+        requestAnimationFrame(() => valueInput.focus());
+      }, () => { rerender(); }, 'annotationProperty');
+
+      okBtn.addEventListener('click', () => {
+        const val = valueInput.value.trim();
+        // Allow raw IRI entry if autocomplete was not used
+        if (!newPropIri) {
+          const raw = propInput.value.trim();
+          if (raw.startsWith('http://') || raw.startsWith('https://')) { newPropIri = raw; }
+        }
+        if (newPropIri && val) {
+          const lang = langInput.value.trim() || undefined;
+          annotationState.push({ propIri: newPropIri, value: val, lang });
+        }
+        rerender();
+      });
+      cancelBtn.addEventListener('click', () => { rerender(); });
+      valueInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')  { okBtn.click(); }
+        if (e.key === 'Escape') { cancelBtn.click(); }
+      });
+
+      row.appendChild(w1);
+      row.appendChild(valueInput);
+      row.appendChild(langInput);
+      row.appendChild(okBtn);
+      row.appendChild(cancelBtn);
+      addDiv.appendChild(row);
+      requestAnimationFrame(() => propInput.focus());
+    });
+
+    addDiv.appendChild(addBtn);
+    body.appendChild(addDiv);
+  }
+
+  rerender();
+  container.appendChild(sec);
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeSectionEl(title: string): HTMLElement {
@@ -716,6 +873,56 @@ function collectEditorLines(key: string): string[] {
     .split('\n')
     .map(l => l.trim())
     .filter(l => l.length > 0 && !l.startsWith('#'));
+}
+
+// ── Annotation state helpers ──────────────────────────────────────────────────
+
+function buildAnnotationState(msg: LoadEntityMessage): AnnotationEntry[] {
+  const entries: AnnotationEntry[] = [];
+
+  for (const [lang, vals] of Object.entries(msg.labels)) {
+    for (const v of vals) {
+      entries.push({ propIri: RDFS_LABEL, value: v, lang: lang || undefined });
+    }
+  }
+
+  for (const [propIri, vals] of Object.entries(msg.annotations)) {
+    if (propIri === RDFS_LABEL) { continue; }
+    for (const v of vals) {
+      const atIdx = v.lastIndexOf('@');
+      const haslang = atIdx > 0 && /^[A-Za-z][A-Za-z0-9\-]*$/.test(v.slice(atIdx + 1));
+      entries.push({
+        propIri,
+        value: haslang ? v.slice(0, atIdx) : v,
+        lang:  haslang ? v.slice(atIdx + 1) : undefined,
+      });
+    }
+  }
+
+  entries.sort((a, b) => {
+    const ai = PRIORITY_IRIS.indexOf(a.propIri);
+    const bi = PRIORITY_IRIS.indexOf(b.propIri);
+    if (ai !== -1 && bi !== -1) { return ai - bi; }
+    if (ai !== -1) { return -1; }
+    if (bi !== -1) { return 1; }
+    return localNameFromIri(a.propIri).localeCompare(localNameFromIri(b.propIri));
+  });
+
+  return entries;
+}
+
+function collectAnnotationsForSave(): { labels: Record<string, string[]>; annotations: Record<string, string[]> } {
+  const labels: Record<string, string[]> = {};
+  const annotations: Record<string, string[]> = {};
+  for (const e of annotationState) {
+    if (e.propIri === RDFS_LABEL) {
+      (labels[e.lang ?? ''] ??= []).push(e.value);
+    } else {
+      const raw = e.lang ? `${e.value}@${e.lang}` : e.value;
+      (annotations[e.propIri] ??= []).push(raw);
+    }
+  }
+  return { labels, annotations };
 }
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
@@ -788,48 +995,9 @@ function renderEntity(msg: LoadEntityMessage): void {
   const content = document.getElementById('content')!;
   content.innerHTML = '';
 
-  // Labels (read-only)
-  const allLabels = Object.entries(msg.labels).flatMap(([lc, vals]) => vals.map(v => ({ lang: lc, value: v })));
-  if (allLabels.length > 0) {
-    const sec = makeSectionEl('Labels');
-    const body = sec.querySelector('.section-body') as HTMLElement;
-    const table = document.createElement('table');
-    for (const l of allLabels) {
-      const tr = document.createElement('tr');
-      const td1 = document.createElement('td');
-      td1.className = 'lang-tag-cell';
-      td1.innerHTML = `<span class="lang-tag">${l.lang || '(none)'}</span>`;
-      const td2 = document.createElement('td');
-      td2.textContent = l.value;
-      tr.appendChild(td1);
-      tr.appendChild(td2);
-      table.appendChild(tr);
-    }
-    body.appendChild(table);
-    content.appendChild(sec);
-  }
-
-  // Annotations (read-only, skip rdfs:label)
-  const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
-  const annEntries = Object.entries(msg.annotations).filter(([k, v]) => k !== RDFS_LABEL && v.length > 0);
-  if (annEntries.length > 0) {
-    const sec = makeSectionEl('Annotations');
-    const body = sec.querySelector('.section-body') as HTMLElement;
-    const table = document.createElement('table');
-    for (const [prop, vals] of annEntries) {
-      const tr = document.createElement('tr');
-      const td1 = document.createElement('td');
-      td1.className = 'prop-iri-cell';
-      td1.textContent = localNameFromIri(prop);
-      const td2 = document.createElement('td');
-      td2.textContent = vals.join(', ');
-      tr.appendChild(td1);
-      tr.appendChild(td2);
-      table.appendChild(tr);
-    }
-    body.appendChild(table);
-    content.appendChild(sec);
-  }
+  // Unified editable annotations section (rdfs:label, skos:prefLabel, skos:altLabel, skos:definition, then rest)
+  annotationState = buildAnnotationState(msg);
+  renderAnnotationsSection(content);
 
   // Entity-type-specific sections
   switch (msg.entityType) {
@@ -897,13 +1065,14 @@ function handleSave(): void {
   if (!currentIri) { return; }
 
   const base = { type: 'save' as const, iri: currentIri, entityType: currentEntityType };
+  const annotData = collectAnnotationsForSave();
 
   let payload: Record<string, unknown> = { ...base };
 
   switch (currentEntityType) {
     case 'class':
       payload = {
-        ...base,
+        ...base, ...annotData,
         superClassIris: iriListState['superClassIris'] ?? [],
         superClassExpressions: collectEditorLines('superClassExpressions'),
         equivalentClassIris: iriListState['equivalentClassIris'] ?? [],
@@ -914,7 +1083,7 @@ function handleSave(): void {
 
     case 'objectProperty':
       payload = {
-        ...base,
+        ...base, ...annotData,
         superPropertyIris: iriListState['superPropertyIris'] ?? [],
         domainIris: iriListState['domainIris'] ?? [],
         rangeIris: iriListState['rangeIris'] ?? [],
@@ -928,7 +1097,7 @@ function handleSave(): void {
 
     case 'dataProperty':
       payload = {
-        ...base,
+        ...base, ...annotData,
         superPropertyIris: iriListState['superPropertyIris'] ?? [],
         domainIris: iriListState['domainIris'] ?? [],
         rangeIris: iriListState['rangeIris'] ?? [],
@@ -938,14 +1107,14 @@ function handleSave(): void {
 
     case 'annotationProperty':
       payload = {
-        ...base,
+        ...base, ...annotData,
         superPropertyIris: iriListState['superPropertyIris'] ?? [],
       };
       break;
 
     case 'individual':
       payload = {
-        ...base,
+        ...base, ...annotData,
         classIris: iriListState['classIris'] ?? [],
         objectPropertyAssertions: objAssertionState,
         dataPropertyAssertions: dataAssertionState,
@@ -1106,6 +1275,24 @@ function injectStyles(): void {
     a { color: var(--link); text-decoration: none; }
     a:hover { text-decoration: underline; }
     code { background: var(--code-bg); padding: 1px 4px; border-radius: 2px; font-family: var(--vscode-editor-font-family, monospace); }
+
+    /* Annotation editing */
+    .annotation-value-input {
+      background: var(--input-bg); color: var(--fg);
+      border: 1px solid transparent;
+      padding: 2px 6px; border-radius: 3px;
+      font-family: inherit; font-size: inherit; width: 100%;
+    }
+    .annotation-value-input:focus { outline: none; border-color: var(--input-border); }
+    .lang-tag-input {
+      background: var(--input-bg); color: var(--fg);
+      border: 1px solid var(--input-border);
+      padding: 2px 3px; border-radius: 3px;
+      font-family: inherit; font-size: 0.78em; width: 46px;
+    }
+    .lang-tag-input:focus { outline: 1px solid var(--link); }
+    .annotation-table .prop-iri-cell { width: 130px; white-space: nowrap; }
+    .annotation-table .lang-tag-cell { width: 52px; }
   `;
   document.head.appendChild(style);
 }

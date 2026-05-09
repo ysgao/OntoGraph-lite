@@ -80,13 +80,60 @@ export interface OntologyModel {
   isClassified: boolean;
 }
 
+function makeAnnProp(iri: string, label: string): OWLAnnotationProperty {
+  return { iri, type: 'annotationProperty', labels: { en: [label] }, annotations: {}, superPropertyIris: [], domainIris: [], rangeIris: [] };
+}
+
+/** OWL 2 built-in annotation properties that are always available even without explicit Declaration. */
+export const BUILTIN_ANNOTATION_PROP_IRIS: readonly string[] = [
+  'http://www.w3.org/2000/01/rdf-schema#label',
+  'http://www.w3.org/2000/01/rdf-schema#comment',
+  'http://www.w3.org/2000/01/rdf-schema#seeAlso',
+  'http://www.w3.org/2000/01/rdf-schema#isDefinedBy',
+  'http://www.w3.org/2002/07/owl#deprecated',
+  'http://www.w3.org/2002/07/owl#versionInfo',
+  'http://www.w3.org/2002/07/owl#priorVersion',
+  'http://www.w3.org/2002/07/owl#backwardCompatibleWith',
+  'http://www.w3.org/2002/07/owl#incompatibleWith',
+  'http://www.w3.org/2004/02/skos/core#prefLabel',
+  'http://www.w3.org/2004/02/skos/core#altLabel',
+  'http://www.w3.org/2004/02/skos/core#definition',
+  'http://www.w3.org/2004/02/skos/core#example',
+  'http://www.w3.org/2004/02/skos/core#note',
+  'http://www.w3.org/2004/02/skos/core#scopeNote',
+  'http://www.w3.org/2004/02/skos/core#editorialNote',
+  'http://www.w3.org/2004/02/skos/core#historyNote',
+  'http://www.w3.org/2004/02/skos/core#changeNote',
+];
+
+const BUILTIN_ANNOTATION_PROPS: Map<string, OWLAnnotationProperty> = new Map([
+  ['http://www.w3.org/2000/01/rdf-schema#label',             makeAnnProp('http://www.w3.org/2000/01/rdf-schema#label',             'label')],
+  ['http://www.w3.org/2000/01/rdf-schema#comment',           makeAnnProp('http://www.w3.org/2000/01/rdf-schema#comment',           'comment')],
+  ['http://www.w3.org/2000/01/rdf-schema#seeAlso',           makeAnnProp('http://www.w3.org/2000/01/rdf-schema#seeAlso',           'seeAlso')],
+  ['http://www.w3.org/2000/01/rdf-schema#isDefinedBy',       makeAnnProp('http://www.w3.org/2000/01/rdf-schema#isDefinedBy',       'isDefinedBy')],
+  ['http://www.w3.org/2002/07/owl#deprecated',               makeAnnProp('http://www.w3.org/2002/07/owl#deprecated',               'deprecated')],
+  ['http://www.w3.org/2002/07/owl#versionInfo',              makeAnnProp('http://www.w3.org/2002/07/owl#versionInfo',              'versionInfo')],
+  ['http://www.w3.org/2002/07/owl#priorVersion',             makeAnnProp('http://www.w3.org/2002/07/owl#priorVersion',             'priorVersion')],
+  ['http://www.w3.org/2002/07/owl#backwardCompatibleWith',   makeAnnProp('http://www.w3.org/2002/07/owl#backwardCompatibleWith',   'backwardCompatibleWith')],
+  ['http://www.w3.org/2002/07/owl#incompatibleWith',         makeAnnProp('http://www.w3.org/2002/07/owl#incompatibleWith',         'incompatibleWith')],
+  ['http://www.w3.org/2004/02/skos/core#prefLabel',          makeAnnProp('http://www.w3.org/2004/02/skos/core#prefLabel',          'prefLabel')],
+  ['http://www.w3.org/2004/02/skos/core#altLabel',           makeAnnProp('http://www.w3.org/2004/02/skos/core#altLabel',           'altLabel')],
+  ['http://www.w3.org/2004/02/skos/core#definition',         makeAnnProp('http://www.w3.org/2004/02/skos/core#definition',         'definition')],
+  ['http://www.w3.org/2004/02/skos/core#example',            makeAnnProp('http://www.w3.org/2004/02/skos/core#example',            'example')],
+  ['http://www.w3.org/2004/02/skos/core#note',               makeAnnProp('http://www.w3.org/2004/02/skos/core#note',               'note')],
+  ['http://www.w3.org/2004/02/skos/core#scopeNote',          makeAnnProp('http://www.w3.org/2004/02/skos/core#scopeNote',          'scopeNote')],
+  ['http://www.w3.org/2004/02/skos/core#editorialNote',      makeAnnProp('http://www.w3.org/2004/02/skos/core#editorialNote',      'editorialNote')],
+  ['http://www.w3.org/2004/02/skos/core#historyNote',        makeAnnProp('http://www.w3.org/2004/02/skos/core#historyNote',        'historyNote')],
+  ['http://www.w3.org/2004/02/skos/core#changeNote',         makeAnnProp('http://www.w3.org/2004/02/skos/core#changeNote',         'changeNote')],
+]);
+
 export function createEmptyModel(sourceUri: string): OntologyModel {
   return {
     metadata: { imports: [], annotations: {} },
     classes: new Map(),
     objectProperties: new Map(),
     dataProperties: new Map(),
-    annotationProperties: new Map(),
+    annotationProperties: new Map(BUILTIN_ANNOTATION_PROPS),
     individuals: new Map(),
     sourceUri,
     rawContent: '',

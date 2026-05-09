@@ -7,6 +7,7 @@ import {
   OWLDataProperty,
   OWLAnnotationProperty,
   OWLIndividual,
+  BUILTIN_ANNOTATION_PROP_IRIS,
 } from '../model/OntologyModel';
 
 const OWL = 'http://www.w3.org/2002/07/owl#';
@@ -79,8 +80,9 @@ export class TurtleParser {
       ).push(oVal);
     }
 
-    // Collect annotation property IRIs first so they're available for all entity annotations
-    const annProps = new Set<string>();
+    // Collect annotation property IRIs — seed with built-ins (rdfs:label, skos:*, etc.) so their
+    // values are collected even when the ontology omits explicit owl:AnnotationProperty declarations
+    const annProps = new Set<string>(BUILTIN_ANNOTATION_PROP_IRIS);
     for (const [iri, preds] of idx) {
       if (isNamed(iri) && (preds.get(RDF_TYPE) ?? []).includes(`${OWL}AnnotationProperty`)) {
         annProps.add(iri);

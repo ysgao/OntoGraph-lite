@@ -136,6 +136,25 @@ export function serializeToFunctional(model: OntologyModel): string {
     }
   }
 
+  // Non-label annotation assertions (skos:prefLabel, skos:altLabel, skos:definition, etc.)
+  for (const entity of [
+    ...model.classes.values(),
+    ...model.objectProperties.values(),
+    ...model.dataProperties.values(),
+    ...model.annotationProperties.values(),
+    ...model.individuals.values(),
+  ]) {
+    for (const [propIri, values] of Object.entries(entity.annotations)) {
+      for (const val of values) {
+        const atIdx = val.lastIndexOf('@');
+        const haslang = atIdx > 0 && /^[A-Za-z][A-Za-z0-9\-]*$/.test(val.slice(atIdx + 1));
+        const text = haslang ? val.slice(0, atIdx) : val;
+        const lang = haslang ? val.slice(atIdx + 1) : undefined;
+        out.push(`  AnnotationAssertion(${iri(propIri)} ${iri(entity.iri)} ${literal(text, lang)})`);
+      }
+    }
+  }
+
   // Suppress owl:Nothing and owl:Thing declarations (OWLAPI adds them implicitly)
   out.push(')');
   return out.join('\n');

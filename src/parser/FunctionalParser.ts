@@ -312,6 +312,9 @@ export class FunctionalParser {
     const val = this.readAnnotationValue();
     this.expectRParen();
 
+    // Ensure the annotation property is registered even if never explicitly declared
+    this.getOrCreateAnnotationProp(pa);
+
     // subject must already be declared; if not, skip
     const entity =
       this.model.classes.get(subject) ??
