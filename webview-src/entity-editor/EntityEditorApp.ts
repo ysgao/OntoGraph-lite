@@ -110,10 +110,12 @@ const pendingValidations = new Map<number, (errors: ValidationResultMessage['err
 // ── Annotation priority constants ─────────────────────────────────────────────
 
 const RDFS_LABEL      = 'http://www.w3.org/2000/01/rdf-schema#label';
+const RDFS_COMMENT    = 'http://www.w3.org/2000/01/rdf-schema#comment';
 const SKOS_PREF_LABEL = 'http://www.w3.org/2004/02/skos/core#prefLabel';
 const SKOS_ALT_LABEL  = 'http://www.w3.org/2004/02/skos/core#altLabel';
 const SKOS_DEFINITION = 'http://www.w3.org/2004/02/skos/core#definition';
-const PRIORITY_IRIS   = [RDFS_LABEL, SKOS_PREF_LABEL, SKOS_ALT_LABEL, SKOS_DEFINITION];
+const PRIORITY_IRIS   = [RDFS_LABEL, SKOS_PREF_LABEL, SKOS_ALT_LABEL, SKOS_DEFINITION, RDFS_COMMENT];
+const DEFAULT_EN_IRIS = [RDFS_LABEL, SKOS_PREF_LABEL, SKOS_ALT_LABEL, RDFS_COMMENT];
 
 interface AnnotationEntry { propIri: string; value: string; lang?: string; }
 let annotationState: AnnotationEntry[] = [];
@@ -832,10 +834,10 @@ function renderAnnotationsSection(container: HTMLElement): void {
       tdProp.title = entry.propIri;
       tdProp.textContent = localNameFromIri(entry.propIri);
 
-      // Col 2: lang tag (only for rdfs:label or entries that already carry one)
+      // Col 2: lang tag (for specific properties or entries that already carry one)
       const tdLang = document.createElement('td');
       tdLang.className = 'lang-tag-cell';
-      if (entry.propIri === RDFS_LABEL || entry.lang !== undefined) {
+      if (DEFAULT_EN_IRIS.includes(entry.propIri) || entry.lang !== undefined) {
         const langInput = document.createElement('input');
         langInput.type = 'text';
         langInput.className = 'lang-tag-input';
@@ -917,6 +919,9 @@ function renderAnnotationsSection(container: HTMLElement): void {
 
       const propInput = createIriInput(w1, 'Annotation property…', (iri, _lbl) => {
         newPropIri = iri;
+        if (DEFAULT_EN_IRIS.includes(iri) && !langInput.value.trim()) {
+          langInput.value = 'en';
+        }
         requestAnimationFrame(() => valueInput.focus());
       }, () => { rerender(); }, 'annotationProperty');
 
