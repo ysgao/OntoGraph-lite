@@ -20,6 +20,7 @@ import type {
   CompletionResultMessage,
   ValidationResultMessage,
 } from './EntityEditorMessages';
+import { parsedDocVersions } from '../extension';
 
 // ── Singleton panel ───────────────────────────────────────────────────────────
 
@@ -221,7 +222,12 @@ function handleMessage(
       _annotationSyncActive = true;
       void (async () => {
         const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-        if (doc) { await syncAnnotationsToDocument(doc, entity, model.sourceFormat); }
+        if (doc) { 
+          const ranges = await syncAnnotationsToDocument(doc, entity, model.sourceFormat); 
+          if (ranges) {
+            parsedDocVersions.set(doc.uri.toString(), doc.version);
+          }
+        }
         _annotationSyncActive = false;
         // Safe to clear now: the file buffer has the updated annotations, so the
         // next model re-parse (triggered by onDidSaveTextDocument) will have correct data.
@@ -229,6 +235,7 @@ function handleMessage(
       })();
 
       fireRefresh();
+      void vscode.commands.executeCommand('ontograph.refresh');
       // Refresh the webview from the updated model to confirm the save
       sendLoadEntity(p, model, msg.iri);
       vscode.window.setStatusBarMessage(`$(check) OntoGraph: Saved ${getLabel(entity)}`, 4000);

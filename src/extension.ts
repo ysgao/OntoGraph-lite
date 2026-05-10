@@ -24,6 +24,8 @@ let activeModel: OntologyModel | undefined;
 let activeIndex: OntologyIndex | undefined;
 let lspStarted = false;
 
+export const parsedDocVersions = new Map<string, number>();
+
 export function activate(context: vscode.ExtensionContext): void {
   outputChannel = vscode.window.createOutputChannel('OntoGraph');
   context.subscriptions.push(outputChannel);
@@ -244,7 +246,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Track the last-parsed version of each document URI so we skip redundant parses.
   // doc.version increments on every edit; switching tabs with no edits keeps it the same.
-  const parsedDocVersions = new Map<string, number>();
+  // Exported so programmatic edits (like annotation sync) can update this to prevent reloads.
 
   async function handleDocument(doc: vscode.TextDocument): Promise<void> {
     const langId = resolveLanguageId(doc);
