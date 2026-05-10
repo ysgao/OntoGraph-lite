@@ -29,19 +29,31 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   private model: OntologyModel | undefined;
   /** parent IRI → child IRIs (asserted, pre-sorted by label) */
   private childrenOf = new Map<string, string[]>();
+  /** child IRI → parent IRIs (asserted, pre-sorted by label) */
+  private parentsOf = new Map<string, string[]>();
+  private focusIri: string | undefined = OWL_THING;
   private preferredLang = 'en';
   private readonly collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
   setModel(model: OntologyModel, preferredLang = 'en'): void {
     this.model = model;
     this.preferredLang = preferredLang;
+    this.focusIri = OWL_THING;
     this.buildIndex();
+    this._onDidChangeTreeData.fire();
+  }
+
+  setFocus(iri: string): void {
+    if (this.focusIri === iri) { return; }
+    this.focusIri = iri;
     this._onDidChangeTreeData.fire();
   }
 
   private buildIndex(): void {
     this.childrenOf.clear();
+    this.parentsOf.clear();
     if (!this.model) { return; }
+
     for (const cls of this.model.classes.values()) {
       const explicitParents = new Set(cls.superClassIris);
       for (const expr of cls.superClassExpressions ?? []) {
@@ -56,22 +68,35 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
       }
 
       const parents = explicitParents.size > 0 ? Array.from(explicitParents) : [OWL_THING];
+      this.parentsOf.set(cls.iri, parents);
+
       for (const parent of parents) {
         const siblings = this.childrenOf.get(parent) ?? [];
         siblings.push(cls.iri);
         this.childrenOf.set(parent, siblings);
       }
     }
+
+    // Sort children
     for (const [, children] of this.childrenOf) {
-      children.sort((a, b) => {
-        const la = this.model!.classes.get(a);
-        const lb = this.model!.classes.get(b);
-        return this.collator.compare(
-          la ? getLabel(la, this.preferredLang) : a,
-          lb ? getLabel(lb, this.preferredLang) : b,
-        );
-      });
+      this.sortIris(children);
     }
+    // Sort parents
+    for (const [, parents] of this.parentsOf) {
+      this.sortIris(parents);
+    }
+  }
+
+  private sortIris(iris: string[]): void {
+    if (!this.model) { return; }
+    iris.sort((a, b) => {
+      const la = this.model!.classes.get(a);
+      const lb = this.model!.classes.get(b);
+      return this.collator.compare(
+        la ? getLabel(la, this.preferredLang) : a,
+        lb ? getLabel(lb, this.preferredLang) : b,
+      );
+    });
   }
 
   refresh(): void {
@@ -79,62 +104,92 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   }
 
   getTreeItem(element: ClassTreeItem): vscode.TreeItem {
+    if (element.iri === this.focusIri) {
+      element.iconPath = new vscode.ThemeIcon('target');
+      element.description = '(focus)';
+    } else {
+      const parents = this.parentsOf.get(this.focusIri ?? '');
+      if (parents?.includes(element.iri)) {
+        element.iconPath = new vscode.ThemeIcon('chevron-up');
+        element.description = '(superclass)';
+      } else {
+        // Subconcept: use "> " (chevron-right) if it has children
+        const hasChildren = (this.childrenOf.get(element.iri)?.length ?? 0) > 0;
+        if (hasChildren) {
+          element.iconPath = new vscode.ThemeIcon('chevron-right');
+        } else {
+          element.iconPath = new vscode.ThemeIcon('symbol-class');
+        }
+        element.description = '(subclass)';
+      }
+    }
     return element;
   }
 
   getChildren(element?: ClassTreeItem): ClassTreeItem[] {
     if (!this.model) { return []; }
 
-    // No element → return owl:Thing as the single visible root (auto-expanded)
-    if (!element) {
+    // If we have an element, it's a neighborhood node, which has no children in this view
+    if (element) { return []; }
+
+    // Root level: if no focus, show owl:Thing root (legacy behavior or initial state)
+    if (!this.focusIri) {
       const childCount = (this.childrenOf.get(OWL_THING)?.length ?? 0);
       return [new ClassTreeItem(OWL_THING, 'owl:Thing', childCount > 0, true, childCount > 0)];
     }
 
-    const childIris = this.childrenOf.get(element.iri) ?? [];
-    return childIris.map(iri => {
-      const cls = this.model!.classes.get(iri);
-      const label = cls ? getLabel(cls, this.preferredLang) : iri;
-      const hasChildren = (this.childrenOf.get(iri)?.length ?? 0) > 0;
-      return new ClassTreeItem(iri, label, hasChildren);
-    });
+    // Neighborhood view: [parents] + [focus] + [children]
+    const result: ClassTreeItem[] = [];
+
+    // 1. Parents (Level 0)
+    const parentIris = this.parentsOf.get(this.focusIri) ?? [];
+    for (const iri of parentIris) {
+      if (iri === OWL_THING) { continue; }
+      const item = this.makeItem(iri, "");
+      if (item) {
+        item.collapsibleState = vscode.TreeItemCollapsibleState.None;
+        result.push(item);
+      }
+    }
+
+    // 2. Focus (Level 1, unless Thing)
+    const focusPrefix = (this.focusIri === OWL_THING) ? "" : "  ";
+    const focusItem = this.makeItem(this.focusIri, focusPrefix);
+    if (focusItem) {
+      focusItem.collapsibleState = vscode.TreeItemCollapsibleState.None;
+      result.push(focusItem);
+    }
+
+    // 3. Children (Level 2, or Level 1 if Thing is focus)
+    const childPrefix = (this.focusIri === OWL_THING) ? "  " : "    ";
+    const childIris = this.childrenOf.get(this.focusIri) ?? [];
+    for (const iri of childIris) {
+      const item = this.makeItem(iri, childPrefix);
+      if (item) {
+        item.collapsibleState = vscode.TreeItemCollapsibleState.None;
+        result.push(item);
+      }
+    }
+
+    return result;
   }
 
-  makeItem(iri: string): ClassTreeItem | undefined {
+  makeItem(iri: string, prefix = ""): ClassTreeItem | undefined {
     if (!this.model) { return undefined; }
     const cls = this.model.classes.get(iri);
-    if (!cls) { return undefined; }
+    if (!cls && iri !== OWL_THING) { return undefined; }
+    const label = cls ? getLabel(cls, this.preferredLang) : (iri === OWL_THING ? 'owl:Thing' : iri);
     return new ClassTreeItem(
       iri,
-      getLabel(cls, this.preferredLang),
-      (this.childrenOf.get(iri)?.length ?? 0) > 0,
+      prefix + label,
+      false, // Children handled by neighborhood logic
     );
   }
 
-  getParent(element: ClassTreeItem): ClassTreeItem | undefined {
-    if (!this.model) { return undefined; }
-    const cls = this.model.classes.get(element.iri);
-    if (!cls) { return undefined; }
-
-    const explicitParents = new Set(cls.superClassIris);
-    for (const expr of cls.superClassExpressions ?? []) {
-      for (const p of extractTopLevelNamedClasses(expr, this.model.classes)) {
-        explicitParents.add(p);
-      }
-    }
-    for (const expr of cls.equivalentClassExpressions ?? []) {
-      for (const p of extractTopLevelNamedClasses(expr, this.model.classes)) {
-        explicitParents.add(p);
-      }
-    }
-
-    if (explicitParents.size === 0) { return undefined; }
-    const parentIri = Array.from(explicitParents)[0];
-    const parent = this.model.classes.get(parentIri);
-    if (!parent) { return undefined; }
-    const label = getLabel(parent, this.preferredLang);
-    const hasChildren = (this.childrenOf.get(parentIri)?.length ?? 0) > 0;
-    return new ClassTreeItem(parentIri, label, hasChildren);
+  getParent(_element: ClassTreeItem): ClassTreeItem | undefined {
+    // In flat neighborhood view, all visible items are roots.
+    // Returning undefined ensures reveal() can find them among the top-level children.
+    return undefined;
   }
 }
 

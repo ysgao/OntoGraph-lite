@@ -43,6 +43,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const iri = (item as { iri?: string } | undefined)?.iri;
     if (!iri || !activeModel) { return; }
     showEntityInfo(context, activeModel, iri);
+    if (activeModel.classes.has(iri)) {
+      classProvider.setFocus(iri);
+      inferredProvider.setFocus(iri);
+    }
   }
 
   const classView = vscode.window.createTreeView('ontograph.classes', { treeDataProvider: classProvider });
@@ -96,9 +100,11 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       switch (entityType) {
         case 'class': {
+          classProvider.setFocus(iri);
           const item = classProvider.makeItem(iri);
           if (item) { void classView.reveal(item, opts); }
           if (activeModel?.isClassified) {
+            inferredProvider.setFocus(iri);
             const inferredItem = inferredProvider.makeItem(iri);
             if (inferredItem) { void inferredView.reveal(inferredItem, opts); }
           }
