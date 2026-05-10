@@ -1,8 +1,16 @@
-import type { OntologyModel } from './OntologyModel';
+import type { EntityType, OntologyModel } from './OntologyModel';
 import { getLabel } from './OntologyModel';
 import type { OntologyIndex } from './OntologyIndex';
 
 export type AxiomDisplayStyle = 'label' | 'shortIri' | 'fullIri';
+
+export interface RenderedExpressionEntityRef {
+  from: number;
+  to: number;
+  iri: string;
+  entityType: EntityType;
+  label: string;
+}
 
 const MANCHESTER_KW = new Set([
   'some', 'only', 'value', 'min', 'max', 'exactly', 'and', 'or', 'not', 'that', 'Self',
@@ -79,6 +87,44 @@ export function renderExpression(
 ): string {
   BARE_IRI.lastIndex = 0;
   return expr.replace(BARE_IRI, iri => renderIri(iri, model, style, lang, forEditing));
+}
+
+export function renderExpressionWithEntityRefs(
+  expr: string,
+  model: OntologyModel,
+  style: AxiomDisplayStyle,
+  lang = 'en',
+  forEditing = false,
+): { text: string; refs: RenderedExpressionEntityRef[] } {
+  const refs: RenderedExpressionEntityRef[] = [];
+  let text = '';
+  let lastIndex = 0;
+  BARE_IRI.lastIndex = 0;
+
+  for (const match of expr.matchAll(BARE_IRI)) {
+    const iri = match[0];
+    const fromSource = match.index ?? 0;
+    text += expr.slice(lastIndex, fromSource);
+
+    const entity = entityByIri(iri, model);
+    const rendered = renderIri(iri, model, style, lang, forEditing);
+    const from = text.length;
+    text += rendered;
+    if (entity) {
+      refs.push({
+        from,
+        to: from + rendered.length,
+        iri,
+        entityType: entity.type,
+        label: getLabel(entity, lang),
+      });
+    }
+
+    lastIndex = fromSource + iri.length;
+  }
+
+  text += expr.slice(lastIndex);
+  return { text, refs };
 }
 
 /**

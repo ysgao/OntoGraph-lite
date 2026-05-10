@@ -11,7 +11,7 @@ import type {
 import { getLabel } from '../model/OntologyModel';
 import { OntologyIndex } from '../model/OntologyIndex';
 import { ManchesterParser } from '../parser/ManchesterParser';
-import { renderExpression, normalizeExpression, type AxiomDisplayStyle } from '../model/AxiomDisplay';
+import { normalizeExpression, renderExpressionWithEntityRefs, type AxiomDisplayStyle } from '../model/AxiomDisplay';
 import { syncAnnotationsToDocument } from '../sync/AnnotationSync';
 import { syncAxiomsToDocument } from '../sync/AxiomSync';
 import type {
@@ -128,6 +128,10 @@ function handleMessage(
 
     case 'navigate':
       showEntityInfo(context, model, msg.iri);
+      break;
+
+    case 'focusEntity':
+      void vscode.commands.executeCommand('ontograph.focusEntity', { iri: msg.iri });
       break;
 
     case 'requestCompletion': {
@@ -341,15 +345,37 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
     annotations: effectiveAnnotations,
     displayStyle: style,
     iriLabels,
+    expressionEntityRefs: {},
   };
 
   if (entity.type === 'class') {
     const cls = entity as OWLClass;
     msg.superClassIris = cls.superClassIris;
-    msg.superClassExpressions = (cls.superClassExpressions ?? []).map(e => renderExpression(e, model, style, lang, true));
+    msg.superClassExpressions = renderExpressionsWithRefs(
+      'superClassExpressions',
+      cls.superClassExpressions ?? [],
+      msg.expressionEntityRefs!,
+      model,
+      style,
+      lang,
+    );
     msg.equivalentClassIris = cls.equivalentClassIris;
-    msg.equivalentClassExpressions = (cls.equivalentClassExpressions ?? []).map(e => renderExpression(e, model, style, lang, true));
-    msg.gciExpressions = (cls.gciExpressions ?? []).map(e => renderExpression(e, model, style, lang, true));
+    msg.equivalentClassExpressions = renderExpressionsWithRefs(
+      'equivalentClassExpressions',
+      cls.equivalentClassExpressions ?? [],
+      msg.expressionEntityRefs!,
+      model,
+      style,
+      lang,
+    );
+    msg.gciExpressions = renderExpressionsWithRefs(
+      'gciExpressions',
+      cls.gciExpressions ?? [],
+      msg.expressionEntityRefs!,
+      model,
+      style,
+      lang,
+    );
     msg.disjointClassIris = cls.disjointClassIris;
   } else if (entity.type === 'objectProperty') {
     const prop = entity as OWLObjectProperty;
@@ -389,6 +415,31 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function renderExpressionsWithRefs(
+  sectionKey: string,
+  expressions: string[],
+  refsBySection: NonNullable<LoadEntityMessage['expressionEntityRefs']>,
+  model: OntologyModel,
+  style: AxiomDisplayStyle,
+  lang: string,
+): string[] {
+  const renderedExpressions: string[] = [];
+  const refs: NonNullable<LoadEntityMessage['expressionEntityRefs']>[string] = [];
+  let offset = 0;
+
+  for (const expr of expressions) {
+    const rendered = renderExpressionWithEntityRefs(expr, model, style, lang, true);
+    renderedExpressions.push(rendered.text);
+    for (const ref of rendered.refs) {
+      refs.push({ ...ref, from: ref.from + offset, to: ref.to + offset });
+    }
+    offset += rendered.text.length + 1;
+  }
+
+  refsBySection[sectionKey] = refs;
+  return renderedExpressions;
+}
 
 function findEntity(model: OntologyModel, iri: string) {
   return model.classes.get(iri)

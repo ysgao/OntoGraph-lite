@@ -1,5 +1,7 @@
-import { EditorState } from '@codemirror/state';
+import { EditorState, StateField } from '@codemirror/state';
 import {
+  Decoration,
+  type DecorationSet,
   EditorView,
   keymap,
   lineNumbers,
@@ -33,6 +35,14 @@ const vscode = acquireVsCodeApi();
 
 type EntityType = 'class' | 'objectProperty' | 'dataProperty' | 'annotationProperty' | 'individual';
 
+interface ExpressionEntityRef {
+  from: number;
+  to: number;
+  iri: string;
+  entityType: EntityType;
+  label: string;
+}
+
 interface LoadEntityMessage {
   type: 'loadEntity';
   entityType: EntityType;
@@ -65,6 +75,7 @@ interface LoadEntityMessage {
   isIrreflexive?: boolean;
   isAsymmetric?: boolean;
   iriLabels: Record<string, string>;
+  expressionEntityRefs?: Record<string, ExpressionEntityRef[]>;
 }
 
 interface CompletionResultMessage {
@@ -241,7 +252,46 @@ const vsCodeTheme = EditorView.theme({
   '.cm-activeLine': { backgroundColor: 'var(--vscode-editor-lineHighlightBackground)' },
 });
 
-function createEditor(parent: HTMLElement, initialDoc: string): EditorView {
+function clickableEntityExtension(refs: ExpressionEntityRef[]) {
+  const initialDecorations = Decoration.set(
+    refs
+      .filter(ref => ref.from < ref.to)
+      .map(ref => Decoration.mark({
+        class: `cm-clickable-entity cm-clickable-entity-${ref.entityType}`,
+        attributes: {
+          'data-iri': ref.iri,
+          title: `${ref.label}\n${ref.iri}`,
+        },
+      }).range(ref.from, ref.to)),
+    true,
+  );
+
+  const decorationField = StateField.define<DecorationSet>({
+    create() { return initialDecorations; },
+    update(decorations, transaction) {
+      return decorations.map(transaction.changes);
+    },
+    provide: field => EditorView.decorations.from(field),
+  });
+
+  return [
+    decorationField,
+    EditorView.domEventHandlers({
+      click(event) {
+        const target = event.target instanceof HTMLElement
+          ? event.target.closest<HTMLElement>('.cm-clickable-entity')
+          : null;
+        const iri = target?.dataset['iri'];
+        if (!iri) { return false; }
+        event.preventDefault();
+        vscode.postMessage({ type: 'focusEntity', iri });
+        return true;
+      },
+    }),
+  ];
+}
+
+function createEditor(parent: HTMLElement, initialDoc: string, entityRefs: ExpressionEntityRef[] = []): EditorView {
   return new EditorView({
     state: EditorState.create({
       doc: initialDoc,
@@ -255,6 +305,7 @@ function createEditor(parent: HTMLElement, initialDoc: string): EditorView {
         keymap.of([...defaultKeymap, ...historyKeymap]),
         autocompletion({ override: [manchesterCompletionSource] }),
         linter(manchesterLinter, { delay: 400 }),
+        clickableEntityExtension(entityRefs),
         vsCodeTheme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -535,7 +586,13 @@ function renderPropertyChainSection(container: HTMLElement): void {
 
 // ── Expression section ────────────────────────────────────────────────────────
 
-function renderExpressionSection(container: HTMLElement, title: string, key: string, initialDoc: string): void {
+function renderExpressionSection(
+  container: HTMLElement,
+  title: string,
+  key: string,
+  initialDoc: string,
+  entityRefs: ExpressionEntityRef[] = [],
+): void {
   if (editorMap[key]) { editorMap[key].destroy(); delete editorMap[key]; }
 
   const sec = makeSectionEl(title);
@@ -545,7 +602,7 @@ function renderExpressionSection(container: HTMLElement, title: string, key: str
   body.appendChild(editorEl);
   container.appendChild(sec);
 
-  editorMap[key] = createEditor(editorEl, initialDoc);
+  editorMap[key] = createEditor(editorEl, initialDoc, entityRefs);
 }
 
 // ── Checkbox section ──────────────────────────────────────────────────────────
@@ -1134,12 +1191,15 @@ function renderEntity(msg: LoadEntityMessage): void {
       iriListState['disjointClassIris'] = msg.disjointClassIris ?? [];
       renderIriListSection(content, 'SubClassOf', 'superClassIris');
       renderExpressionSection(content, 'SubClassOf (expressions)', 'superClassExpressions',
-        (msg.superClassExpressions ?? []).join('\n'));
+        (msg.superClassExpressions ?? []).join('\n'),
+        msg.expressionEntityRefs?.['superClassExpressions'] ?? []);
       renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris');
       renderExpressionSection(content, 'EquivalentTo (expressions)', 'equivalentClassExpressions',
-        (msg.equivalentClassExpressions ?? []).join('\n'));
+        (msg.equivalentClassExpressions ?? []).join('\n'),
+        msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? []);
       renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
-        (msg.gciExpressions ?? []).join('\n'));
+        (msg.gciExpressions ?? []).join('\n'),
+        msg.expressionEntityRefs?.['gciExpressions'] ?? []);
       renderIriListSection(content, 'DisjointWith', 'disjointClassIris');
       break;
 
@@ -1426,6 +1486,16 @@ function injectStyles(): void {
     .checkbox-label input { cursor: pointer; }
 
     .expression-editor { min-height: 80px; max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: 3px; }
+    .cm-clickable-entity {
+      color: var(--link);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 2px;
+      cursor: pointer;
+    }
+    .cm-clickable-entity:hover {
+      background: var(--vscode-editorHoverHighlightBackground, rgba(255,255,255,0.08));
+    }
 
     .assertion-table { border-collapse: separate; border-spacing: 0 2px; }
     .assertion-arrow { padding: 0 8px; opacity: 0.5; }

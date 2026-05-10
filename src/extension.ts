@@ -49,6 +49,16 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
+  function entityTypeForIri(iri: string): EntityType | undefined {
+    if (!activeModel) { return undefined; }
+    if (activeModel.classes.has(iri)) { return 'class'; }
+    if (activeModel.objectProperties.has(iri)) { return 'objectProperty'; }
+    if (activeModel.dataProperties.has(iri)) { return 'dataProperty'; }
+    if (activeModel.annotationProperties.has(iri)) { return 'annotationProperty'; }
+    if (activeModel.individuals.has(iri)) { return 'individual'; }
+    return undefined;
+  }
+
   const classView = vscode.window.createTreeView('ontograph.classes', { treeDataProvider: classProvider });
   const inferredView = vscode.window.createTreeView('ontograph.inferredClasses', { treeDataProvider: inferredProvider });
   const objectPropView = vscode.window.createTreeView('ontograph.objectProperties', { treeDataProvider: objectPropProvider });
@@ -101,10 +111,10 @@ export function activate(context: vscode.ExtensionContext): void {
       switch (entityType) {
         case 'class': {
           classProvider.setFocus(iri);
+          inferredProvider.setFocus(iri);
           const item = classProvider.makeItem(iri);
           if (item) { void classView.reveal(item, opts); }
           if (activeModel?.isClassified) {
-            inferredProvider.setFocus(iri);
             const inferredItem = inferredProvider.makeItem(iri);
             if (inferredItem) { void inferredView.reveal(inferredItem, opts); }
           }
@@ -175,6 +185,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('ontograph.refresh', () => {
       if (activeModel) { refreshAllViews(activeModel); }
+    }),
+
+    vscode.commands.registerCommand('ontograph.focusEntity', (item?: { iri?: string }) => {
+      const iri = item?.iri;
+      if (!iri || !activeModel) { return; }
+      const entityType = entityTypeForIri(iri);
+      if (!entityType) {
+        void vscode.window.showWarningMessage(`OntoGraph: Entity not found: ${iri}`);
+        return;
+      }
+      showEntityInfo(context, activeModel, iri);
+      revealInTreeView(iri, entityType);
     }),
 
     vscode.commands.registerCommand('ontograph.classifyOntology', () =>

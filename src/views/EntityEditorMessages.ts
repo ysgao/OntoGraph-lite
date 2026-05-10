@@ -42,6 +42,15 @@ export interface LoadEntityMessage {
 
   /** IRI → human-readable label for all IRIs in the list fields */
   iriLabels: Record<string, string>;
+
+  /** CodeMirror ranges for clickable entity tokens in expression sections */
+  expressionEntityRefs?: Record<string, {
+    from: number;
+    to: number;
+    iri: string;
+    entityType: EntityType;
+    label: string;
+  }[]>;
 }
 
 export interface CompletionResultMessage {
@@ -62,6 +71,7 @@ export interface EntityEditorReadyMessage { type: 'ready' }
 export interface RequestCompletionMessage { type: 'requestCompletion'; requestId: number; prefix: string }
 export interface ValidateMessage { type: 'validate'; requestId: number; text: string }
 export interface NavigateMessage { type: 'navigate'; iri: string }
+export interface FocusEntityMessage { type: 'focusEntity'; iri: string }
 
 export interface SaveEntityMessage {
   type: 'save';
@@ -100,4 +110,5 @@ export type EntityEditorWebviewToExt =
   | RequestCompletionMessage
   | ValidateMessage
   | NavigateMessage
+  | FocusEntityMessage
   | SaveEntityMessage;
