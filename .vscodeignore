@@ -8,6 +8,7 @@
 **/out-webview/**
 **/java-server/src/**
 **/java-server/target/**
+**/test-ontologies/**
 tsconfig*.json
 esbuild.mjs
 .eslintrc*

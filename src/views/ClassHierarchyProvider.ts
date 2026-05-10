@@ -43,7 +43,19 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
     this.childrenOf.clear();
     if (!this.model) { return; }
     for (const cls of this.model.classes.values()) {
-      const parents = cls.superClassIris.length > 0 ? cls.superClassIris : [OWL_THING];
+      const explicitParents = new Set(cls.superClassIris);
+      for (const expr of cls.superClassExpressions ?? []) {
+        for (const p of extractTopLevelNamedClasses(expr, this.model.classes)) {
+          explicitParents.add(p);
+        }
+      }
+      for (const expr of cls.equivalentClassExpressions ?? []) {
+        for (const p of extractTopLevelNamedClasses(expr, this.model.classes)) {
+          explicitParents.add(p);
+        }
+      }
+
+      const parents = explicitParents.size > 0 ? Array.from(explicitParents) : [OWL_THING];
       for (const parent of parents) {
         const siblings = this.childrenOf.get(parent) ?? [];
         siblings.push(cls.iri);
@@ -102,12 +114,62 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   getParent(element: ClassTreeItem): ClassTreeItem | undefined {
     if (!this.model) { return undefined; }
     const cls = this.model.classes.get(element.iri);
-    if (!cls || cls.superClassIris.length === 0) { return undefined; }
-    const parentIri = cls.superClassIris[0];
+    if (!cls) { return undefined; }
+
+    const explicitParents = new Set(cls.superClassIris);
+    for (const expr of cls.superClassExpressions ?? []) {
+      for (const p of extractTopLevelNamedClasses(expr, this.model.classes)) {
+        explicitParents.add(p);
+      }
+    }
+    for (const expr of cls.equivalentClassExpressions ?? []) {
+      for (const p of extractTopLevelNamedClasses(expr, this.model.classes)) {
+        explicitParents.add(p);
+      }
+    }
+
+    if (explicitParents.size === 0) { return undefined; }
+    const parentIri = Array.from(explicitParents)[0];
     const parent = this.model.classes.get(parentIri);
     if (!parent) { return undefined; }
     const label = getLabel(parent, this.preferredLang);
     const hasChildren = (this.childrenOf.get(parentIri)?.length ?? 0) > 0;
     return new ClassTreeItem(parentIri, label, hasChildren);
   }
+}
+
+function extractTopLevelNamedClasses(expr: string, knownClasses: Map<string, any>): string[] {
+  let depth = 0;
+  for (let i = 0; i < expr.length; i++) {
+    const char = expr[i];
+    if (char === '(') depth++;
+    else if (char === ')') depth--;
+    else if (depth === 0 && expr.startsWith(' or ', i)) return [];
+  }
+  
+  const result: string[] = [];
+  let currentConjunct = '';
+  depth = 0;
+  for (let i = 0; i < expr.length; i++) {
+    const char = expr[i];
+    if (char === '(') depth++;
+    else if (char === ')') depth--;
+    
+    if (depth === 0 && expr.startsWith(' and ', i)) {
+      result.push(currentConjunct.trim());
+      currentConjunct = '';
+      i += 4;
+    } else {
+      currentConjunct += char;
+    }
+  }
+  if (currentConjunct) result.push(currentConjunct.trim());
+  
+  const namedClasses: string[] = [];
+  for (const c of result) {
+    if (!c.includes(' ') && !c.includes('(') && knownClasses.has(c)) {
+      namedClasses.push(c);
+    }
+  }
+  return namedClasses;
 }
