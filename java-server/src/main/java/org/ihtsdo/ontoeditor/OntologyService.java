@@ -51,7 +51,6 @@ public class OntologyService {
      * Load an ontology from a file path using a fresh manager.
      * Avoids the cost of JSON-encoding/decoding the file content over the IPC pipe.
      */
-    @SuppressWarnings("null")
     public OWLOntology loadFromFile(String filePath, String format) throws OWLOntologyCreationException {
         OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
         File file = new File(filePath);
@@ -68,7 +67,6 @@ public class OntologyService {
      * @param content  The ontology serialization.
      * @param format   One of "functional", "manchester", "turtle", "rdf-xml", "owl-xml", or null for auto-detect.
      */
-    @SuppressWarnings("null")
     public OWLOntology loadFromString(String content, String format) throws OWLOntologyCreationException {
         Objects.requireNonNull(content, "content");
         OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
@@ -91,7 +89,6 @@ public class OntologyService {
     /**
      * Classify the ontology: precompute hierarchy, detect incoherent classes.
      */
-    @SuppressWarnings("null")
     public ClassificationResult classify(OWLOntology ontology, String engine, int contentLength)
             throws Exception {
         boolean useElk = shouldUseElk(engine, contentLength);
