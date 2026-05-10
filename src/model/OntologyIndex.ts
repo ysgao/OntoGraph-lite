@@ -6,8 +6,8 @@ const SKOS_ALT_LABEL = 'http://www.w3.org/2004/02/skos/core#altLabel';
 export class OntologyIndex {
   private iriToEntity = new Map<string, OWLEntityUnion>();
   private labelToIris = new Map<string, string[]>();
-  /** IRI → all label text concatenated (lowercase), used for token search */
-  private searchText = new Map<string, string>();
+  /** IRI → array of individual labels (lowercase), used for token search and scoring */
+  private searchText = new Map<string, string[]>();
 
   constructor(private model: OntologyModel) {
     this.rebuild();
@@ -43,7 +43,7 @@ export class OntologyIndex {
         for (const labels of Object.values(entity.labels)) {
           for (const label of labels) {
             this.indexLabel(entity.iri, label);
-            allValues.push(OntologyIndex.stripLangTag(label));
+            allValues.push(OntologyIndex.stripLangTag(label).toLowerCase());
           }
         }
         for (const annotIri of [SKOS_PREF_LABEL, SKOS_ALT_LABEL]) {
@@ -51,13 +51,13 @@ export class OntologyIndex {
           if (values) {
             for (const val of values) {
               this.indexLabel(entity.iri, val);
-              allValues.push(OntologyIndex.stripLangTag(val));
+              allValues.push(OntologyIndex.stripLangTag(val).toLowerCase());
             }
           }
         }
         const pos = Math.max(entity.iri.lastIndexOf('#'), entity.iri.lastIndexOf('/'));
-        if (pos >= 0) { allValues.push(entity.iri.slice(pos + 1)); }
-        this.searchText.set(entity.iri, allValues.join(' ').toLowerCase());
+        if (pos >= 0) { allValues.push(entity.iri.slice(pos + 1).toLowerCase()); }
+        this.searchText.set(entity.iri, allValues);
       }
     }
   }
@@ -69,15 +69,32 @@ export class OntologyIndex {
   searchByLabel(query: string, maxResults = 50): OWLEntityUnion[] {
     const tokens = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
     if (tokens.length === 0) { return []; }
-    const results: OWLEntityUnion[] = [];
-    for (const [iri, text] of this.searchText) {
-      if (tokens.every(t => text.includes(t))) {
+    const matches: { entity: OWLEntityUnion; score: number }[] = [];
+    const queryLower = query.toLowerCase().trim();
+    
+    for (const [iri, labels] of this.searchText) {
+      let bestScore = -1;
+      for (const text of labels) {
+        if (tokens.every(t => text.includes(t))) {
+          let score = 0;
+          if (text === queryLower) {
+            score = 100;
+          } else if (text.startsWith(queryLower)) {
+            score = 50 - text.length * 0.1;
+          } else {
+            score = 10 - text.length * 0.1;
+          }
+          if (score > bestScore) { bestScore = score; }
+        }
+      }
+      if (bestScore > -1) {
         const entity = this.iriToEntity.get(iri);
-        if (entity) { results.push(entity); }
-        if (results.length >= maxResults) { break; }
+        if (entity) { matches.push({ entity, score: bestScore }); }
       }
     }
-    return results;
+    
+    matches.sort((a, b) => b.score - a.score);
+    return matches.slice(0, maxResults).map(m => m.entity);
   }
 
   /** Return all entities whose label exactly equals the given string (case-insensitive). */

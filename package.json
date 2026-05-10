@@ -302,7 +302,7 @@
           ],
           "default": "label",
           "enumDescriptions": [
-            "Show rdfs:label (e.g. 'Koala'); multi-word labels use shortIri in the editor",
+            "Show rdfs:label (e.g. 'Koala'); multi-word labels use single quotes in the editor (e.g. 'Body structure')",
             "Show short IRI with ontology base prefix (e.g. ':Koala') or built-in prefix (e.g. 'owl:Thing')",
             "Show full IRI wrapped in angle brackets (e.g. '<http://example.org/animals#Koala>')"
           ],

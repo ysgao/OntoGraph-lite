@@ -46,15 +46,19 @@ export function renderIri(
   model: OntologyModel,
   style: AxiomDisplayStyle,
   lang: string,
-  _forEditing: boolean,
+  forEditing: boolean,
 ): string {
   if (style === 'fullIri') { return `<${iri}>`; }
   if (style === 'shortIri') { return computeShortIri(iri, model.metadata.iri); }
-  // label
   const entity = entityByIri(iri, model);
   if (entity) {
     const lbl = getLabel(entity, lang);
-    if (lbl && lbl !== iri) { return lbl; }
+    if (lbl && lbl !== iri) {
+      if (forEditing && /\s/.test(lbl)) {
+        return `'${lbl}'`;
+      }
+      return lbl;
+    }
   }
   return computeShortIri(iri, model.metadata.iri);
 }
@@ -129,9 +133,25 @@ export function normalizeExpression(
       continue;
     }
 
-    // Read a token (stops at whitespace, parens, braces, quotes, angle brackets)
+    // Single-quoted label: '...'
+    if (c === "'") {
+      let j = i + 1;
+      while (j < n) {
+        if (expr[j] === '\\') { j += 2; continue; }
+        if (expr[j] === "'") { j++; break; }
+        j++;
+      }
+      const labelToken = expr.slice(i + 1, j - 1);
+      const byLabel = index.exactMatchByLabel(labelToken);
+      if (byLabel.length > 0) { result.push(byLabel[0].iri); }
+      else { result.push(expr.slice(i, j)); }
+      i = j;
+      continue;
+    }
+
+    // Read a token (stops at whitespace, parens, braces, double/single quotes, angle brackets)
     const tStart = i;
-    while (i < n && !' \t\n\r(),{}"<>'.includes(expr[i])) { i++; }
+    while (i < n && !' \t\n\r(),{}"\'<>'.includes(expr[i])) { i++; }
     const token = expr.slice(tStart, i);
     if (!token) { i++; continue; }
 

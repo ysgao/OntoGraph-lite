@@ -133,6 +133,15 @@ const manchesterLanguage = StreamLanguage.define({
       if (stream.peek() === '"') { stream.next(); }
       return 'string';
     }
+    if (stream.peek() === "'") {
+      stream.next();
+      while (!stream.eol() && stream.peek() !== "'") {
+        if (stream.peek() === '\\') { stream.next(); }
+        stream.next();
+      }
+      if (stream.peek() === "'") { stream.next(); }
+      return 'variableName';
+    }
     if (stream.match(/^\d+(\.\d+)?/)) { return 'number'; }
     const word = stream.match(/^[A-Za-z_][\w-]*/);
     const w = typeof word === 'object' ? (word as RegExpMatchArray)[0] : '';
@@ -147,10 +156,17 @@ const manchesterLanguage = StreamLanguage.define({
 });
 
 async function manchesterCompletionSource(context: CompletionContext): Promise<CompletionResult | null> {
-  const word = context.matchBefore(/[\w:_-]{2,}/);
+  const word = context.matchBefore(/'[^']*'?|[\w:_-]{2,}/);
   if (!word) { return null; }
 
-  const prefix = word.text;
+  let prefix = word.text;
+  if (prefix.startsWith("'")) {
+    prefix = prefix.slice(1);
+    if (prefix.endsWith("'")) {
+      prefix = prefix.slice(0, -1);
+    }
+  }
+
   const reqId = nextReqId++;
 
   const items = await new Promise<CompletionResultMessage['items']>((resolve) => {
@@ -160,14 +176,21 @@ async function manchesterCompletionSource(context: CompletionContext): Promise<C
   });
 
   if (items.length === 0) { return null; }
+
+  const userQuoted = word.text.startsWith("'");
+
   return {
     from: word.from,
-    options: items.map(item => ({
-      label: item.label,
-      detail: item.entityType,
-      info: item.iri,
-      apply: item.label,
-    })),
+    validFor: /^'[^']*'?$|^[\w:_-]+$/,
+    options: items.map(item => {
+      const needsQuotes = userQuoted || /\s/.test(item.label);
+      const applyStr = needsQuotes ? `'${item.label}'` : item.label;
+      return {
+        label: applyStr,
+        displayLabel: item.label,
+        info: item.iri,
+      };
+    }),
   };
 }
 
@@ -262,11 +285,7 @@ function createIriInput(
       row.dataset['index'] = String(i);
       const nameEl = document.createElement('span');
       nameEl.textContent = item.label;
-      const typeEl = document.createElement('span');
-      typeEl.className = 'iri-dropdown-type';
-      typeEl.textContent = item.entityType;
       row.appendChild(nameEl);
-      row.appendChild(typeEl);
       row.addEventListener('mousedown', (e) => {
         e.preventDefault();
         onSelect(item.iri, item.label);
