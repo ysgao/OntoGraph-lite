@@ -57,6 +57,9 @@ export async function classifyOntology(
       model.isClassified = true;
       inferredProvider.setModel(model);
 
+      // Focus the Inferred Classes view so the user sees the result immediately
+      void vscode.commands.executeCommand('ontograph.inferredClasses.focus');
+
       const incoherent = result.incoherentClasses.length;
       if (!result.consistent) {
         void vscode.window.showErrorMessage('OntoGraph: Ontology is INCONSISTENT.');

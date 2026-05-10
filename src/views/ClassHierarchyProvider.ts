@@ -36,9 +36,17 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   private readonly collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
   setModel(model: OntologyModel, preferredLang = 'en'): void {
+    const oldFocus = this.focusIri;
     this.model = model;
     this.preferredLang = preferredLang;
-    this.focusIri = OWL_THING;
+
+    // Restore focus if it still exists in the model, else fall back to Thing
+    if (oldFocus && (oldFocus === OWL_THING || this.model.classes.has(oldFocus))) {
+      this.focusIri = oldFocus;
+    } else {
+      this.focusIri = OWL_THING;
+    }
+
     this.buildIndex();
     this._onDidChangeTreeData.fire();
   }
