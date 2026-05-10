@@ -13,6 +13,7 @@ import { OntologyIndex } from '../model/OntologyIndex';
 import { ManchesterParser } from '../parser/ManchesterParser';
 import { renderExpression, normalizeExpression, type AxiomDisplayStyle } from '../model/AxiomDisplay';
 import { syncAnnotationsToDocument } from '../sync/AnnotationSync';
+import { syncAxiomsToDocument } from '../sync/AxiomSync';
 import type {
   EntityEditorExtToWebview,
   EntityEditorWebviewToExt,
@@ -219,18 +220,42 @@ function handleMessage(
       // Sync to the source OWL document if it's open.
       // _annotationSyncActive guards refreshEntityEditorIfOpen so it knows not to
       // clear savedEntityState during the in-flight applyEdit window.
+      //
+      // For Turtle: axiom sync is a single combined operation that writes both
+      // structural axioms and annotations atomically, producing one version
+      // increment and one parsedDocVersions update.
+      //
+      // For Manchester and Functional: annotation sync and axiom sync touch
+      // non-overlapping regions of the document (Annotations: section vs. other
+      // sections / AnnotationAssertion lines vs. other axiom lines), so two
+      // sequential edits are safe. parsedDocVersions is updated once at the end.
       _annotationSyncActive = true;
       void (async () => {
         const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-        if (doc) { 
-          const ranges = await syncAnnotationsToDocument(doc, entity, model.sourceFormat); 
-          if (ranges) {
-            parsedDocVersions.set(doc.uri.toString(), doc.version);
+        if (doc) {
+          const fmt = model.sourceFormat;
+          if (fmt === 'turtle') {
+            // Single combined operation: axiom sync handles both annotations and axioms
+            await syncAxiomsToDocument(doc, entity, fmt);
+          } else {
+            // Two-pass for non-overlapping regions: annotation first, then axioms
+            await syncAnnotationsToDocument(doc, entity, fmt);
+            // Re-fetch so axiom sync reads the annotation-updated content
+            const updatedDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+            if (updatedDoc) {
+              await syncAxiomsToDocument(updatedDoc, entity, fmt);
+            }
+          }
+          // Single parsedDocVersions update after all edits are applied, so the
+          // final doc.version is stored and no intermediate version triggers a reload.
+          const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+          if (finalDoc) {
+            parsedDocVersions.set(finalDoc.uri.toString(), finalDoc.version);
           }
         }
         _annotationSyncActive = false;
-        // Safe to clear now: the file buffer has the updated annotations, so the
-        // next model re-parse (triggered by onDidSaveTextDocument) will have correct data.
+        // Safe to clear now: the file buffer has updated data, so the next
+        // model re-parse (triggered by onDidSaveTextDocument) will have correct data.
         savedEntityState.delete(msg.iri);
       })();
 
