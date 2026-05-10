@@ -148,7 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const qp = vscode.window.createQuickPick<SearchQuickPickItem>();
-      qp.placeholder = 'Search by label, prefLabel, altLabel, or short IRI…';
+      qp.placeholder = 'Search by name or label…';
       qp.matchOnDescription = true;
       qp.onDidChangeValue(value => {
         if (!value.trim()) { qp.items = []; return; }

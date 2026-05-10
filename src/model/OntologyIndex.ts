@@ -56,7 +56,11 @@ export class OntologyIndex {
           }
         }
         const pos = Math.max(entity.iri.lastIndexOf('#'), entity.iri.lastIndexOf('/'));
-        if (pos >= 0) { allValues.push(entity.iri.slice(pos + 1).toLowerCase()); }
+        const localName = pos >= 0 ? entity.iri.slice(pos + 1) : entity.iri;
+        if (localName) {
+          allValues.push(localName.toLowerCase());
+          this.indexLabel(entity.iri, localName);
+        }
         this.searchText.set(entity.iri, allValues);
       }
     }
