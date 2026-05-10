@@ -139,7 +139,7 @@ export class TurtleParser {
           superClassIris: namedVals(idx, iri, `${RDFS}subClassOf`),
           equivalentClassIris: namedVals(idx, iri, `${OWL}equivalentClass`),
           disjointClassIris: namedVals(idx, iri, `${OWL}disjointWith`),
-          superClassExpressions: [], equivalentClassExpressions: [],
+          superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [],
         } satisfies OWLClass);
       } else if (isObjProp) {
         const chainHeads = getAll(idx, iri, `${OWL}propertyChainAxiom`).filter(v => !isNamed(v));

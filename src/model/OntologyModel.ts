@@ -15,6 +15,8 @@ export interface OWLClass extends OWLEntity {
   /** Blank-node complex expressions encoded as Manchester Syntax strings */
   superClassExpressions: string[];
   equivalentClassExpressions: string[];
+  /** Left-hand complex expressions in GCI axioms where this class is the superclass */
+  gciExpressions: string[];
 }
 
 export interface OWLProperty extends OWLEntity {

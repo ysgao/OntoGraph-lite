@@ -168,6 +168,7 @@ function handleMessage(
           cls.superClassExpressions = (msg.superClassExpressions ?? []).map(e => normalizeExpression(e, model, index));
           cls.equivalentClassIris = msg.equivalentClassIris ?? [];
           cls.equivalentClassExpressions = (msg.equivalentClassExpressions ?? []).map(e => normalizeExpression(e, model, index));
+          cls.gciExpressions = (msg.gciExpressions ?? []).map(e => normalizeExpression(e, model, index));
           cls.disjointClassIris = msg.disjointClassIris ?? [];
           break;
         }
@@ -348,6 +349,7 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
     msg.superClassExpressions = (cls.superClassExpressions ?? []).map(e => renderExpression(e, model, style, lang, true));
     msg.equivalentClassIris = cls.equivalentClassIris;
     msg.equivalentClassExpressions = (cls.equivalentClassExpressions ?? []).map(e => renderExpression(e, model, style, lang, true));
+    msg.gciExpressions = (cls.gciExpressions ?? []).map(e => renderExpression(e, model, style, lang, true));
     msg.disjointClassIris = cls.disjointClassIris;
   } else if (entity.type === 'objectProperty') {
     const prop = entity as OWLObjectProperty;

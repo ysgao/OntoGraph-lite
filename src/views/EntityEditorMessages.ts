@@ -16,6 +16,7 @@ export interface LoadEntityMessage {
   superClassExpressions?: string[];
   equivalentClassIris?: string[];
   equivalentClassExpressions?: string[];
+  gciExpressions?: string[];
   disjointClassIris?: string[];
 
   // Object/Data/Annotation property
@@ -70,6 +71,7 @@ export interface SaveEntityMessage {
   superClassExpressions?: string[];
   equivalentClassIris?: string[];
   equivalentClassExpressions?: string[];
+  gciExpressions?: string[];
   disjointClassIris?: string[];
   superPropertyIris?: string[];
   domainIris?: string[];

@@ -247,11 +247,20 @@ export class FunctionalParser {
     const subExpr = this.readClassExpression();
     const supExpr = this.readClassExpression();
     this.expectRParen();
-    const subIri = this.asIri(subExpr); if (!subIri) return;
-    const cls = this.getOrCreateClass(subIri);
-    const supIri = this.asIri(supExpr);
-    if (supIri) { if (this.addUnique(this._superClassSets, subIri, supIri)) cls.superClassIris.push(supIri); }
-    else cls.superClassExpressions.push(supExpr);
+    const subIri = this.asIri(subExpr);
+    if (subIri) {
+      const cls = this.getOrCreateClass(subIri);
+      const supIri = this.asIri(supExpr);
+      if (supIri) { if (this.addUnique(this._superClassSets, subIri, supIri)) cls.superClassIris.push(supIri); }
+      else cls.superClassExpressions.push(supExpr);
+    } else {
+      // GCI: complex left-hand side — attach to the right-hand named class
+      const supIri = this.asIri(supExpr);
+      if (supIri) {
+        const cls = this.getOrCreateClass(supIri);
+        cls.gciExpressions.push(subExpr);
+      }
+    }
   }
 
   private parseEquivalentClasses(): void {
@@ -621,7 +630,7 @@ export class FunctionalParser {
     if (!e) {
       e = { iri, type: 'class', labels: {}, annotations: {},
         superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
-        superClassExpressions: [], equivalentClassExpressions: [] };
+        superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [] };
       this.model.classes.set(iri, e);
     }
     return e;

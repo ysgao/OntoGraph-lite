@@ -269,6 +269,10 @@ function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
     for (const dj of cls.disjointClassIris) {
       lines.push(`  DisjointClasses(${a(iri)} ${a(dj)})`);
     }
+    for (const expr of cls.gciExpressions ?? []) {
+      const fn = manchesterToFunctional(expr);
+      if (fn) lines.push(`  SubClassOf(${fn} ${a(iri)})`);
+    }
   } else if (entity.type === 'objectProperty') {
     const prop = entity as OWLObjectProperty;
     for (const sup of prop.superPropertyIris) {

@@ -194,7 +194,7 @@ export class ManchesterParser {
 
   private mkClass(iri: string): OWLClass {
     let e=this.model.classes.get(iri);
-    if(!e){e={iri,type:'class',labels:{},annotations:{},superClassIris:[],equivalentClassIris:[],disjointClassIris:[],superClassExpressions:[],equivalentClassExpressions:[]};this.model.classes.set(iri,e);}
+    if(!e){e={iri,type:'class',labels:{},annotations:{},superClassIris:[],equivalentClassIris:[],disjointClassIris:[],superClassExpressions:[],equivalentClassExpressions:[],gciExpressions:[]};this.model.classes.set(iri,e);}
     return e;
   }
   private mkObjProp(iri: string): OWLObjectProperty {

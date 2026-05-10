@@ -165,6 +165,7 @@ export class OwlXmlParser {
         disjointClassIris: [],
         superClassExpressions: [],
         equivalentClassExpressions: [],
+        gciExpressions: [],
       };
       model.classes.set(iri, cls);
     }

@@ -394,6 +394,7 @@ export class RdfXmlParser {
           disjointClassIris: namedVals(idx, iri, `${OWL}disjointWith`),
           superClassExpressions: sc?.superExprs ?? [],
           equivalentClassExpressions: sc?.equivExprs ?? [],
+          gciExpressions: [],
         } satisfies OWLClass);
       } else if (isObjProp) {
         model.objectProperties.set(iri, {

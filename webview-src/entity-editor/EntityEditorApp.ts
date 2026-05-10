@@ -1111,6 +1111,8 @@ function renderEntity(msg: LoadEntityMessage): void {
       renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris');
       renderExpressionSection(content, 'EquivalentTo (expressions)', 'equivalentClassExpressions',
         (msg.equivalentClassExpressions ?? []).join('\n'));
+      renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
+        (msg.gciExpressions ?? []).join('\n'));
       renderIriListSection(content, 'DisjointWith', 'disjointClassIris');
       break;
 
@@ -1186,6 +1188,7 @@ function handleSave(): void {
         superClassExpressions: collectEditorLines('superClassExpressions'),
         equivalentClassIris: iriListState['equivalentClassIris'] ?? [],
         equivalentClassExpressions: collectEditorLines('equivalentClassExpressions'),
+        gciExpressions: collectEditorLines('gciExpressions'),
         disjointClassIris: iriListState['disjointClassIris'] ?? [],
       };
       break;
