@@ -57,6 +57,13 @@ interface LoadEntityMessage {
   classIris?: string[];
   objectPropertyAssertions?: { propertyIri: string; targetIri: string }[];
   dataPropertyAssertions?: { propertyIri: string; value: string; datatype?: string }[];
+  gciExpressions?: string[];
+  equivalentPropertyIris?: string[];
+  disjointPropertyIris?: string[];
+  propertyChains?: string[][];
+  isReflexive?: boolean;
+  isIrreflexive?: boolean;
+  isAsymmetric?: boolean;
   iriLabels: Record<string, string>;
 }
 
@@ -1137,7 +1144,7 @@ function renderEntity(msg: LoadEntityMessage): void {
       iriListState['superPropertyIris'] = msg.superPropertyIris ?? [];
       iriListState['equivalentPropertyIris'] = msg.equivalentPropertyIris ?? [];
       iriListState['disjointPropertyIris'] = msg.disjointPropertyIris ?? [];
-      propertyChainState = (msg.propertyChains ?? []).map(c => [...c]);
+      propertyChainState = (msg.propertyChains ?? []).map((c: string[]) => [...c]);
       singleIriState['inverseOfIri'] = msg.inverseOfIri ?? '';
       renderCheckboxSection(content, 'Characteristics', [
         { id: 'isTransitive', label: 'Transitive', checked: msg.isTransitive ?? false },

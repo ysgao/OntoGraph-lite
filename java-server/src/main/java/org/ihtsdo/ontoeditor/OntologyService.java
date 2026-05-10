@@ -56,7 +56,7 @@ public class OntologyService {
         File file = new File(filePath);
         OWLDocumentFormat docFormat = mapFormat(format);
         if (docFormat == null) {
-            return manager.loadOntologyFromOntologyDocument(IRI.create(file.toURI()));
+            return manager.loadOntologyFromOntologyDocument(Objects.requireNonNull(IRI.create(Objects.requireNonNull(file.toURI()))));
         }
         return manager.loadOntologyFromOntologyDocument(
             new FileDocumentSource(file, docFormat, null));
@@ -126,7 +126,7 @@ public class OntologyService {
                 visited.add(owlThing);
 
                 while (!queue.isEmpty()) {
-                    OWLClass parent = queue.poll();
+                    OWLClass parent = Objects.requireNonNull(queue.poll());
                     Set<OWLClass> children = reasoner.getSubClasses(parent, true).getFlattened();
                     for (OWLClass child : children) {
                         if (child.isOWLNothing()) continue;
