@@ -49,7 +49,7 @@ function labelAnnotations(
       if (pred === RDFS_LABEL) {
         (labels[lang] ??= []).push(raw);
       } else if (annProps.has(pred)) {
-        (annotations[pred] ??= []).push(raw);
+        (annotations[pred] ??= []).push(lang ? `${raw}@${lang}` : raw);
       }
     }
   }
@@ -117,7 +117,9 @@ export class TurtleParser {
         for (const ap of annProps) {
           for (const v of (preds.get(ap) ?? [])) {
             const s = v.indexOf('\x00');
-            (model.metadata.annotations[ap] ??= []).push(s >= 0 ? v.slice(0, s) : v);
+            const raw = s >= 0 ? v.slice(0, s) : v;
+            const lang = s >= 0 ? v.slice(s + 1) : '';
+            (model.metadata.annotations[ap] ??= []).push(lang ? `${raw}@${lang}` : raw);
           }
         }
         continue;

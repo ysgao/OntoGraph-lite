@@ -2,6 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 import {
   createEmptyModel, OntologyModel,
   OWLClass, OWLObjectProperty, OWLDataProperty, OWLAnnotationProperty, OWLIndividual,
+  BUILTIN_ANNOTATION_PROP_IRIS,
 } from '../model/OntologyModel';
 
 const OWL = 'http://www.w3.org/2002/07/owl#';
@@ -54,7 +55,7 @@ function labelAnnotations(
       if (pred === RDFS_LABEL) {
         (labels[lang] ??= []).push(raw);
       } else if (annProps.has(pred)) {
-        (annotations[pred] ??= []).push(raw);
+        (annotations[pred] ??= []).push(lang ? `${raw}@${lang}` : raw);
       }
     }
   }
@@ -120,7 +121,7 @@ export class RdfXmlParser {
     const sidecar: Sidecar = new Map();
 
     // First pass: collect annotation property IRIs so they're available when processing annotations
-    const annProps = new Set<string>();
+    const annProps = new Set<string>(BUILTIN_ANNOTATION_PROP_IRIS);
     for (const [tag, elements] of Object.entries(root)) {
       if (tag.startsWith('@')) continue;
       if (this.expandElementName(tag) === `${OWL}AnnotationProperty`) {
@@ -369,7 +370,9 @@ export class RdfXmlParser {
         for (const ap of annProps) {
           for (const v of (preds.get(ap) ?? [])) {
             const s = v.indexOf('\x00');
-            (model.metadata.annotations[ap] ??= []).push(s >= 0 ? v.slice(0, s) : v);
+            const raw = s >= 0 ? v.slice(0, s) : v;
+            const lang = s >= 0 ? v.slice(s + 1) : '';
+            (model.metadata.annotations[ap] ??= []).push(lang ? `${raw}@${lang}` : raw);
           }
         }
         continue;

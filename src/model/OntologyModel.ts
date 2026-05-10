@@ -158,14 +158,28 @@ function pickSkosLabel(values: string[], preferredLang: string): string | undefi
   // Prefer a value whose language tag matches preferredLang, then 'en', then any
   let fallback: string | undefined;
   for (const raw of values) {
-    const at = raw.lastIndexOf('@');
-    const text = at >= 0 ? raw.slice(0, at) : raw;
-    const lang = at >= 0 ? raw.slice(at + 1) : '';
+    const { text, lang } = parseStoredAnnotationValue(raw);
     if (lang === preferredLang) { return text; }
     if (lang === 'en' || lang === '') { fallback ??= text; }
     fallback ??= text;
   }
   return fallback;
+}
+
+function parseStoredAnnotationValue(raw: string): { text: string; lang: string } {
+  const quoted = /^"((?:\\.|[^"\\])*)"@([A-Za-z][A-Za-z0-9-]*)$/.exec(raw);
+  if (quoted) {
+    return {
+      text: quoted[1].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\\\/g, '\\'),
+      lang: quoted[2],
+    };
+  }
+  const at = raw.lastIndexOf('@');
+  const hasLang = at > 0 && /^[A-Za-z][A-Za-z0-9-]*$/.test(raw.slice(at + 1));
+  return {
+    text: hasLang ? raw.slice(0, at) : raw,
+    lang: hasLang ? raw.slice(at + 1) : '',
+  };
 }
 
 export function getLabel(entity: OWLEntity, preferredLang = 'en'): string {

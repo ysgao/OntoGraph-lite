@@ -338,7 +338,8 @@ export class FunctionalParser {
       arr.push(val); entity.labels[lang] = arr;
     } else {
       const arr = entity.annotations[pa] ?? [];
-      arr.push(val); entity.annotations[pa] = arr;
+      arr.push(this.lastStringLang ? `${val}@${this.lastStringLang}` : val);
+      entity.annotations[pa] = arr;
     }
   }
 

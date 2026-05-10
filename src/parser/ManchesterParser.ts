@@ -184,7 +184,7 @@ export class ManchesterParser {
       if(v.type==='STRING'){
         this.advance();
         if(propIri===RDFS_LABEL&&labels)(labels[v.lang??'']??=[]).push(v.value);
-        (store[propIri]??=[]).push(v.lang?`"${v.value}"@${v.lang}`:v.value);
+        (store[propIri]??=[]).push(v.lang?`${v.value}@${v.lang}`:v.value);
       } else if(v.type==='IRI'||v.type==='WORD'){
         this.advance();(store[propIri]??=[]).push(v.value);
       }

@@ -1073,12 +1073,11 @@ function buildAnnotationState(msg: LoadEntityMessage): AnnotationEntry[] {
   for (const [propIri, vals] of Object.entries(msg.annotations)) {
     if (propIri === RDFS_LABEL) { continue; }
     for (const v of vals) {
-      const atIdx = v.lastIndexOf('@');
-      const haslang = atIdx > 0 && /^[A-Za-z][A-Za-z0-9\-]*$/.test(v.slice(atIdx + 1));
+      const parsed = parseStoredAnnotationValue(v);
       entries.push({
         propIri,
-        value: haslang ? v.slice(0, atIdx) : v,
-        lang:  haslang ? v.slice(atIdx + 1) : undefined,
+        value: parsed.value,
+        lang: parsed.lang,
       });
     }
   }
@@ -1093,6 +1092,23 @@ function buildAnnotationState(msg: LoadEntityMessage): AnnotationEntry[] {
   });
 
   return entries;
+}
+
+function parseStoredAnnotationValue(raw: string): { value: string; lang?: string } {
+  const quoted = /^"((?:\\.|[^"\\])*)"@([A-Za-z][A-Za-z0-9-]*)$/.exec(raw);
+  if (quoted) {
+    return {
+      value: quoted[1].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\\\/g, '\\'),
+      lang: quoted[2],
+    };
+  }
+
+  const atIdx = raw.lastIndexOf('@');
+  const hasLang = atIdx > 0 && /^[A-Za-z][A-Za-z0-9-]*$/.test(raw.slice(atIdx + 1));
+  return {
+    value: hasLang ? raw.slice(0, atIdx) : raw,
+    lang: hasLang ? raw.slice(atIdx + 1) : undefined,
+  };
 }
 
 function collectAnnotationsForSave(): { labels: Record<string, string[]>; annotations: Record<string, string[]> } {

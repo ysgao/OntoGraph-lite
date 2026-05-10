@@ -1,16 +1,85 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { test, expect } from 'vitest';
+import { FunctionalParser } from './FunctionalParser';
 import { ManchesterParser } from './ManchesterParser';
 import { OwlXmlParser } from './OwlXmlParser';
 import { TurtleParser } from './TurtleParser';
 import { RdfXmlParser } from './RdfXmlParser';
 
 const ROOT = join(__dirname, '../../test-ontologies');
+const EX = 'http://example.org/animals#';
+const RDFS_COMMENT = 'http://www.w3.org/2000/01/rdf-schema#comment';
+const SKOS_PREF_LABEL = 'http://www.w3.org/2004/02/skos/core#prefLabel';
+const SKOS_ALT_LABEL = 'http://www.w3.org/2004/02/skos/core#altLabel';
 
 function check(cond: boolean, msg: string): void {
   expect(cond, msg).toBe(true);
 }
+
+function expectLanguageTaggedAnnotations(
+  annotations: Record<string, string[]> | undefined,
+  source: string,
+): void {
+  expect(annotations?.[SKOS_PREF_LABEL]?.[0], `${source}: skos:prefLabel lang`).toBe('Preferred koala@en');
+  expect(annotations?.[SKOS_ALT_LABEL]?.[0], `${source}: skos:altLabel lang`).toBe('Koala bear@en-gb');
+  expect(annotations?.[RDFS_COMMENT]?.[0], `${source}: rdfs:comment lang`).toBe('Comment text@en');
+}
+
+test('Phase2: language-tagged prefLabel, altLabel, and comment annotations', () => {
+  const functional = new FunctionalParser(`
+Prefix(:=<${EX}>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(skos:=<http://www.w3.org/2004/02/skos/core#>)
+Ontology(<http://example.org/animals>
+  Declaration(Class(:Koala))
+  AnnotationAssertion(skos:prefLabel :Koala "Preferred koala"@en)
+  AnnotationAssertion(skos:altLabel :Koala "Koala bear"@en-gb)
+  AnnotationAssertion(rdfs:comment :Koala "Comment text"@en)
+)
+`, 'file:///annotations.ofn').parse();
+  expectLanguageTaggedAnnotations(functional.classes.get(`${EX}Koala`)?.annotations, 'Functional');
+
+  const manchester = new ManchesterParser(`
+Prefix: : <${EX}>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: skos: <http://www.w3.org/2004/02/skos/core#>
+Ontology: <http://example.org/animals>
+
+Class: :Koala
+  Annotations: skos:prefLabel "Preferred koala"@en,
+    skos:altLabel "Koala bear"@en-gb,
+    rdfs:comment "Comment text"@en
+`, 'file:///annotations.omn').parse();
+  expectLanguageTaggedAnnotations(manchester.classes.get(`${EX}Koala`)?.annotations, 'Manchester');
+
+  const turtle = new TurtleParser(`
+@prefix : <${EX}> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+:Koala a owl:Class ;
+  skos:prefLabel "Preferred koala"@en ;
+  skos:altLabel "Koala bear"@en-gb ;
+  rdfs:comment "Comment text"@en .
+`, 'file:///annotations.ttl').parse();
+  expectLanguageTaggedAnnotations(turtle.classes.get(`${EX}Koala`)?.annotations, 'Turtle');
+
+  const rdfXml = new RdfXmlParser(`
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:skos="http://www.w3.org/2004/02/skos/core#">
+  <owl:Class rdf:about="${EX}Koala">
+    <skos:prefLabel xml:lang="en">Preferred koala</skos:prefLabel>
+    <skos:altLabel xml:lang="en-gb">Koala bear</skos:altLabel>
+    <rdfs:comment xml:lang="en">Comment text</rdfs:comment>
+  </owl:Class>
+</rdf:RDF>
+`, 'file:///annotations.rdf').parse();
+  expectLanguageTaggedAnnotations(rdfXml.classes.get(`${EX}Koala`)?.annotations, 'RDF/XML');
+});
 
 // ── Manchester Syntax ────────────────────────────────────────────────────────
 
