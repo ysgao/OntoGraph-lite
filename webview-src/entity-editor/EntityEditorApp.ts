@@ -77,6 +77,7 @@ interface ValidationResultMessage {
 let currentIri = '';
 let currentEntityType: EntityType = 'class';
 let localIriLabels: Record<string, string> = {};
+let lastSavedStateString = '';
 
 // IRI list state: sectionKey → IRI[]
 const iriListState: Record<string, string[]> = {};
@@ -246,6 +247,11 @@ function createEditor(parent: HTMLElement, initialDoc: string): EditorView {
         autocompletion({ override: [manchesterCompletionSource] }),
         linter(manchesterLinter, { delay: 400 }),
         vsCodeTheme,
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            checkForChanges();
+          }
+        }),
       ],
     }),
     parent,
@@ -432,6 +438,7 @@ function renderIriListSection(container: HTMLElement, title: string, key: string
     addContainer.appendChild(addBtn);
     body.appendChild(chips);
     body.appendChild(addContainer);
+    checkForChanges();
   }
 
   rerender();
@@ -510,6 +517,7 @@ function renderPropertyChainSection(container: HTMLElement): void {
     addChainBtn.addEventListener('click', () => { propertyChainState.push([]); rerender(); });
     addChainContainer.appendChild(addChainBtn);
     body.appendChild(addChainContainer);
+    checkForChanges();
   }
 
   rerender();
@@ -550,6 +558,7 @@ function renderCheckboxSection(
     cb.type = 'checkbox';
     cb.id = `cb-${f.id}`;
     cb.checked = f.checked;
+    cb.addEventListener('change', () => checkForChanges());
     label.appendChild(cb);
     label.appendChild(document.createTextNode(` ${f.label}`));
     row.appendChild(label);
@@ -590,6 +599,7 @@ function renderSingleIriSection(container: HTMLElement, title: string, key: stri
 
   rerender();
   body.appendChild(wrapper);
+  checkForChanges();
   container.appendChild(sec);
 }
 
@@ -677,6 +687,7 @@ function renderObjAssertionSection(container: HTMLElement): void {
     });
     addDiv.appendChild(addBtn);
     body.appendChild(addDiv);
+    checkForChanges();
   }
 
   rerender();
@@ -785,6 +796,7 @@ function renderDataAssertionSection(container: HTMLElement): void {
     });
     addDiv.appendChild(addBtn);
     body.appendChild(addDiv);
+    checkForChanges();
   }
 
   rerender();
@@ -825,6 +837,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
         langInput.title = 'Language tag';
         langInput.addEventListener('input', () => {
           annotationState[i] = { ...annotationState[i], lang: langInput.value.trim() || undefined };
+          checkForChanges();
         });
         tdLang.appendChild(langInput);
       }
@@ -837,6 +850,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
       valueInput.value = entry.value;
       valueInput.addEventListener('input', () => {
         annotationState[i] = { ...annotationState[i], value: valueInput.value };
+        checkForChanges();
       });
       tdValue.appendChild(valueInput);
 
@@ -929,6 +943,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
 
     addDiv.appendChild(addBtn);
     body.appendChild(addDiv);
+    checkForChanges();
   }
 
   rerender();
@@ -1172,12 +1187,11 @@ function renderEntity(msg: LoadEntityMessage): void {
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 
-function handleSave(): void {
-  if (!currentIri) { return; }
+function getCurrentState(): any {
+  if (!currentIri) { return {}; }
 
   const base = { type: 'save' as const, iri: currentIri, entityType: currentEntityType };
   const annotData = collectAnnotationsForSave();
-
   let payload: Record<string, unknown> = { ...base };
 
   switch (currentEntityType) {
@@ -1203,13 +1217,13 @@ function handleSave(): void {
         disjointPropertyIris: iriListState['disjointPropertyIris'] ?? [],
         propertyChains: propertyChainState,
         inverseOfIri: singleIriState['inverseOfIri'] || undefined,
-        isTransitive: (document.getElementById('cb-isTransitive') as HTMLInputElement | null)?.checked,
-        isSymmetric: (document.getElementById('cb-isSymmetric') as HTMLInputElement | null)?.checked,
-        isReflexive: (document.getElementById('cb-isReflexive') as HTMLInputElement | null)?.checked,
-        isIrreflexive: (document.getElementById('cb-isIrreflexive') as HTMLInputElement | null)?.checked,
-        isAsymmetric: (document.getElementById('cb-isAsymmetric') as HTMLInputElement | null)?.checked,
-        isFunctional: (document.getElementById('cb-isFunctional') as HTMLInputElement | null)?.checked,
-        isInverseFunctional: (document.getElementById('cb-isInverseFunctional') as HTMLInputElement | null)?.checked,
+        isTransitive: (document.getElementById('cb-isTransitive') as HTMLInputElement | null)?.checked ?? false,
+        isSymmetric: (document.getElementById('cb-isSymmetric') as HTMLInputElement | null)?.checked ?? false,
+        isReflexive: (document.getElementById('cb-isReflexive') as HTMLInputElement | null)?.checked ?? false,
+        isIrreflexive: (document.getElementById('cb-isIrreflexive') as HTMLInputElement | null)?.checked ?? false,
+        isAsymmetric: (document.getElementById('cb-isAsymmetric') as HTMLInputElement | null)?.checked ?? false,
+        isFunctional: (document.getElementById('cb-isFunctional') as HTMLInputElement | null)?.checked ?? false,
+        isInverseFunctional: (document.getElementById('cb-isInverseFunctional') as HTMLInputElement | null)?.checked ?? false,
       };
       break;
 
@@ -1219,7 +1233,7 @@ function handleSave(): void {
         superPropertyIris: iriListState['superPropertyIris'] ?? [],
         domainIris: iriListState['domainIris'] ?? [],
         rangeIris: iriListState['rangeIris'] ?? [],
-        isFunctional: (document.getElementById('cb-isFunctional') as HTMLInputElement | null)?.checked,
+        isFunctional: (document.getElementById('cb-isFunctional') as HTMLInputElement | null)?.checked ?? false,
       };
       break;
 
@@ -1239,8 +1253,26 @@ function handleSave(): void {
       };
       break;
   }
+  return payload;
+}
+
+function checkForChanges(): void {
+  const currentStateString = JSON.stringify(getCurrentState());
+  const saveBtn = document.getElementById('btn-save') as HTMLButtonElement | null;
+  if (saveBtn) {
+    const hasChanged = currentStateString !== lastSavedStateString;
+    saveBtn.disabled = !hasChanged;
+  }
+}
+
+function handleSave(): void {
+  const payload = getCurrentState();
+  if (!payload.iri) { return; }
 
   vscode.postMessage(payload);
+
+  lastSavedStateString = JSON.stringify(payload);
+  checkForChanges();
 
   const status = document.getElementById('status');
   if (status) {
@@ -1313,6 +1345,11 @@ function injectStyles(): void {
     #btn-save {
       background: var(--btn-bg); color: var(--btn-fg); border-color: transparent;
       padding: 4px 12px; font-size: inherit;
+    }
+    #btn-save:disabled {
+      opacity: 0.4;
+      cursor: default;
+      filter: grayscale(0.8);
     }
 
     .section { margin-bottom: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -1458,6 +1495,8 @@ window.addEventListener('message', (event: MessageEvent) => {
 
   if (msg.type === 'loadEntity') {
     renderEntity(msg);
+    lastSavedStateString = JSON.stringify(getCurrentState());
+    checkForChanges();
   }
 });
 
