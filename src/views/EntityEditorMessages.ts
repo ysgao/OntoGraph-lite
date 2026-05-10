@@ -26,7 +26,13 @@ export interface LoadEntityMessage {
   isSymmetric?: boolean;
   isFunctional?: boolean;
   isInverseFunctional?: boolean;
+  isReflexive?: boolean;
+  isIrreflexive?: boolean;
+  isAsymmetric?: boolean;
   inverseOfIri?: string;
+  equivalentPropertyIris?: string[];
+  disjointPropertyIris?: string[];
+  propertyChains?: string[][];
 
   // Individual
   classIris?: string[];
@@ -72,7 +78,13 @@ export interface SaveEntityMessage {
   isSymmetric?: boolean;
   isFunctional?: boolean;
   isInverseFunctional?: boolean;
+  isReflexive?: boolean;
+  isIrreflexive?: boolean;
+  isAsymmetric?: boolean;
   inverseOfIri?: string;
+  equivalentPropertyIris?: string[];
+  disjointPropertyIris?: string[];
+  propertyChains?: string[][];
   classIris?: string[];
   objectPropertyAssertions?: { propertyIri: string; targetIri: string }[];
   dataPropertyAssertions?: { propertyIri: string; value: string; datatype?: string }[];

@@ -29,7 +29,13 @@ export interface OWLProperty extends OWLEntity {
 export interface OWLObjectProperty extends OWLProperty {
   type: 'objectProperty';
   isInverseFunctional?: boolean;
+  isReflexive?: boolean;
+  isIrreflexive?: boolean;
+  isAsymmetric?: boolean;
   inverseOfIri?: string;
+  equivalentPropertyIris?: string[];
+  disjointPropertyIris?: string[];
+  propertyChains?: string[][];
 }
 
 export interface OWLDataProperty extends OWLProperty {

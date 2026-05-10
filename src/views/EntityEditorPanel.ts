@@ -181,6 +181,12 @@ function handleMessage(
           prop.isSymmetric = msg.isSymmetric;
           prop.isFunctional = msg.isFunctional;
           prop.isInverseFunctional = msg.isInverseFunctional;
+          prop.isReflexive = msg.isReflexive;
+          prop.isIrreflexive = msg.isIrreflexive;
+          prop.isAsymmetric = msg.isAsymmetric;
+          prop.equivalentPropertyIris = msg.equivalentPropertyIris ?? [];
+          prop.disjointPropertyIris = msg.disjointPropertyIris ?? [];
+          prop.propertyChains = msg.propertyChains ?? [];
           break;
         }
         case 'dataProperty': {
@@ -296,8 +302,12 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
     for (const i of [...(prop.superPropertyIris ?? []), ...(prop.domainIris ?? []), ...(prop.rangeIris ?? [])]) {
       allIris.add(i);
     }
-    if (entity.type === 'objectProperty' && (entity as OWLObjectProperty).inverseOfIri) {
-      allIris.add((entity as OWLObjectProperty).inverseOfIri!);
+    if (entity.type === 'objectProperty') {
+      const op = entity as OWLObjectProperty;
+      if (op.inverseOfIri) allIris.add(op.inverseOfIri);
+      for (const i of (op.equivalentPropertyIris ?? [])) allIris.add(i);
+      for (const i of (op.disjointPropertyIris ?? [])) allIris.add(i);
+      for (const chain of (op.propertyChains ?? [])) for (const i of chain) allIris.add(i);
     }
   } else if (entity.type === 'individual') {
     const ind = entity as OWLIndividual;
@@ -348,7 +358,13 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
     msg.isSymmetric = prop.isSymmetric;
     msg.isFunctional = prop.isFunctional;
     msg.isInverseFunctional = prop.isInverseFunctional;
+    msg.isReflexive = prop.isReflexive;
+    msg.isIrreflexive = prop.isIrreflexive;
+    msg.isAsymmetric = prop.isAsymmetric;
     msg.inverseOfIri = prop.inverseOfIri;
+    msg.equivalentPropertyIris = prop.equivalentPropertyIris ?? [];
+    msg.disjointPropertyIris = prop.disjointPropertyIris ?? [];
+    msg.propertyChains = prop.propertyChains ?? [];
   } else if (entity.type === 'dataProperty') {
     const prop = entity as OWLDataProperty;
     msg.superPropertyIris = prop.superPropertyIris;

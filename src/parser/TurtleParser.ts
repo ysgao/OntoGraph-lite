@@ -56,6 +56,22 @@ function labelAnnotations(
   return { labels, annotations };
 }
 
+function readRdfList(idx: Index, head: string): string[] {
+  const RDF_FIRST = `${RDF}first`;
+  const RDF_REST  = `${RDF}rest`;
+  const RDF_NIL   = `${RDF}nil`;
+  const items: string[] = [];
+  let cur = head;
+  const seen = new Set<string>();
+  while (cur && cur !== RDF_NIL && !seen.has(cur)) {
+    seen.add(cur);
+    const first = getAll(idx, cur, RDF_FIRST)[0];
+    if (first && isNamed(first)) items.push(first);
+    cur = getAll(idx, cur, RDF_REST)[0] ?? '';
+  }
+  return items;
+}
+
 export class TurtleParser {
   constructor(private readonly text: string, private readonly uri: string) {}
 
@@ -126,16 +142,23 @@ export class TurtleParser {
           superClassExpressions: [], equivalentClassExpressions: [],
         } satisfies OWLClass);
       } else if (isObjProp) {
+        const chainHeads = getAll(idx, iri, `${OWL}propertyChainAxiom`).filter(v => !isNamed(v));
         model.objectProperties.set(iri, {
           ...base, type: 'objectProperty',
           superPropertyIris: namedVals(idx, iri, `${RDFS}subPropertyOf`),
           domainIris: namedVals(idx, iri, `${RDFS}domain`),
           rangeIris: namedVals(idx, iri, `${RDFS}range`),
           inverseOfIri: namedVals(idx, iri, `${OWL}inverseOf`)[0],
+          equivalentPropertyIris: namedVals(idx, iri, `${OWL}equivalentProperty`),
+          disjointPropertyIris: namedVals(idx, iri, `${OWL}propertyDisjointWith`),
+          propertyChains: chainHeads.map(h => readRdfList(idx, h)),
           isTransitive: flag(types, `${OWL}TransitiveProperty`),
           isSymmetric: flag(types, `${OWL}SymmetricProperty`),
           isFunctional: flag(types, `${OWL}FunctionalProperty`),
           isInverseFunctional: flag(types, `${OWL}InverseFunctionalProperty`),
+          isReflexive: flag(types, `${OWL}ReflexiveProperty`),
+          isIrreflexive: flag(types, `${OWL}IrreflexiveProperty`),
+          isAsymmetric: flag(types, `${OWL}AsymmetricProperty`),
         } satisfies OWLObjectProperty);
       } else if (isDataProp) {
         model.dataProperties.set(iri, {

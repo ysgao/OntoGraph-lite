@@ -185,8 +185,8 @@ export class FunctionalParser {
       case 'SymmetricObjectProperty':        return this.parsePropCharacteristic('objectProperty', 'isSymmetric');
       case 'FunctionalDataProperty':         return this.parsePropCharacteristic('dataProperty', 'isFunctional');
       case 'InverseObjectProperties':        return this.parseInverseObjectProperties();
-      case 'EquivalentObjectProperties':
-      case 'DisjointObjectProperties':
+      case 'EquivalentObjectProperties':     return this.parseEquivalentOrDisjointObjectProperties('equivalentPropertyIris');
+      case 'DisjointObjectProperties':       return this.parseEquivalentOrDisjointObjectProperties('disjointPropertyIris');
       case 'EquivalentDataProperties':
       case 'DisjointDataProperties':         return this.skipFullBlock();
       case 'ClassAssertion':                 return this.parseClassAssertion();
@@ -197,12 +197,11 @@ export class FunctionalParser {
       case 'SameIndividual':
       case 'DifferentIndividuals':
       case 'HasKey':
-      case 'SubPropertyChainOf':
-      case 'ReflexiveObjectProperty':
-      case 'IrreflexiveObjectProperty':
-      case 'AsymmetricObjectProperty':
       case 'DatatypeDefinition':
       case 'SWRL':                           return this.skipFullBlock();
+      case 'ReflexiveObjectProperty':        return this.parsePropCharacteristic('objectProperty', 'isReflexive');
+      case 'IrreflexiveObjectProperty':      return this.parsePropCharacteristic('objectProperty', 'isIrreflexive');
+      case 'AsymmetricObjectProperty':       return this.parsePropCharacteristic('objectProperty', 'isAsymmetric');
       default:                               return this.skipFullBlock();
     }
   }
@@ -337,12 +336,37 @@ export class FunctionalParser {
   private parseSubObjectPropertyOf(): void {
     this.advance(); this.expectLParen();
     this.skipAxiomAnnotations();
-    // sub can be ObjectPropertyChain(...)
-    if (this.peek()?.value === 'ObjectPropertyChain') { this.skipNestedBlock(); this.readIri(); this.expectRParen(); return; }
+    if (this.peek()?.value === 'ObjectPropertyChain') {
+      this.advance(); this.expectLParen();
+      const chainMembers: string[] = [];
+      while (this.peek()?.type !== 'RPAREN' && this.peek()) chainMembers.push(this.readIri());
+      this.expectRParen();
+      const sup = this.readIri();
+      this.expectRParen();
+      const p = this.getOrCreateObjectProp(sup);
+      if (!p.propertyChains) p.propertyChains = [];
+      p.propertyChains.push(chainMembers);
+      return;
+    }
     const sub = this.readIri(); const sup = this.readIri();
     this.expectRParen();
     const p = this.getOrCreateObjectProp(sub);
     if (this.addUnique(this._superPropertySets, sub, sup)) p.superPropertyIris.push(sup);
+  }
+
+  private parseEquivalentOrDisjointObjectProperties(field: 'equivalentPropertyIris' | 'disjointPropertyIris'): void {
+    this.advance(); this.expectLParen();
+    this.skipAxiomAnnotations();
+    const iris: string[] = [];
+    while (this.peek()?.type !== 'RPAREN' && this.peek()) iris.push(this.readIri());
+    this.expectRParen();
+    for (let i = 0; i < iris.length; i++) {
+      const p = this.getOrCreateObjectProp(iris[i]);
+      if (!p[field]) p[field] = [];
+      for (let j = 0; j < iris.length; j++) {
+        if (i !== j && !p[field]!.includes(iris[j])) p[field]!.push(iris[j]);
+      }
+    }
   }
 
   private parseSubDataPropertyOf(): void {

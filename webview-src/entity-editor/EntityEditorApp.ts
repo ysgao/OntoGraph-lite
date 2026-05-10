@@ -88,6 +88,9 @@ const singleIriState: Record<string, string> = {};
 let objAssertionState: { propertyIri: string; targetIri: string }[] = [];
 let dataAssertionState: { propertyIri: string; value: string; datatype?: string }[] = [];
 
+// Property chain state: list of chains, each chain is an ordered list of IRIs
+let propertyChainState: string[][] = [];
+
 // CodeMirror editors: sectionKey → EditorView
 const editorMap: Record<string, EditorView> = {};
 
@@ -429,6 +432,84 @@ function renderIriListSection(container: HTMLElement, title: string, key: string
     addContainer.appendChild(addBtn);
     body.appendChild(chips);
     body.appendChild(addContainer);
+  }
+
+  rerender();
+  container.appendChild(sec);
+}
+
+// ── Property chain section ────────────────────────────────────────────────────
+
+function renderPropertyChainSection(container: HTMLElement): void {
+  const sec = makeSectionEl('SuperPropertyOf (Chain)');
+  const body = sec.querySelector('.section-body') as HTMLElement;
+
+  function rerender(): void {
+    body.innerHTML = '';
+
+    for (let i = 0; i < propertyChainState.length; i++) {
+      const chain = propertyChainState[i];
+      const row = document.createElement('div');
+      row.className = 'chain-row';
+
+      const membersEl = document.createElement('div');
+      membersEl.className = 'chain-members';
+
+      for (let j = 0; j < chain.length; j++) {
+        if (j > 0) {
+          const sep = document.createElement('span');
+          sep.className = 'chain-sep';
+          sep.textContent = ' ∘ ';
+          membersEl.appendChild(sep);
+        }
+        const memberIri = chain[j];
+        const label = localIriLabels[memberIri] ?? localNameFromIri(memberIri);
+        const ci = j;
+        membersEl.appendChild(makeChip(label, memberIri, () => {
+          propertyChainState[i] = chain.filter((_, k) => k !== ci);
+          if (propertyChainState[i].length === 0) propertyChainState.splice(i, 1);
+          rerender();
+        }));
+      }
+
+      const addMemberContainer = document.createElement('div');
+      addMemberContainer.className = 'add-iri-container';
+      const addMemberBtn = document.createElement('button');
+      addMemberBtn.className = 'add-btn';
+      addMemberBtn.textContent = '+';
+      addMemberBtn.addEventListener('click', () => {
+        addMemberBtn.style.display = 'none';
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'add-iri-input-wrapper';
+        addMemberContainer.appendChild(inputWrapper);
+        const inp = createIriInput(inputWrapper, 'Add property…', (iri, label) => {
+          if (iri) { localIriLabels[iri] = label; propertyChainState[i] = [...chain, iri]; }
+          rerender();
+        }, () => { rerender(); });
+        requestAnimationFrame(() => inp.focus());
+      });
+      addMemberContainer.appendChild(addMemberBtn);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-btn';
+      removeBtn.title = 'Remove chain';
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', () => { propertyChainState.splice(i, 1); rerender(); });
+
+      row.appendChild(membersEl);
+      row.appendChild(addMemberContainer);
+      row.appendChild(removeBtn);
+      body.appendChild(row);
+    }
+
+    const addChainContainer = document.createElement('div');
+    addChainContainer.className = 'add-iri-container';
+    const addChainBtn = document.createElement('button');
+    addChainBtn.className = 'add-btn';
+    addChainBtn.textContent = '+ Add Chain';
+    addChainBtn.addEventListener('click', () => { propertyChainState.push([]); rerender(); });
+    addChainContainer.appendChild(addChainBtn);
+    body.appendChild(addChainContainer);
   }
 
   rerender();
@@ -1037,10 +1118,16 @@ function renderEntity(msg: LoadEntityMessage): void {
       iriListState['domainIris'] = msg.domainIris ?? [];
       iriListState['rangeIris'] = msg.rangeIris ?? [];
       iriListState['superPropertyIris'] = msg.superPropertyIris ?? [];
+      iriListState['equivalentPropertyIris'] = msg.equivalentPropertyIris ?? [];
+      iriListState['disjointPropertyIris'] = msg.disjointPropertyIris ?? [];
+      propertyChainState = (msg.propertyChains ?? []).map(c => [...c]);
       singleIriState['inverseOfIri'] = msg.inverseOfIri ?? '';
       renderCheckboxSection(content, 'Characteristics', [
         { id: 'isTransitive', label: 'Transitive', checked: msg.isTransitive ?? false },
         { id: 'isSymmetric', label: 'Symmetric', checked: msg.isSymmetric ?? false },
+        { id: 'isReflexive', label: 'Reflexive', checked: msg.isReflexive ?? false },
+        { id: 'isIrreflexive', label: 'Irreflexive', checked: msg.isIrreflexive ?? false },
+        { id: 'isAsymmetric', label: 'Asymmetric', checked: msg.isAsymmetric ?? false },
         { id: 'isFunctional', label: 'Functional', checked: msg.isFunctional ?? false },
         { id: 'isInverseFunctional', label: 'InverseFunctional', checked: msg.isInverseFunctional ?? false },
       ]);
@@ -1048,6 +1135,9 @@ function renderEntity(msg: LoadEntityMessage): void {
       renderIriListSection(content, 'Range', 'rangeIris');
       renderSingleIriSection(content, 'InverseOf', 'inverseOfIri', msg.inverseOfIri ?? '');
       renderIriListSection(content, 'SubPropertyOf', 'superPropertyIris');
+      renderIriListSection(content, 'Equivalent To', 'equivalentPropertyIris');
+      renderIriListSection(content, 'Disjoint With', 'disjointPropertyIris');
+      renderPropertyChainSection(content);
       break;
 
     case 'dataProperty':
@@ -1106,9 +1196,15 @@ function handleSave(): void {
         superPropertyIris: iriListState['superPropertyIris'] ?? [],
         domainIris: iriListState['domainIris'] ?? [],
         rangeIris: iriListState['rangeIris'] ?? [],
+        equivalentPropertyIris: iriListState['equivalentPropertyIris'] ?? [],
+        disjointPropertyIris: iriListState['disjointPropertyIris'] ?? [],
+        propertyChains: propertyChainState,
         inverseOfIri: singleIriState['inverseOfIri'] || undefined,
         isTransitive: (document.getElementById('cb-isTransitive') as HTMLInputElement | null)?.checked,
         isSymmetric: (document.getElementById('cb-isSymmetric') as HTMLInputElement | null)?.checked,
+        isReflexive: (document.getElementById('cb-isReflexive') as HTMLInputElement | null)?.checked,
+        isIrreflexive: (document.getElementById('cb-isIrreflexive') as HTMLInputElement | null)?.checked,
+        isAsymmetric: (document.getElementById('cb-isAsymmetric') as HTMLInputElement | null)?.checked,
         isFunctional: (document.getElementById('cb-isFunctional') as HTMLInputElement | null)?.checked,
         isInverseFunctional: (document.getElementById('cb-isInverseFunctional') as HTMLInputElement | null)?.checked,
       };
@@ -1287,6 +1383,11 @@ function injectStyles(): void {
     }
     .inline-remove { margin-left: 4px; vertical-align: middle; }
     .add-assertion-row { margin-top: 4px; }
+    .chain-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; padding: 4px 6px; background: var(--badge-bg); border-radius: 3px; }
+    .chain-members { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; flex: 1; }
+    .chain-sep { opacity: 0.7; font-size: 0.85em; padding: 0 2px; }
+    .remove-btn { border: none; background: transparent; color: var(--fg); opacity: 0.6; cursor: pointer; padding: 0 4px; font-size: 1em; line-height: 1; }
+    .remove-btn:hover { opacity: 1; }
     .new-assertion-inputs {
       display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;
     }

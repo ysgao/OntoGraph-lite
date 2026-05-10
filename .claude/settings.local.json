@@ -17,7 +17,8 @@
       "Bash(unzip -l /Users/yoga/JavaApp/OntoGraph/ontograph-0.1.0.vsix)",
       "Bash(python3 -m json.tool)",
       "Bash(node *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|vue|html\\)$\")"
     ]
   }
 }

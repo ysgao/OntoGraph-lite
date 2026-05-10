@@ -220,6 +220,7 @@ const OBJ_PROP_AXIOM_KWS = new Set([
   'FunctionalObjectProperty', 'InverseFunctionalObjectProperty',
   'TransitiveObjectProperty', 'SymmetricObjectProperty', 'AsymmetricObjectProperty',
   'ReflexiveObjectProperty', 'IrreflexiveObjectProperty', 'InverseObjectProperties',
+  'EquivalentObjectProperties', 'DisjointObjectProperties',
 ]);
 const DATA_PROP_AXIOM_KWS = new Set([
   'SubDataPropertyOf', 'DataPropertyDomain', 'DataPropertyRange',
@@ -283,7 +284,16 @@ function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
     if (prop.isInverseFunctional)  lines.push(`  InverseFunctionalObjectProperty(${a(iri)})`);
     if (prop.isTransitive)         lines.push(`  TransitiveObjectProperty(${a(iri)})`);
     if (prop.isSymmetric)          lines.push(`  SymmetricObjectProperty(${a(iri)})`);
+    if (prop.isReflexive)          lines.push(`  ReflexiveObjectProperty(${a(iri)})`);
+    if (prop.isIrreflexive)        lines.push(`  IrreflexiveObjectProperty(${a(iri)})`);
+    if (prop.isAsymmetric)         lines.push(`  AsymmetricObjectProperty(${a(iri)})`);
     if (prop.inverseOfIri)         lines.push(`  InverseObjectProperties(${a(iri)} ${a(prop.inverseOfIri)})`);
+    for (const eq of (prop.equivalentPropertyIris ?? []))
+      lines.push(`  EquivalentObjectProperties(${a(iri)} ${a(eq)})`);
+    for (const disj of (prop.disjointPropertyIris ?? []))
+      lines.push(`  DisjointObjectProperties(${a(iri)} ${a(disj)})`);
+    for (const chain of (prop.propertyChains ?? []))
+      lines.push(`  SubObjectPropertyOf(ObjectPropertyChain(${chain.map(a).join(' ')}) ${a(iri)})`);
   } else if (entity.type === 'dataProperty') {
     const prop = entity as OWLDataProperty;
     for (const sup of prop.superPropertyIris) {
@@ -432,8 +442,17 @@ function generateManchesterAxiomSections(entity: OWLEntity, prefixes: Map<string
     if (prop.isInverseFunctional)  chars.push('InverseFunctional');
     if (prop.isTransitive)         chars.push('Transitive');
     if (prop.isSymmetric)          chars.push('Symmetric');
+    if (prop.isReflexive)          chars.push('Reflexive');
+    if (prop.isIrreflexive)        chars.push('Irreflexive');
+    if (prop.isAsymmetric)         chars.push('Asymmetric');
     if (chars.length > 0) lines.push(`    Characteristics: ${chars.join(', ')}`);
     if (prop.inverseOfIri) lines.push(`    InverseOf: ${ab(prop.inverseOfIri)}`);
+    if ((prop.equivalentPropertyIris ?? []).length > 0)
+      lines.push(`    EquivalentTo: ${prop.equivalentPropertyIris!.map(ab).join(',\n        ')}`);
+    if ((prop.disjointPropertyIris ?? []).length > 0)
+      lines.push(`    DisjointWith: ${prop.disjointPropertyIris!.map(ab).join(',\n        ')}`);
+    for (const chain of (prop.propertyChains ?? []))
+      lines.push(`    SubPropertyChain: ${chain.map(ab).join(' o ')}`);
   } else if (entity.type === 'dataProperty') {
     const prop = entity as OWLDataProperty;
     if (prop.superPropertyIris.length > 0) {
@@ -490,6 +509,7 @@ function fmtDataLiteralManchester(value: string, datatype: string | undefined, p
 const MANAGED_SECTION_KWS = new Set([
   'SubClassOf', 'EquivalentTo', 'DisjointWith',
   'SubPropertyOf', 'Domain', 'Range', 'Characteristics', 'InverseOf',
+  'SubPropertyChain',
   'Types', 'Facts',
 ]);
 
@@ -596,11 +616,18 @@ function generateTurtleStructuralSegs(entity: OWLEntity, prefixes: Map<string, s
     if (prop.isSymmetric)         types.push('owl:SymmetricProperty');
     if (prop.isFunctional)        types.push('owl:FunctionalProperty');
     if (prop.isInverseFunctional) types.push('owl:InverseFunctionalProperty');
+    if (prop.isReflexive)         types.push('owl:ReflexiveProperty');
+    if (prop.isIrreflexive)       types.push('owl:IrreflexiveProperty');
+    if (prop.isAsymmetric)        types.push('owl:AsymmetricProperty');
     segs.push(`rdf:type ${types.join(' , ')}`);
     for (const sup of prop.superPropertyIris) segs.push(`rdfs:subPropertyOf ${ab(sup)}`);
     for (const dom of prop.domainIris) segs.push(`rdfs:domain ${ab(dom)}`);
     for (const rng of prop.rangeIris) segs.push(`rdfs:range ${ab(rng)}`);
     if (prop.inverseOfIri) segs.push(`owl:inverseOf ${ab(prop.inverseOfIri)}`);
+    for (const eq of (prop.equivalentPropertyIris ?? [])) segs.push(`owl:equivalentProperty ${ab(eq)}`);
+    for (const disj of (prop.disjointPropertyIris ?? [])) segs.push(`owl:propertyDisjointWith ${ab(disj)}`);
+    for (const chain of (prop.propertyChains ?? []))
+      segs.push(`owl:propertyChainAxiom ( ${chain.map(ab).join(' ')} )`);
   } else if (entity.type === 'dataProperty') {
     const prop = entity as OWLDataProperty;
     const types = ['owl:DatatypeProperty'];

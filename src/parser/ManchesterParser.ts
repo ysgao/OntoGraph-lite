@@ -13,7 +13,7 @@ interface Tok { type: TT; value: string; lang?: string; datatype?: string; }
 
 const FRAME_KW = new Set(['Class','ObjectProperty','DataProperty','AnnotationProperty','Individual','DisjointClasses','EquivalentClasses']);
 const CLS_KW   = new Set(['Annotations','SubClassOf','EquivalentTo','DisjointWith']);
-const PROP_KW  = new Set(['Annotations','SubPropertyOf','Domain','Range','Characteristics','InverseOf']);
+const PROP_KW  = new Set(['Annotations','SubPropertyOf','Domain','Range','Characteristics','InverseOf','EquivalentTo','DisjointWith','SubPropertyChain']);
 const REST_KW  = new Set(['some','only','value','min','max','exactly','Self']);
 
 function tokenize(src: string, pfx: Map<string, string>): Tok[] {
@@ -257,6 +257,9 @@ export class ManchesterParser {
       else if(sec==='Range'){const r=this.readIri();if(r)p.rangeIris.push(r);}
       else if(sec==='InverseOf'){const r=this.readIri();if(r)p.inverseOfIri=r;}
       else if(sec==='Characteristics') this.parseCharacteristics(p,true);
+      else if(sec==='EquivalentTo'){const r=this.readIri();if(r){if(!p.equivalentPropertyIris)p.equivalentPropertyIris=[];p.equivalentPropertyIris.push(r);}}
+      else if(sec==='DisjointWith'){const r=this.readIri();if(r){if(!p.disjointPropertyIris)p.disjointPropertyIris=[];p.disjointPropertyIris.push(r);}}
+      else if(sec==='SubPropertyChain'){const chain=this.readPropertyChain();if(chain.length>=2){if(!p.propertyChains)p.propertyChains=[];p.propertyChains.push(chain);}}
     }
   }
 
@@ -300,10 +303,24 @@ export class ManchesterParser {
       else if(t.value==='Transitive'){p.isTransitive=true;this.advance();}
       else if(t.value==='Symmetric'){p.isSymmetric=true;this.advance();}
       else if(t.value==='InverseFunctional'){if(allowInverse)(p as OWLObjectProperty).isInverseFunctional=true;this.advance();}
-      else if(t.value==='Asymmetric'||t.value==='Reflexive'||t.value==='Irreflexive'){this.advance();}
+      else if(t.value==='Asymmetric'){if(allowInverse)(p as OWLObjectProperty).isAsymmetric=true;this.advance();}
+      else if(t.value==='Reflexive'){if(allowInverse)(p as OWLObjectProperty).isReflexive=true;this.advance();}
+      else if(t.value==='Irreflexive'){if(allowInverse)(p as OWLObjectProperty).isIrreflexive=true;this.advance();}
       else break;
       if(!this.eat('COMMA'))break;
     }
+  }
+
+  private readPropertyChain(): string[] {
+    const chain: string[] = [];
+    const first = this.readIri();
+    if(first) chain.push(first);
+    while(this.peek()?.type==='WORD'&&this.peek()?.value==='o'){
+      this.advance();
+      const r=this.readIri();
+      if(r) chain.push(r);
+    }
+    return chain;
   }
 
   private parseIndividualFrame(): void {
