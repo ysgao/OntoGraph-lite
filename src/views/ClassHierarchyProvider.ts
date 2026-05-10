@@ -7,18 +7,18 @@ const OWL_THING = 'http://www.w3.org/2002/07/owl#Thing';
 export class ClassTreeItem extends vscode.TreeItem {
   constructor(
     public readonly iri: string,
-    label: string,
+    public readonly baseLabel: string,
+    public readonly prefix: string,
     hasChildren: boolean,
     public readonly isRoot = false,
     autoExpand = false,
   ) {
-    super(label, hasChildren
+    super(prefix + baseLabel, hasChildren
       ? (autoExpand ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed)
       : vscode.TreeItemCollapsibleState.None);
     this.id = `class:${iri}`;
     this.tooltip = iri;
     this.contextValue = 'owlEntity';
-    this.iconPath = new vscode.ThemeIcon('symbol-class');
   }
 }
 
@@ -104,25 +104,27 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   }
 
   getTreeItem(element: ClassTreeItem): vscode.TreeItem {
+    let icon = '▫';
+
     if (element.iri === this.focusIri) {
-      element.iconPath = new vscode.ThemeIcon('target');
-      element.description = '(focus)';
+      icon = '◉';
     } else {
       const parents = this.parentsOf.get(this.focusIri ?? '');
       if (parents?.includes(element.iri)) {
-        element.iconPath = new vscode.ThemeIcon('chevron-up');
-        element.description = '(superclass)';
+        icon = '^';
       } else {
-        // Subconcept: use "> " (chevron-right) if it has children
         const hasChildren = (this.childrenOf.get(element.iri)?.length ?? 0) > 0;
         if (hasChildren) {
-          element.iconPath = new vscode.ThemeIcon('chevron-right');
-        } else {
-          element.iconPath = new vscode.ThemeIcon('symbol-class');
+          icon = '>';
         }
-        element.description = '(subclass)';
       }
     }
+
+    // Indented label with a larger icon and no extra role text
+    element.label = `${element.prefix}${icon} ${element.baseLabel}`;
+    element.description = undefined; 
+    element.iconPath = undefined; 
+
     return element;
   }
 
@@ -135,7 +137,7 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
     // Root level: if no focus, show owl:Thing root (legacy behavior or initial state)
     if (!this.focusIri) {
       const childCount = (this.childrenOf.get(OWL_THING)?.length ?? 0);
-      return [new ClassTreeItem(OWL_THING, 'owl:Thing', childCount > 0, true, childCount > 0)];
+      return [new ClassTreeItem(OWL_THING, 'owl:Thing', '', childCount > 0, true, childCount > 0)];
     }
 
     // Neighborhood view: [parents] + [focus] + [children]
@@ -178,10 +180,11 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
     if (!this.model) { return undefined; }
     const cls = this.model.classes.get(iri);
     if (!cls && iri !== OWL_THING) { return undefined; }
-    const label = cls ? getLabel(cls, this.preferredLang) : (iri === OWL_THING ? 'owl:Thing' : iri);
+    const baseLabel = cls ? getLabel(cls, this.preferredLang) : (iri === OWL_THING ? 'owl:Thing' : iri);
     return new ClassTreeItem(
       iri,
-      prefix + label,
+      baseLabel,
+      prefix,
       false, // Children handled by neighborhood logic
     );
   }

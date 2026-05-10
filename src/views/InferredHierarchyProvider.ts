@@ -7,17 +7,16 @@ const OWL_THING = 'http://www.w3.org/2002/07/owl#Thing';
 export class InferredClassTreeItem extends vscode.TreeItem {
   constructor(
     public readonly iri: string,
-    label: string,
+    public readonly baseLabel: string,
+    public readonly prefix: string,
     hasChildren: boolean,
   ) {
-    super(label, hasChildren
+    super(prefix + baseLabel, hasChildren
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None);
     this.id = `inferred:${iri}`;
     this.tooltip = iri;
     this.contextValue = 'owlEntity';
-    this.iconPath = new vscode.ThemeIcon('symbol-class');
-    this.description = '(inferred)';
   }
 }
 
@@ -90,25 +89,27 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
   }
 
   getTreeItem(element: InferredClassTreeItem): vscode.TreeItem {
+    let icon = '▫';
+
     if (element.iri === this.focusIri) {
-      element.iconPath = new vscode.ThemeIcon('target');
-      element.description = '(focus inferred)';
+      icon = '◉';
     } else {
       const parents = this.sortedSuperClasses.get(this.focusIri ?? '');
       if (parents?.includes(element.iri)) {
-        element.iconPath = new vscode.ThemeIcon('chevron-up');
-        element.description = '(superclass inferred)';
+        icon = '^';
       } else {
-        // Subconcept: use "> " (chevron-right) if it has children
         const hasChildren = (this.sortedSubClasses.get(element.iri)?.length ?? 0) > 0;
         if (hasChildren) {
-          element.iconPath = new vscode.ThemeIcon('chevron-right');
-        } else {
-          element.iconPath = new vscode.ThemeIcon('symbol-class');
+          icon = '>';
         }
-        element.description = '(subclass inferred)';
       }
     }
+
+    // Indented label with a larger icon and no extra role text
+    element.label = `${element.prefix}${icon} ${element.baseLabel}`;
+    element.description = undefined; 
+    element.iconPath = undefined; 
+
     return element;
   }
 
@@ -121,8 +122,8 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
     if (!this.model?.isClassified) { return undefined; }
     const cls = this.model.classes.get(iri);
     if (!cls && iri !== OWL_THING) { return undefined; }
-    const label = cls ? getLabel(cls, this.preferredLang) : (iri === OWL_THING ? 'owl:Thing' : iri);
-    return new InferredClassTreeItem(iri, prefix + label, false);
+    const baseLabel = cls ? getLabel(cls, this.preferredLang) : (iri === OWL_THING ? 'owl:Thing' : iri);
+    return new InferredClassTreeItem(iri, baseLabel, prefix, false);
   }
 
   getChildren(element?: InferredClassTreeItem): InferredClassTreeItem[] {
@@ -134,7 +135,7 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
     // Root level: if no focus, show owl:Thing root
     if (!this.focusIri) {
       const childCount = (this.sortedSubClasses.get(OWL_THING)?.length ?? 0);
-      return [new InferredClassTreeItem(OWL_THING, 'owl:Thing', childCount > 0)];
+      return [new InferredClassTreeItem(OWL_THING, 'owl:Thing', '', childCount > 0)];
     }
 
     // Neighborhood view: [parents] + [focus] + [children]
