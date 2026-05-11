@@ -345,7 +345,16 @@ function isEntityAxiomLine(line: string, entityIri: string, keywords: Set<string
   return line.includes(`<${entityIri}>`);
 }
 
-function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): vscode.WorkspaceEdit | null {
+interface SyncResult {
+  edit: vscode.WorkspaceEdit;
+  changedRanges: vscode.Range[];
+}
+
+function changedLineRanges(startLine: number, lines: readonly string[]): vscode.Range[] {
+  return lines.map((line, i) => new vscode.Range(startLine + i, 0, startLine + i, line.length));
+}
+
+function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | null {
   const text = doc.getText();
   const lines = text.split('\n');
   const keywords = entityAxiomKeywords(entity);
@@ -383,7 +392,7 @@ function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): vsco
   }
 
   if (toDelete.length === 0 && newLines.length === 0) return null;
-  return edit;
+  return { edit, changedRanges: changedLineRanges(insertAt, newLines) };
 }
 
 // ── Manchester Syntax (.omn) ───────────────────────────────────────────────────
@@ -517,7 +526,7 @@ const MANAGED_SECTION_KWS = new Set([
   'Types', 'Facts',
 ]);
 
-function syncAxiomsManchester(doc: vscode.TextDocument, entity: OWLEntity): vscode.WorkspaceEdit | null {
+function syncAxiomsManchester(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | null {
   const text = doc.getText();
   const lines = text.split('\n');
   const prefixes = parsePrefixes(text, 'manchester');
@@ -550,10 +559,12 @@ function syncAxiomsManchester(doc: vscode.TextDocument, entity: OWLEntity): vsco
   if (managedRanges.length === 0 && newSections === '') return null;
 
   const edit = new vscode.WorkspaceEdit();
+  let changedAt = frame.start + 1;
 
   if (managedRanges.length > 0) {
     // Replace the first managed range with new content, delete the rest
     const first = managedRanges[0];
+    changedAt = first.start;
     const newContent = newSections.length > 0 ? newSections + '\n' : '';
     const startPos = doc.lineAt(first.start).range.start;
     const endPos = doc.lineAt(first.end - 1).rangeIncludingLineBreak.end;
@@ -576,10 +587,11 @@ function syncAxiomsManchester(doc: vscode.TextDocument, entity: OWLEntity): vsco
         break;
       }
     }
+    changedAt = insertLine;
     edit.insert(doc.uri, new vscode.Position(insertLine, 0), newSections + '\n');
   }
 
-  return edit;
+  return { edit, changedRanges: changedLineRanges(changedAt, newSections ? newSections.split('\n') : []) };
 }
 
 // ── Turtle Syntax (.ttl / .n3) ────────────────────────────────────────────────
@@ -670,7 +682,7 @@ function fmtDataLiteralTurtle(value: string, datatype: string | undefined, prefi
   return `"${esc}"`;
 }
 
-function syncAxiomsTurtle(doc: vscode.TextDocument, entity: OWLEntity): vscode.WorkspaceEdit | null {
+function syncAxiomsTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | null {
   const text = doc.getText();
   const lines = text.split('\n');
   const prefixes = parsePrefixes(text, 'turtle');
@@ -722,7 +734,7 @@ function syncAxiomsTurtle(doc: vscode.TextDocument, entity: OWLEntity): vscode.W
   const replaceStart = doc.lineAt(blockStart).range.start;
   const replaceEnd = doc.lineAt(blockEnd - 1).rangeIncludingLineBreak.end;
   edit.replace(doc.uri, new vscode.Range(replaceStart, replaceEnd), rebuiltLines.join('\n') + '\n');
-  return edit;
+  return { edit, changedRanges: changedLineRanges(blockStart, rebuiltLines) };
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -731,23 +743,24 @@ export async function syncAxiomsToDocument(
   doc: vscode.TextDocument,
   entity: OWLEntity,
   sourceFormat?: string,
-): Promise<boolean> {
+): Promise<vscode.Range[] | null> {
   const fsPath = doc.uri.fsPath.toLowerCase();
   const fmt = sourceFormat ?? extensionFormat(fsPath);
-  let edit: vscode.WorkspaceEdit | null = null;
+  let result: SyncResult | null = null;
 
   if (fmt === 'functional') {
-    edit = syncAxiomsFunctional(doc, entity);
+    result = syncAxiomsFunctional(doc, entity);
   } else if (fmt === 'manchester') {
-    edit = syncAxiomsManchester(doc, entity);
+    result = syncAxiomsManchester(doc, entity);
   } else if (fmt === 'turtle') {
-    edit = syncAxiomsTurtle(doc, entity);
+    result = syncAxiomsTurtle(doc, entity);
   } else {
-    return false;
+    return null;
   }
 
-  if (!edit) return false;
-  return vscode.workspace.applyEdit(edit);
+  if (!result) return null;
+  const ok = await vscode.workspace.applyEdit(result.edit);
+  return ok ? result.changedRanges : null;
 }
 
 function extensionFormat(fsPath: string): string | undefined {

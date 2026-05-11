@@ -44,6 +44,12 @@ let _annotationSyncActive = false;
 let _cachedIndexModel: OntologyModel | undefined;
 let _cachedIndex: OntologyIndex | undefined;
 
+const syncHighlightDecoration = vscode.window.createTextEditorDecorationType({
+  backgroundColor: new vscode.ThemeColor('editor.wordHighlightStrongBackground'),
+  overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.modifiedForeground'),
+  overviewRulerLane: vscode.OverviewRulerLane.Right,
+});
+
 function getIndex(model: OntologyModel): OntologyIndex {
   if (model !== _cachedIndexModel || !_cachedIndex) {
     _cachedIndexModel = model;
@@ -251,18 +257,20 @@ function handleMessage(
         const doc = await getSourceDocument(model);
         if (doc) {
           const fmt = model.sourceFormat;
+          const changedRanges: vscode.Range[] = [];
           if (fmt === 'turtle') {
             // Single combined operation: axiom sync handles both annotations and axioms
-            await syncAxiomsToDocument(doc, entity, fmt);
+            changedRanges.push(...(await syncAxiomsToDocument(doc, entity, fmt) ?? []));
           } else {
             // Two-pass for non-overlapping regions: annotation first, then axioms
-            await syncAnnotationsToDocument(doc, entity, fmt);
+            changedRanges.push(...(await syncAnnotationsToDocument(doc, entity, fmt) ?? []));
             // Re-fetch so axiom sync reads the annotation-updated content
             const updatedDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
             if (updatedDoc) {
-              await syncAxiomsToDocument(updatedDoc, entity, fmt);
+              changedRanges.push(...(await syncAxiomsToDocument(updatedDoc, entity, fmt) ?? []));
             }
           }
+          highlightSyncedRanges(doc.uri, changedRanges);
           // Single parsedDocVersions update after all edits are applied, so the
           // final doc.version is stored and no intermediate version triggers a reload.
           const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
@@ -457,6 +465,19 @@ function findEntity(model: OntologyModel, iri: string) {
     ?? model.dataProperties.get(iri)
     ?? model.annotationProperties.get(iri)
     ?? model.individuals.get(iri);
+}
+
+function highlightSyncedRanges(uri: vscode.Uri, ranges: vscode.Range[]): void {
+  if (ranges.length === 0) { return; }
+  const editors = vscode.window.visibleTextEditors.filter(editor => editor.document.uri.toString() === uri.toString());
+  for (const editor of editors) {
+    editor.setDecorations(syncHighlightDecoration, ranges);
+  }
+  setTimeout(() => {
+    for (const editor of vscode.window.visibleTextEditors.filter(e => e.document.uri.toString() === uri.toString())) {
+      editor.setDecorations(syncHighlightDecoration, []);
+    }
+  }, 4000);
 }
 
 async function getSourceDocument(model: OntologyModel): Promise<vscode.TextDocument | undefined> {
