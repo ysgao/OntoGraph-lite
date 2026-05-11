@@ -105,19 +105,31 @@ export function activate(context: vscode.ExtensionContext): void {
     individualProvider.setModel(model, preferredLang);
   }
 
+  function hasInferredHierarchy(model: OntologyModel | undefined): model is OntologyModel {
+    if (!model?.isClassified) { return false; }
+    for (const children of model.inferredSubClasses.values()) {
+      if (children.size > 0) { return true; }
+    }
+    return false;
+  }
+
   function revealInTreeView(iri: string, entityType: EntityType): void {
-    const opts = { select: true, focus: false, expand: true };
+    const opts = { select: true, focus: false, expand: false };
     try {
       switch (entityType) {
         case 'class': {
           classProvider.setFocus(iri);
           inferredProvider.setFocus(iri);
+          if (hasInferredHierarchy(activeModel)) {
+            const inferredItem = inferredProvider.makeItem(iri);
+            if (inferredItem) {
+              void vscode.commands.executeCommand('ontograph.inferredClasses.focus');
+              void inferredView.reveal(inferredItem, opts);
+              break;
+            }
+          }
           const item = classProvider.makeItem(iri);
           if (item) { void classView.reveal(item, opts); }
-          if (activeModel?.isClassified) {
-            const inferredItem = inferredProvider.makeItem(iri);
-            if (inferredItem) { void inferredView.reveal(inferredItem, opts); }
-          }
           break;
         }
         case 'objectProperty': {

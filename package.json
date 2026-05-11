@@ -47,16 +47,16 @@
     "views": {
       "ontograph": [
         {
-          "id": "ontograph.classes",
-          "name": "Classes",
-          "icon": "$(type-hierarchy)",
-          "contextualTitle": "OWL Classes"
-        },
-        {
           "id": "ontograph.inferredClasses",
           "name": "Inferred Hierarchy",
           "icon": "$(symbol-class)",
-          "contextualTitle": "Inferred Class Hierarchy",
+          "contextualTitle": "Inferred Class Hierarchy"
+        },
+        {
+          "id": "ontograph.classes",
+          "name": "Classes",
+          "icon": "$(type-hierarchy)",
+          "contextualTitle": "OWL Classes",
           "visibility": "collapsed"
         },
         {

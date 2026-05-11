@@ -128,6 +128,7 @@ function handleMessage(
 
     case 'navigate':
       showEntityInfo(context, model, msg.iri);
+      void vscode.commands.executeCommand('ontograph.focusEntity', { iri: msg.iri });
       break;
 
     case 'focusEntity':
