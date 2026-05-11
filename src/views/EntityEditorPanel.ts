@@ -253,39 +253,44 @@ function handleMessage(
       // sequential edits are safe. parsedDocVersions is updated once at the end.
       _annotationSyncActive = true;
       void (async () => {
-        const wasSourceDocOpen = vscode.workspace.textDocuments.some(d => d.uri.toString() === model.sourceUri);
-        const doc = await getSourceDocument(model);
-        if (doc) {
-          const fmt = model.sourceFormat;
-          const changedRanges: vscode.Range[] = [];
-          if (fmt === 'turtle') {
-            // Single combined operation: axiom sync handles both annotations and axioms
-            changedRanges.push(...(await syncAxiomsToDocument(doc, entity, fmt) ?? []));
-          } else {
-            // Two-pass for non-overlapping regions: annotation first, then axioms
-            changedRanges.push(...(await syncAnnotationsToDocument(doc, entity, fmt) ?? []));
-            // Re-fetch so axiom sync reads the annotation-updated content
-            const updatedDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-            if (updatedDoc) {
-              changedRanges.push(...(await syncAxiomsToDocument(updatedDoc, entity, fmt) ?? []));
+        try {
+          const wasSourceDocOpen = vscode.window.visibleTextEditors.some(e => e.document.uri.toString() === model.sourceUri);
+          const doc = await getSourceDocument(model);
+          if (doc) {
+            const fmt = model.sourceFormat;
+            const changedRanges: vscode.Range[] = [];
+            if (fmt === 'turtle') {
+              // Single combined operation: axiom sync handles both annotations and axioms
+              changedRanges.push(...(await syncAxiomsToDocument(doc, entity, fmt) ?? []));
+            } else {
+              // Two-pass for non-overlapping regions: annotation first, then axioms
+              changedRanges.push(...(await syncAnnotationsToDocument(doc, entity, fmt) ?? []));
+              // Re-fetch so axiom sync reads the annotation-updated content
+              const updatedDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+              if (updatedDoc) {
+                changedRanges.push(...(await syncAxiomsToDocument(updatedDoc, entity, fmt) ?? []));
+              }
+            }
+            highlightSyncedRanges(doc.uri, changedRanges);
+            // Single parsedDocVersions update after all edits are applied, so the
+            // final doc.version is stored and no intermediate version triggers a reload.
+            const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+            if (finalDoc) {
+              // Update tracking BEFORE save to prevent race with onDidSaveTextDocument
+              parsedDocVersions.set(finalDoc.uri.toString(), finalDoc.version);
+              model.rawContent = finalDoc.getText();
+
+              if (!wasSourceDocOpen) {
+                await finalDoc.save();
+              }
             }
           }
-          highlightSyncedRanges(doc.uri, changedRanges);
-          // Single parsedDocVersions update after all edits are applied, so the
-          // final doc.version is stored and no intermediate version triggers a reload.
-          const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-          if (finalDoc) {
-            if (!wasSourceDocOpen) {
-              await finalDoc.save();
-            }
-            parsedDocVersions.set(finalDoc.uri.toString(), finalDoc.version);
-            model.rawContent = finalDoc.getText();
-          }
+        } finally {
+          _annotationSyncActive = false;
+          // Safe to clear now: the file buffer has updated data, so the next
+          // model re-parse (triggered by onDidSaveTextDocument) will have correct data.
+          savedEntityState.delete(msg.iri);
         }
-        _annotationSyncActive = false;
-        // Safe to clear now: the file buffer has updated data, so the next
-        // model re-parse (triggered by onDidSaveTextDocument) will have correct data.
-        savedEntityState.delete(msg.iri);
       })();
 
       fireRefresh();

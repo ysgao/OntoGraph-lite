@@ -228,6 +228,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('ontograph.classifyOntologyStale', async () => {
+      if (activeModel) {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(activeModel.sourceUri));
+        // Force re-parse: ignore the cached version
+        parsedDocVersions.delete(activeModel.sourceUri);
+        await handleDocument(doc);
+      }
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
     }),
@@ -314,6 +320,15 @@ export function activate(context: vscode.ExtensionContext): void {
     const key = doc.uri.toString();
     const version = doc.version;
     if (parsedDocVersions.get(key) === version) { return; }
+
+    const content = doc.getText();
+    // Optimization: Skip re-parsing if the document matches the memory model exactly
+    // (e.g. after a programmatic open of a closed file that is already loaded).
+    if (activeModel?.sourceUri === key && activeModel.rawContent === content) {
+      parsedDocVersions.set(key, version);
+      return;
+    }
+
     parsedDocVersions.set(key, version);
 
     outputChannel.appendLine(`[handleDocument] lang=${langId} uri=${doc.uri.fsPath.split(/[\\/]/).pop()} v${version}`);
@@ -321,7 +336,16 @@ export function activate(context: vscode.ExtensionContext): void {
     const statusMsg = vscode.window.setStatusBarMessage(`$(loading~spin) OntoGraph: parsing…`);
 
     try {
-      const model = await ParserRegistry.parseAsync(doc.getText(), langId, key);
+      const model = await ParserRegistry.parseAsync(content, langId, key);
+      
+      // Preserve classification state if re-parsing the same ontology,
+      // ensuring the "stale" hierarchy remains visible during edits.
+      if (activeModel && activeModel.sourceUri === key) {
+        model.isClassified = activeModel.isClassified;
+        model.classificationNeedsUpdate = activeModel.classificationNeedsUpdate;
+        model.inferredSubClasses = activeModel.inferredSubClasses;
+      }
+
       activeModel = model;
       refreshAllViews(model);
       refreshEntityEditorIfOpen(model);
