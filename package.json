@@ -160,22 +160,22 @@
         {
           "command": "ontograph.searchEntity",
           "when": "view =~ /^ontograph\\./",
-          "group": "navigation@0"
+          "group": "navigation@2"
         },
         {
           "command": "ontograph.refresh",
           "when": "view =~ /^ontograph\\./",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "ontograph.classifyOntology",
           "when": "view == ontograph.classes || view == ontograph.inferredClasses && !ontograph.classificationNeedsUpdate",
-          "group": "navigation"
+          "group": "navigation@0"
         },
         {
           "command": "ontograph.classifyOntologyStale",
           "when": "view == ontograph.inferredClasses && ontograph.classificationNeedsUpdate",
-          "group": "navigation"
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [

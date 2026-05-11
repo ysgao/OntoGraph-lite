@@ -68,14 +68,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   function updateClassificationViewState(model: OntologyModel | undefined): void {
     const needsUpdate = !!model?.classificationNeedsUpdate;
-    inferredView.title = needsUpdate ? 'Inferred Hierarchy (Needs Update)' : 'Inferred Hierarchy';
-    inferredView.description = needsUpdate ? 'stale' : undefined;
-    inferredView.badge = needsUpdate
-      ? { value: 1, tooltip: 'Classification needs update. Click Classify Ontology to refresh the inferred hierarchy.' }
-      : undefined;
-    inferredView.message = needsUpdate
-      ? 'Classification needs update. This inferred hierarchy is from the previous classification; click Classify Ontology to refresh it.'
-      : undefined;
+    inferredView.title = 'Inferred Hierarchy';
+    inferredView.description = undefined;
+    inferredView.badge = undefined;
+    inferredView.message = undefined;
     void vscode.commands.executeCommand('setContext', 'ontograph.classificationNeedsUpdate', needsUpdate);
   }
   updateClassificationViewState(undefined);
