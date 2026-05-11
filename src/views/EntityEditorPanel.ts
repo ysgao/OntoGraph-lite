@@ -247,7 +247,8 @@ function handleMessage(
       // sequential edits are safe. parsedDocVersions is updated once at the end.
       _annotationSyncActive = true;
       void (async () => {
-        const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+        const wasSourceDocOpen = vscode.workspace.textDocuments.some(d => d.uri.toString() === model.sourceUri);
+        const doc = await getSourceDocument(model);
         if (doc) {
           const fmt = model.sourceFormat;
           if (fmt === 'turtle') {
@@ -266,6 +267,9 @@ function handleMessage(
           // final doc.version is stored and no intermediate version triggers a reload.
           const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
           if (finalDoc) {
+            if (!wasSourceDocOpen) {
+              await finalDoc.save();
+            }
             parsedDocVersions.set(finalDoc.uri.toString(), finalDoc.version);
             model.rawContent = finalDoc.getText();
           }
@@ -453,6 +457,18 @@ function findEntity(model: OntologyModel, iri: string) {
     ?? model.dataProperties.get(iri)
     ?? model.annotationProperties.get(iri)
     ?? model.individuals.get(iri);
+}
+
+async function getSourceDocument(model: OntologyModel): Promise<vscode.TextDocument | undefined> {
+  const openDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+  if (openDoc) { return openDoc; }
+  try {
+    return await vscode.workspace.openTextDocument(vscode.Uri.parse(model.sourceUri));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showWarningMessage(`OntoGraph: Could not open source ontology for sync: ${msg}`);
+    return undefined;
+  }
 }
 
 function hasInferredHierarchy(model: OntologyModel): boolean {
