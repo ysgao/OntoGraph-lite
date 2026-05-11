@@ -15,9 +15,12 @@ export async function checkConsistency(
     return;
   }
 
-  const { content, format } = model.rawContent
-    ? { content: model.rawContent, format: model.sourceFormat }
-    : { content: serializeToFunctional(model), format: 'functional' };
+  const sourceDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+  const { content, format } = sourceDoc
+    ? { content: sourceDoc.getText(), format: model.sourceFormat }
+    : model.rawContent
+      ? { content: model.rawContent, format: model.sourceFormat }
+      : { content: serializeToFunctional(model), format: 'functional' };
 
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'OntoGraph: Checking consistency…', cancellable: false },

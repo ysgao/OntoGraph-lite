@@ -23,13 +23,15 @@ export async function classifyOntology(
     ? (model.classes.size > threshold ? 'elk' : 'hermit')
     : engineSetting;
 
-  // Use the original file content so complex class expressions (restrictions,
-  // equivalences) reach the reasoner intact. Fall back to functional
-  // serialization only for programmatically-constructed models that have no
-  // stored raw content.
-  const { content, format } = model.rawContent
-    ? { content: model.rawContent, format: model.sourceFormat }
-    : { content: serializeToFunctional(model), format: 'functional' };
+  // Use the current open document text when possible so classifications include
+  // axioms saved through the Entity Editor. Fall back to rawContent for parsed
+  // files, then to model serialization for programmatic models.
+  const sourceDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+  const { content, format } = sourceDoc
+    ? { content: sourceDoc.getText(), format: model.sourceFormat }
+    : model.rawContent
+      ? { content: model.rawContent, format: model.sourceFormat }
+      : { content: serializeToFunctional(model), format: 'functional' };
 
   await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
@@ -55,6 +57,7 @@ export async function classifyOntology(
       }
 
       model.isClassified = true;
+      model.classificationNeedsUpdate = false;
       inferredProvider.setModel(model);
 
       // Focus the Inferred Classes view so the user sees the result immediately

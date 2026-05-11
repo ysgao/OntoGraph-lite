@@ -86,6 +86,8 @@ export interface OntologyModel {
   inferredSubClasses: Map<string, Set<string>>;
   /** Whether the ontology has been classified by a reasoner */
   isClassified: boolean;
+  /** Whether saved ontology edits have made the current inferred hierarchy stale */
+  classificationNeedsUpdate: boolean;
 }
 
 function makeAnnProp(iri: string, label: string): OWLAnnotationProperty {
@@ -148,6 +150,7 @@ export function createEmptyModel(sourceUri: string): OntologyModel {
     sourceFormat: 'functional',
     inferredSubClasses: new Map(),
     isClassified: false,
+    classificationNeedsUpdate: false,
   };
 }
 

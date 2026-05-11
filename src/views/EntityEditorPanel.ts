@@ -164,6 +164,7 @@ function handleMessage(
         void vscode.window.showWarningMessage(`OntoGraph: Entity not found: ${msg.iri}`);
         return;
       }
+      const classificationAffectingChange = hasClassificationAffectingChange(entity, msg);
       const index = getIndex(model);
 
       switch (msg.entityType) {
@@ -224,6 +225,9 @@ function handleMessage(
 
       // Invalidate the index so label changes are reflected in autocomplete
       _cachedIndex = undefined;
+      if (classificationAffectingChange && model.isClassified && hasInferredHierarchy(model)) {
+        model.classificationNeedsUpdate = true;
+      }
 
       // Cache the saved state so sendLoadEntity always serves correct data
       // even if activeModel is re-parsed before applyEdit completes (race condition).
@@ -263,6 +267,7 @@ function handleMessage(
           const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
           if (finalDoc) {
             parsedDocVersions.set(finalDoc.uri.toString(), finalDoc.version);
+            model.rawContent = finalDoc.getText();
           }
         }
         _annotationSyncActive = false;
@@ -448,6 +453,79 @@ function findEntity(model: OntologyModel, iri: string) {
     ?? model.dataProperties.get(iri)
     ?? model.annotationProperties.get(iri)
     ?? model.individuals.get(iri);
+}
+
+function hasInferredHierarchy(model: OntologyModel): boolean {
+  for (const children of model.inferredSubClasses.values()) {
+    if (children.size > 0) { return true; }
+  }
+  return false;
+}
+
+function hasClassificationAffectingChange(
+  entity: NonNullable<ReturnType<typeof findEntity>>,
+  msg: Extract<EntityEditorWebviewToExt, { type: 'save' }>,
+): boolean {
+  const sameStringArray = (a: readonly string[] | undefined, b: readonly string[] | undefined) =>
+    JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+  const sameChains = (a: readonly string[][] | undefined, b: readonly string[][] | undefined) =>
+    JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+  const sameObjAssertions = (
+    a: readonly { propertyIri: string; targetIri: string }[] | undefined,
+    b: readonly { propertyIri: string; targetIri: string }[] | undefined,
+  ) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+  const sameDataAssertions = (
+    a: readonly { propertyIri: string; value: string; datatype?: string }[] | undefined,
+    b: readonly { propertyIri: string; value: string; datatype?: string }[] | undefined,
+  ) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+
+  switch (entity.type) {
+    case 'class': {
+      const cls = entity as OWLClass;
+      return !sameStringArray(cls.superClassIris, msg.superClassIris)
+        || !sameStringArray(cls.superClassExpressions, msg.superClassExpressions)
+        || !sameStringArray(cls.equivalentClassIris, msg.equivalentClassIris)
+        || !sameStringArray(cls.equivalentClassExpressions, msg.equivalentClassExpressions)
+        || !sameStringArray(cls.gciExpressions, msg.gciExpressions)
+        || !sameStringArray(cls.disjointClassIris, msg.disjointClassIris);
+    }
+    case 'objectProperty': {
+      const prop = entity as OWLObjectProperty;
+      return !sameStringArray(prop.superPropertyIris, msg.superPropertyIris)
+        || !sameStringArray(prop.domainIris, msg.domainIris)
+        || !sameStringArray(prop.rangeIris, msg.rangeIris)
+        || (prop.inverseOfIri ?? undefined) !== (msg.inverseOfIri || undefined)
+        || !!prop.isTransitive !== !!msg.isTransitive
+        || !!prop.isSymmetric !== !!msg.isSymmetric
+        || !!prop.isFunctional !== !!msg.isFunctional
+        || !!prop.isInverseFunctional !== !!msg.isInverseFunctional
+        || !!prop.isReflexive !== !!msg.isReflexive
+        || !!prop.isIrreflexive !== !!msg.isIrreflexive
+        || !!prop.isAsymmetric !== !!msg.isAsymmetric
+        || !sameStringArray(prop.equivalentPropertyIris, msg.equivalentPropertyIris)
+        || !sameStringArray(prop.disjointPropertyIris, msg.disjointPropertyIris)
+        || !sameChains(prop.propertyChains, msg.propertyChains);
+    }
+    case 'dataProperty': {
+      const prop = entity as OWLDataProperty;
+      return !sameStringArray(prop.superPropertyIris, msg.superPropertyIris)
+        || !sameStringArray(prop.domainIris, msg.domainIris)
+        || !sameStringArray(prop.rangeIris, msg.rangeIris)
+        || !!prop.isFunctional !== !!msg.isFunctional;
+    }
+    case 'annotationProperty': {
+      const prop = entity as OWLAnnotationProperty;
+      return !sameStringArray(prop.superPropertyIris, msg.superPropertyIris)
+        || !sameStringArray(prop.domainIris, msg.domainIris)
+        || !sameStringArray(prop.rangeIris, msg.rangeIris);
+    }
+    case 'individual': {
+      const ind = entity as OWLIndividual;
+      return !sameStringArray(ind.classIris, msg.classIris)
+        || !sameObjAssertions(ind.objectPropertyAssertions, msg.objectPropertyAssertions)
+        || !sameDataAssertions(ind.dataPropertyAssertions, msg.dataPropertyAssertions);
+    }
+  }
 }
 
 function localName(iri: string): string {

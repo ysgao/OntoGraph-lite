@@ -66,6 +66,20 @@ export function activate(context: vscode.ExtensionContext): void {
   const annotationPropView = vscode.window.createTreeView('ontograph.annotationProperties', { treeDataProvider: annotationPropProvider });
   const individualView = vscode.window.createTreeView('ontograph.individuals', { treeDataProvider: individualProvider });
 
+  function updateClassificationViewState(model: OntologyModel | undefined): void {
+    const needsUpdate = !!model?.classificationNeedsUpdate;
+    inferredView.title = needsUpdate ? 'Inferred Hierarchy (Needs Update)' : 'Inferred Hierarchy';
+    inferredView.description = needsUpdate ? 'stale' : undefined;
+    inferredView.badge = needsUpdate
+      ? { value: 1, tooltip: 'Classification needs update. Click Classify Ontology to refresh the inferred hierarchy.' }
+      : undefined;
+    inferredView.message = needsUpdate
+      ? 'Classification needs update. This inferred hierarchy is from the previous classification; click Classify Ontology to refresh it.'
+      : undefined;
+    void vscode.commands.executeCommand('setContext', 'ontograph.classificationNeedsUpdate', needsUpdate);
+  }
+  updateClassificationViewState(undefined);
+
   context.subscriptions.push(
     classView,
     inferredView,
@@ -103,6 +117,7 @@ export function activate(context: vscode.ExtensionContext): void {
     dataPropProvider.setModel(model, preferredLang);
     annotationPropProvider.setModel(model, preferredLang);
     individualProvider.setModel(model, preferredLang);
+    updateClassificationViewState(model);
   }
 
   function hasInferredHierarchy(model: OntologyModel | undefined): model is OntologyModel {
@@ -211,8 +226,15 @@ export function activate(context: vscode.ExtensionContext): void {
       revealInTreeView(iri, entityType);
     }),
 
-    vscode.commands.registerCommand('ontograph.classifyOntology', () =>
-      classifyOntology(activeModel, reasonerBridge, inferredProvider)),
+    vscode.commands.registerCommand('ontograph.classifyOntology', async () => {
+      await classifyOntology(activeModel, reasonerBridge, inferredProvider);
+      updateClassificationViewState(activeModel);
+    }),
+
+    vscode.commands.registerCommand('ontograph.classifyOntologyStale', async () => {
+      await classifyOntology(activeModel, reasonerBridge, inferredProvider);
+      updateClassificationViewState(activeModel);
+    }),
 
     vscode.commands.registerCommand('ontograph.checkConsistency', () =>
       checkConsistency(activeModel, reasonerBridge, context)),
