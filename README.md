@@ -27,7 +27,7 @@ OntoGraph provides rich language support for OWL files via the Language Server P
 
 ### Prerequisites
 
-- **Antigravity** (IDE) [Link](https://docs.antigravity.ai/)   This IDE has better performance than Visual Studio Code for this project. 
+- **Antigravity** (IDE) [Link](https://antigravity.google/)   This IDE has better performance than Visual Studio Code for this project. 
 - **Visual Studio Code** 1.90.0 or newer. [Link](https://code.visualstudio.com/) (Alternatively, you can use this IDE)
 - **Java Runtime Environment (JRE) 11** or newer (required for the reasoning server).
 - **Node.js 18** or newer.
