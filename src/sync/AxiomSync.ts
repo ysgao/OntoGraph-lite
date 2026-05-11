@@ -269,10 +269,7 @@ function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
     for (const dj of cls.disjointClassIris) {
       lines.push(`  DisjointClasses(${a(iri)} ${a(dj)})`);
     }
-    for (const expr of cls.gciExpressions ?? []) {
-      const fn = manchesterToFunctional(expr);
-      if (fn) lines.push(`  SubClassOf(${fn} ${a(iri)})`);
-    }
+    // GCI axioms (SubClassOf(complexExpr <iri>)) are emitted separately by generateFunctionalGCILines
   } else if (entity.type === 'objectProperty') {
     const prop = entity as OWLObjectProperty;
     for (const sup of prop.superPropertyIris) {
@@ -337,12 +334,111 @@ function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
   return lines;
 }
 
-// Match a line to an axiom keyword and verify the entity IRI appears in it
-function isEntityAxiomLine(line: string, entityIri: string, keywords: Set<string>): boolean {
+// Match a line to an axiom keyword and verify the entity IRI is in the owned
+// position for that axiom. A parent IRI in SubClassOf(child parent) is not owned
+// by the parent frame and must not be used as that parent's insertion point.
+function isEntityAxiomLine(line: string, entity: OWLEntity, keywords: Set<string>): boolean {
   const trimmed = line.trimStart();
   const kw = trimmed.match(/^([A-Za-z]+)\s*\(/);
   if (!kw || !keywords.has(kw[1])) return false;
-  return line.includes(`<${entityIri}>`);
+  const tokens = extractIriTokens(trimmed);
+  const entityToken = `<${entity.iri}>`;
+  const first = tokens[0];
+  const second = tokens[1];
+  const last = tokens[tokens.length - 1];
+
+  switch (entity.type) {
+    case 'class':
+      if (kw[1] === 'SubClassOf') {
+        // Named-class subclass axioms are owned by the subclass. GCIs emitted
+        // for this class as superclass have a complex first operand and the
+        // edited class as the final named IRI.
+        return first === entityToken || (!trimmed.startsWith('SubClassOf(<') && last === entityToken);
+      }
+      return first === entityToken;
+
+    case 'objectProperty':
+      if (kw[1] === 'SubObjectPropertyOf' && trimmed.includes('ObjectPropertyChain(')) {
+        return last === entityToken;
+      }
+      return first === entityToken;
+
+    case 'dataProperty':
+    case 'annotationProperty':
+      return first === entityToken;
+
+    case 'individual':
+      if (kw[1] === 'ClassAssertion' || kw[1] === 'ObjectPropertyAssertion' || kw[1] === 'DataPropertyAssertion') {
+        return second === entityToken;
+      }
+      return first === entityToken;
+  }
+}
+
+function extractIriTokens(text: string): string[] {
+  return Array.from(text.matchAll(/<[^>]+>/g), match => match[0]);
+}
+
+// True only for GCI SubClassOf lines: SubClassOf(complexExpr <entity>)
+// These are distinguished from regular SubClassOf(<entity> ...) by the complex LHS.
+function isGCIAxiomLine(line: string, entity: OWLEntity): boolean {
+  if (entity.type !== 'class') return false;
+  const trimmed = line.trimStart();
+  if (!/^SubClassOf\s*\(/.test(trimmed)) return false;
+  const entityToken = `<${entity.iri}>`;
+  const tokens = extractIriTokens(trimmed);
+  return (
+    tokens.length >= 2 &&
+    tokens[0] !== entityToken &&
+    !trimmed.startsWith('SubClassOf(<') &&
+    tokens[tokens.length - 1] === entityToken
+  );
+}
+
+// Generates only the GCI axiom lines (SubClassOf(complexExpr <entity>)) for functional syntax.
+function generateFunctionalGCILines(entity: OWLEntity): string[] {
+  if (entity.type !== 'class') return [];
+  const cls = entity as OWLClass;
+  const a = (i: string) => `<${i}>`;
+  const lines: string[] = [];
+  for (const expr of cls.gciExpressions ?? []) {
+    const fn = manchesterToFunctional(expr);
+    if (fn) lines.push(`  SubClassOf(${fn} ${a(cls.iri)})`);
+  }
+  return lines;
+}
+
+// Returns the Declaration keyword for Declaration(Keyword(<iri>)) matching.
+function entityDeclarationKeyword(entity: OWLEntity): string {
+  switch (entity.type) {
+    case 'class':              return 'Class';
+    case 'objectProperty':     return 'ObjectProperty';
+    case 'dataProperty':       return 'DataProperty';
+    case 'annotationProperty': return 'AnnotationProperty';
+    case 'individual':         return 'NamedIndividual';
+  }
+}
+
+// Returns the last line index that "anchors" the entity in a functional-syntax document:
+// the entity's Declaration line or its last AnnotationAssertion. Returns -1 if neither found.
+function findEntityAnchorLine(lines: string[], entity: OWLEntity): number {
+  const entityToken = `<${entity.iri}>`;
+  const escapedToken = entityToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declKw = entityDeclarationKeyword(entity);
+  const declarationRe = new RegExp(
+    `^\\s*Declaration\\s*\\(\\s*${declKw}\\s*\\(\\s*${escapedToken}\\s*\\)`
+  );
+  let anchor = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (declarationRe.test(lines[i])) {
+      anchor = Math.max(anchor, i);
+      continue;
+    }
+    if (/\bAnnotationAssertion\b/.test(lines[i]) && lines[i].includes(entityToken)) {
+      anchor = Math.max(anchor, i);
+    }
+  }
+  return anchor;
 }
 
 interface SyncResult {
@@ -358,41 +454,70 @@ function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): Sync
   const text = doc.getText();
   const lines = text.split('\n');
   const keywords = entityAxiomKeywords(entity);
-  const newLines = generateFunctionalAxiomLines(entity);
+  const regularLines = generateFunctionalAxiomLines(entity);
+  const gciLines = generateFunctionalGCILines(entity);
 
-  const toDelete: number[] = [];
+  // Separate existing axiom lines into regular (entity as subject) and GCI (entity as superclass)
+  const regularToDelete: number[] = [];
+  const gciToDelete: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (isEntityAxiomLine(lines[i], entity.iri, keywords)) {
-      toDelete.push(i);
+    if (!isEntityAxiomLine(lines[i], entity, keywords)) continue;
+    if (isGCIAxiomLine(lines[i], entity)) {
+      gciToDelete.push(i);
+    } else {
+      regularToDelete.push(i);
     }
   }
 
-  // Find insertion point: where first existing axiom was, or before closing ')' of Ontology block
-  let insertAt: number;
-  if (toDelete.length > 0) {
-    insertAt = toDelete[0];
+  // Closing paren of Ontology block — GCIs always land before this line
+  let closingParenLine = lines.length > 1 ? lines.length - 1 : lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim() === ')') { closingParenLine = i; break; }
+  }
+
+  // Regular axiom insertion point: at the first existing regular axiom, or after the entity's
+  // Declaration / last AnnotationAssertion in the document (fallback: before closing paren).
+  let regularInsertAt: number;
+  if (regularToDelete.length > 0) {
+    regularInsertAt = regularToDelete[0];
   } else {
-    insertAt = lines.length > 1 ? lines.length - 1 : lines.length;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim() === ')') { insertAt = i; break; }
-    }
+    const anchor = findEntityAnchorLine(lines, entity);
+    regularInsertAt = anchor >= 0 ? anchor + 1 : closingParenLine;
   }
 
   const edit = new vscode.WorkspaceEdit();
+  const changedRanges: vscode.Range[] = [];
 
-  if (toDelete.length > 0) {
-    // Replace first deleted line with new content, delete the rest
-    const newContent = newLines.length > 0 ? newLines.join('\n') + '\n' : '';
-    edit.replace(doc.uri, doc.lineAt(insertAt).rangeIncludingLineBreak, newContent);
-    for (const i of [...toDelete.slice(1)].reverse()) {
+  // Regular axioms: replace existing block or insert at anchor
+  if (regularToDelete.length > 0) {
+    const newContent = regularLines.length > 0 ? regularLines.join('\n') + '\n' : '';
+    edit.replace(doc.uri, doc.lineAt(regularInsertAt).rangeIncludingLineBreak, newContent);
+    for (const i of [...regularToDelete.slice(1)].reverse()) {
       edit.delete(doc.uri, doc.lineAt(i).rangeIncludingLineBreak);
     }
-  } else if (newLines.length > 0) {
-    edit.insert(doc.uri, new vscode.Position(insertAt, 0), newLines.join('\n') + '\n');
+    if (regularLines.length > 0) {
+      changedRanges.push(...changedLineRanges(regularInsertAt, regularLines));
+    }
+  } else if (regularLines.length > 0) {
+    edit.insert(doc.uri, new vscode.Position(regularInsertAt, 0), regularLines.join('\n') + '\n');
+    changedRanges.push(...changedLineRanges(regularInsertAt, regularLines));
   }
 
-  if (toDelete.length === 0 && newLines.length === 0) return null;
-  return { edit, changedRanges: changedLineRanges(insertAt, newLines) };
+  // GCI axioms: always at end of Ontology block, before closing paren
+  for (const i of [...gciToDelete].reverse()) {
+    edit.delete(doc.uri, doc.lineAt(i).rangeIncludingLineBreak);
+  }
+  if (gciLines.length > 0) {
+    edit.insert(doc.uri, new vscode.Position(closingParenLine, 0), gciLines.join('\n') + '\n');
+    changedRanges.push(...changedLineRanges(closingParenLine, gciLines));
+  }
+
+  if (regularToDelete.length === 0 && regularLines.length === 0 &&
+      gciToDelete.length === 0 && gciLines.length === 0) {
+    return null;
+  }
+
+  return { edit, changedRanges };
 }
 
 // ── Manchester Syntax (.omn) ───────────────────────────────────────────────────
