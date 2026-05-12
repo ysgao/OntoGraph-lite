@@ -1,3 +1,5 @@
+export {};
+
 const expr = "http://example.org/BodyStructure and (http://example.org/Laterality some http://example.org/Side)";
 function getTopLevelNamedClasses(expr: string): string[] {
   let depth = 0;
