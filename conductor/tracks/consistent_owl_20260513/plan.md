@@ -5,7 +5,7 @@
 - [x] Task: Create unified cluster generation logic [354fb3e]
     - [x] Write unit tests for `generateEntityCluster` utility
     - [x] Implement `generateEntityCluster` in a shared utility file (or `FunctionalSerializer.ts`)
-- [x] Task: Refactor `FunctionalSerializer.ts` for consistent ordering [8eb7dfe]
+- [x] Task: Refactor `FunctionalSerializer.ts` for consistent ordering [8e38692]
     - [x] Update `FunctionalSerializer.test.ts` with new expected structure
     - [x] Implement new ordering logic in `serializeToFunctional`
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Unified Cluster Generation & Serialization' (Protocol in workflow.md)
