@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createEmptyModel, OWLClass, OWLObjectProperty, OWLIndividual } from '../model/OntologyModel';
-import { generateEntityCluster } from './FunctionalSerializer';
+import { createEmptyModel, OWLClass, OWLObjectProperty, OWLIndividual, OntologyModel } from '../model/OntologyModel';
+import { generateEntityCluster, serializeToFunctional } from './FunctionalSerializer';
 
 describe('FunctionalSerializer Clustering', () => {
   it('should generate a cluster for a class with annotations and axioms', () => {
@@ -82,5 +82,57 @@ describe('FunctionalSerializer Clustering', () => {
       'ObjectPropertyAssertion(<http://example.org#partOf> <http://example.org#myInd> <http://example.org#otherInd>)',
       'DataPropertyAssertion(<http://example.org#hasAge> <http://example.org#myInd> "25"^^<http://www.w3.org/2001/XMLSchema#integer>)'
     ]);
+  });
+});
+
+describe('FunctionalSerializer Full Serialization', () => {
+  it('should serialize with correct order and clustering', () => {
+    const model = createEmptyModel('test.ofn');
+    model.metadata.iri = 'http://example.org/ontology';
+    
+    const clsA: OWLClass = {
+      iri: 'http://example.org#A',
+      type: 'class',
+      labels: { en: ['Class A'] },
+      annotations: {},
+      superClassIris: ['http://example.org#B'],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: []
+    };
+    model.classes.set(clsA.iri, clsA);
+
+    const propP: OWLObjectProperty = {
+      iri: 'http://example.org#p',
+      type: 'objectProperty',
+      labels: { en: ['prop p'] },
+      annotations: {},
+      superPropertyIris: [],
+      domainIris: [],
+      rangeIris: []
+    };
+    model.objectProperties.set(propP.iri, propP);
+
+    const output = serializeToFunctional(model);
+    
+    const lines = output.split('\n');
+    
+    // Check some key markers in order
+    expect(lines).toContain('Prefix(:=<http://example.org/ontology#>)');
+    expect(lines).toContain('Ontology(<http://example.org/ontology>');
+    
+    // Declarations should come before clusters
+    const declIdx = lines.findIndex(l => l.includes('Declaration(Class(<http://example.org#A>))'));
+    const clusterIdx = lines.findIndex(l => l.includes('# Class: <http://example.org#A>'));
+    
+    expect(declIdx).toBeGreaterThan(-1);
+    expect(clusterIdx).toBeGreaterThan(-1);
+    expect(declIdx).toBeLessThan(clusterIdx);
+    
+    // Object Property cluster should come before Class cluster
+    const propClusterIdx = lines.findIndex(l => l.includes('# ObjectProperty: <http://example.org#p>'));
+    expect(propClusterIdx).toBeLessThan(clusterIdx);
   });
 });

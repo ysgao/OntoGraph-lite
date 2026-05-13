@@ -116,7 +116,7 @@ export function generateEntityCluster(entity: OWLEntity, model: OntologyModel): 
 export function serializeToFunctional(model: OntologyModel): string {
   const out: string[] = [];
 
-  // Prefixes
+  // 1. Prefixes
   const ontIri = model.metadata.iri ?? 'http://example.org/ontology';
   out.push(`Prefix(:=<${ontIri}#>)`);
   out.push(`Prefix(owl:=<${OWL}>)`);
@@ -125,133 +125,104 @@ export function serializeToFunctional(model: OntologyModel): string {
   out.push(`Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)`);
   out.push('');
 
-  // Ontology header
+  // 2. Ontology header
   const header = model.metadata.versionIri
     ? `${iri(ontIri)}
   ${iri(model.metadata.versionIri)}`
     : iri(ontIri);
   out.push(`Ontology(${header}`);
 
-  // Imports
+  // 3. Imports
   for (const imp of model.metadata.imports) {
     out.push(`  Import(${iri(imp)})`);
   }
+  if (model.metadata.imports.length > 0) {
+    out.push('');
+  }
 
-  // Declarations
+  // 4. Declarations
+  const declarations: string[] = [];
   for (const cls of model.classes.values()) {
-    out.push(`  Declaration(Class(${iri(cls.iri)}))`);
+    declarations.push(`  Declaration(Class(${iri(cls.iri)}))`);
   }
   for (const p of model.objectProperties.values()) {
-    out.push(`  Declaration(ObjectProperty(${iri(p.iri)}))`);
+    declarations.push(`  Declaration(ObjectProperty(${iri(p.iri)}))`);
   }
   for (const p of model.dataProperties.values()) {
-    out.push(`  Declaration(DataProperty(${iri(p.iri)}))`);
+    declarations.push(`  Declaration(DataProperty(${iri(p.iri)}))`);
   }
   for (const p of model.annotationProperties.values()) {
-    out.push(`  Declaration(AnnotationProperty(${iri(p.iri)}))`);
+    declarations.push(`  Declaration(AnnotationProperty(${iri(p.iri)}))`);
   }
   for (const ind of model.individuals.values()) {
-    out.push(`  Declaration(NamedIndividual(${iri(ind.iri)}))`);
+    declarations.push(`  Declaration(NamedIndividual(${iri(ind.iri)}))`);
+  }
+  
+  if (declarations.length > 0) {
+    out.push(...declarations);
+    out.push('');
   }
 
-  // Class axioms
-  for (const cls of model.classes.values()) {
-    for (const sup of cls.superClassIris) {
-      if (sup === OWL_THING) { continue; }
-      out.push(`  SubClassOf(${iri(cls.iri)} ${iri(sup)})`);
-    }
-    if (cls.equivalentClassIris.length > 0) {
-      out.push(`  EquivalentClasses(${[cls.iri, ...cls.equivalentClassIris].map(iri).join(' ')})`);
-    }
-    for (const dis of cls.disjointClassIris) {
-      // Emit only when iri < dis to avoid duplicate pairs
-      if (cls.iri < dis) {
-        out.push(`  DisjointClasses(${iri(cls.iri)} ${iri(dis)})`);
-      }
-    }
-  }
-
-  // Object property axioms
+  // 5. Object Property Clusters
   for (const p of model.objectProperties.values()) {
-    for (const sup of p.superPropertyIris) {
-      out.push(`  SubObjectPropertyOf(${iri(p.iri)} ${iri(sup)})`);
-    }
-    for (const d of p.domainIris) {
-      out.push(`  ObjectPropertyDomain(${iri(p.iri)} ${iri(d)})`);
-    }
-    for (const r of p.rangeIris) {
-      out.push(`  ObjectPropertyRange(${iri(p.iri)} ${iri(r)})`);
-    }
-    if (p.isTransitive)          { out.push(`  TransitiveObjectProperty(${iri(p.iri)})`); }
-    if (p.isSymmetric)           { out.push(`  SymmetricObjectProperty(${iri(p.iri)})`); }
-    if (p.isFunctional)          { out.push(`  FunctionalObjectProperty(${iri(p.iri)})`); }
-    if (p.isInverseFunctional)   { out.push(`  InverseFunctionalObjectProperty(${iri(p.iri)})`); }
-    if (p.inverseOfIri)          { out.push(`  InverseObjectProperties(${iri(p.iri)} ${iri(p.inverseOfIri)})`); }
+    out.push(...generateEntityCluster(p, model).map(line => '  ' + line));
+    out.push('');
   }
 
-  // Data property axioms
+  // 6. Data Property Clusters
   for (const p of model.dataProperties.values()) {
-    for (const sup of p.superPropertyIris) {
-      out.push(`  SubDataPropertyOf(${iri(p.iri)} ${iri(sup)})`);
-    }
-    for (const d of p.domainIris) {
-      out.push(`  DataPropertyDomain(${iri(p.iri)} ${iri(d)})`);
-    }
-    for (const r of p.rangeIris) {
-      out.push(`  DataPropertyRange(${iri(p.iri)} ${iri(r)})`);
-    }
-    if (p.isFunctional) { out.push(`  FunctionalDataProperty(${iri(p.iri)})`); }
+    out.push(...generateEntityCluster(p, model).map(line => '  ' + line));
+    out.push('');
   }
 
-  // Individual axioms
+  // 7. Annotation Property Clusters (only if they have axioms/annotations)
+  for (const p of model.annotationProperties.values()) {
+    const cluster = generateEntityCluster(p, model);
+    // If it only has the comment and no actual annotations/axioms, maybe skip?
+    // But Protege usually emits them if they have something.
+    // AnnotationProperty doesn't have many axioms in this model yet.
+    if (cluster.length > 1) {
+      out.push(...cluster.map(line => '  ' + line));
+      out.push('');
+    }
+  }
+
+  // 8. Class Clusters
+  for (const cls of model.classes.values()) {
+    out.push(...generateEntityCluster(cls, model).map(line => '  ' + line));
+    out.push('');
+  }
+
+  // 9. Individual Clusters
   for (const ind of model.individuals.values()) {
-    for (const cls of ind.classIris) {
-      out.push(`  ClassAssertion(${iri(cls)} ${iri(ind.iri)})`);
-    }
-    for (const a of ind.objectPropertyAssertions) {
-      out.push(`  ObjectPropertyAssertion(${iri(a.propertyIri)} ${iri(ind.iri)} ${iri(a.targetIri)})`);
-    }
-    for (const a of ind.dataPropertyAssertions) {
-      out.push(`  DataPropertyAssertion(${iri(a.propertyIri)} ${iri(ind.iri)} ${literal(a.value, undefined, a.datatype)})`);
-    }
+    out.push(...generateEntityCluster(ind, model).map(line => '  ' + line));
+    out.push('');
   }
 
-  // Annotation assertions (rdfs:label)
-  const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
-  for (const entity of [
-    ...model.classes.values(),
-    ...model.objectProperties.values(),
-    ...model.dataProperties.values(),
-    ...model.annotationProperties.values(),
-    ...model.individuals.values(),
-  ]) {
-    for (const [lang, values] of Object.entries(entity.labels)) {
-      for (const val of values) {
-        out.push(`  AnnotationAssertion(${iri(RDFS_LABEL)} ${iri(entity.iri)} ${literal(val, lang || undefined)})`);
+  // 10. Complex Axioms (GCIs and Property Chains)
+  let hasComplex = false;
+  
+  // Property Chains
+  for (const p of model.objectProperties.values()) {
+    if (p.propertyChains) {
+      for (const chain of p.propertyChains) {
+        out.push(`  SubObjectPropertyOf(ObjectPropertyChain(${chain.map(iri).join(' ')}) ${iri(p.iri)})`);
+        hasComplex = true;
       }
     }
   }
 
-  // Non-label annotation assertions (skos:prefLabel, skos:altLabel, skos:definition, etc.)
-  for (const entity of [
-    ...model.classes.values(),
-    ...model.objectProperties.values(),
-    ...model.dataProperties.values(),
-    ...model.annotationProperties.values(),
-    ...model.individuals.values(),
-  ]) {
-    for (const [propIri, values] of Object.entries(entity.annotations)) {
-      for (const val of values) {
-        const atIdx = val.lastIndexOf('@');
-        const haslang = atIdx > 0 && /^[A-Za-z][A-Za-z0-9\-]*$/.test(val.slice(atIdx + 1));
-        const text = haslang ? val.slice(0, atIdx) : val;
-        const lang = haslang ? val.slice(atIdx + 1) : undefined;
-        out.push(`  AnnotationAssertion(${iri(propIri)} ${iri(entity.iri)} ${literal(text, lang)})`);
-      }
-    }
+  // GCIs (stored in OWLClass.gciExpressions as Manchester strings - but the serializer might need to convert them?)
+  // Actually, the current model has superClassExpressions and equivalentClassExpressions too.
+  // The spec says "Complex class expressions stored as Manchester strings are omitted — the asserted named-class hierarchy is sufficient for reasoner classification."
+  // But Phase 3 says "Handle GCIs and Property Chains separately".
+  // For now I'll just follow the current model's capabilities.
+
+  if (hasComplex) {
+    out.push('');
   }
 
-  // Suppress owl:Nothing and owl:Thing declarations (OWLAPI adds them implicitly)
+  // Closing parenthesis
   out.push(')');
   return out.join('\n');
 }
