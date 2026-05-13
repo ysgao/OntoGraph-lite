@@ -7,7 +7,10 @@ This plan aims to align the app's OWL Functional Syntax (.ofn) output with the f
 - Maintain a global declarations block at the top.
 - Separate Object Property clusters and Class clusters.
 - Place complex axioms (GCIs, Property Chains) at the end of the file.
-- Add descriptive comment lines for each entity cluster.
+- Add descriptive comment lines for each entity cluster if it is not already present.
+- Do not change the workflow of save and synchronization. The users will use the save and synch buttons in the UI to save and synchronize the changes to the file.
+- Do not reparse the file when the user saves the file.
+- Do not reparse the file when the user synchronizes the file.
 
 ## Key Files & Context
 - `src/serializer/FunctionalSerializer.ts`: Full file serialization logic.
@@ -21,7 +24,7 @@ This plan aims to align the app's OWL Functional Syntax (.ofn) output with the f
 - Create a shared utility function `generateEntityCluster(entity: OWLEntity): string[]` that produces:
     - `# Type: <IRI> (Label)`
     - `AnnotationAssertion(...)` lines.
-    - Logical axiom lines (excluding GCIs and Property Chains).
+    - Logical axiom lines ordered by equivalence axioms first, then subsumption axioms (excluding GCIs and Property Chains).
 - This will be used by both the serializer and the sync logic.
 
 ### 2. Refactor `FunctionalSerializer.ts`
@@ -32,20 +35,21 @@ This plan aims to align the app's OWL Functional Syntax (.ofn) output with the f
     4. Object Property Clusters (using `generateEntityCluster`)
     5. Class Clusters (using `generateEntityCluster`)
     6. Individual Clusters
-    7. Complex Axioms (Property Chains and GCIs)
+    7. Complex Axioms (GCIs and Property Chains)
     8. Closing parenthesis
 
 ### 3. Coordinate Incremental Syncing
 - Update `AxiomSync.ts` and `AnnotationSync.ts` to use a unified `syncEntityClusterFunctional` function for functional syntax.
 - This function will:
-    - Detect and remove all existing lines related to the entity (Comment, Annotations, Axioms).
+    - Detect and update all existing lines related to the entity (Comment, Annotations, Axioms).
     - Insert the new cluster in the correct section.
     - If it's a new entity, ensure a `Declaration(...)` is added to the declarations block at the top.
     - GCIs and Property Chains should be managed at the bottom of the file.
+    - There should be empty lines between annotations and logical axioms in the cluster.
 
 ### 4. Logic Adjustments
 - Move `PropertyChain` axioms from the property cluster to the "Complex Axioms" section at the end.
-- Ensure `Declaration` lines are always grouped at the top, even when adding entities incrementally.
+- Add GCI axioms after the Individual Clausters section and before the Property Chains section.
 
 ## Verification & Testing
 - **Manual Verification**: Perform edits via the UI (label changes, axiom updates) on a functional syntax file and inspect the resulting text for proper clustering and ordering.

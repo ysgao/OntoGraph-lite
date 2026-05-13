@@ -1,0 +1,8 @@
+# Project Tracks
+
+This file tracks all major tracks for the project. Each track has its own detailed plan in its respective folder.
+
+---
+
+- [ ] **Track: Consistent OWL Functional Syntax Arrangement**
+  *Link: [./tracks/consistent_owl_20260513/](./tracks/consistent_owl_20260513/)*
