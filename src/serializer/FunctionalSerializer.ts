@@ -8,7 +8,7 @@ const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 function iri(s: string): string { return `<${s}>`; }
 
 function literal(value: string, lang?: string, datatype?: string): string {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  const escaped = value.replace(/\\/g, '\\').replace(/"/g, '\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
   if (lang) { return `"${escaped}"@${lang}`; }
   if (datatype) { return `"${escaped}"^^<${datatype}>`; }
   return `"${escaped}"`;
@@ -175,12 +175,9 @@ export function serializeToFunctional(model: OntologyModel): string {
     out.push('');
   }
 
-  // 7. Annotation Property Clusters (only if they have axioms/annotations)
+  // 7. Annotation Property Clusters
   for (const p of model.annotationProperties.values()) {
     const cluster = generateEntityCluster(p, model);
-    // If it only has the comment and no actual annotations/axioms, maybe skip?
-    // But Protege usually emits them if they have something.
-    // AnnotationProperty doesn't have many axioms in this model yet.
     if (cluster.length > 1) {
       out.push(...cluster.map(line => '  ' + line));
       out.push('');
@@ -199,26 +196,28 @@ export function serializeToFunctional(model: OntologyModel): string {
     out.push('');
   }
 
-  // 10. Complex Axioms (GCIs and Property Chains)
-  let hasComplex = false;
+  // 10. General Class Axioms (GCIs)
+  let complexAxioms: string[] = [];
+  for (const cls of model.classes.values()) {
+    if (cls.gciExpressions) {
+      for (const expr of cls.gciExpressions) {
+        // Placeholder: Since we can't reliably convert Manchester to Functional, we skip for now
+        // but maintain the logic for future implementation.
+      }
+    }
+  }
   
-  // Property Chains
+  // 11. Property Chain Axioms
   for (const p of model.objectProperties.values()) {
     if (p.propertyChains) {
       for (const chain of p.propertyChains) {
-        out.push(`  SubObjectPropertyOf(ObjectPropertyChain(${chain.map(iri).join(' ')}) ${iri(p.iri)})`);
-        hasComplex = true;
+        complexAxioms.push(`  SubObjectPropertyOf(ObjectPropertyChain(${chain.map(iri).join(' ')}) ${iri(p.iri)})`);
       }
     }
   }
 
-  // GCIs (stored in OWLClass.gciExpressions as Manchester strings - but the serializer might need to convert them?)
-  // Actually, the current model has superClassExpressions and equivalentClassExpressions too.
-  // The spec says "Complex class expressions stored as Manchester strings are omitted — the asserted named-class hierarchy is sufficient for reasoner classification."
-  // But Phase 3 says "Handle GCIs and Property Chains separately".
-  // For now I'll just follow the current model's capabilities.
-
-  if (hasComplex) {
+  if (complexAxioms.length > 0) {
+    out.push(...complexAxioms);
     out.push('');
   }
 

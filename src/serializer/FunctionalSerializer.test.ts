@@ -111,7 +111,8 @@ describe('FunctionalSerializer Full Serialization', () => {
       annotations: {},
       superPropertyIris: [],
       domainIris: [],
-      rangeIris: []
+      rangeIris: [],
+      propertyChains: [['http://example.org#p1', 'http://example.org#p2']]
     };
     model.objectProperties.set(propP.iri, propP);
 
@@ -134,5 +135,11 @@ describe('FunctionalSerializer Full Serialization', () => {
     // Object Property cluster should come before Class cluster
     const propClusterIdx = lines.findIndex(l => l.includes('# ObjectProperty: <http://example.org#p>'));
     expect(propClusterIdx).toBeLessThan(clusterIdx);
+
+    // Property chain should be at the end
+    const chainIdx = lines.findIndex(l => l.includes('SubObjectPropertyOf(ObjectPropertyChain'));
+    expect(chainIdx).toBeGreaterThan(clusterIdx);
+    expect(chainIdx).toBeGreaterThan(propClusterIdx);
+    expect(lines[lines.length - 1]).toBe(')');
   });
 });
