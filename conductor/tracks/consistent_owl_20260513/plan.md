@@ -2,9 +2,9 @@
 
 ## Phase 1: Unified Cluster Generation & Serialization
 
-- [ ] Task: Create unified cluster generation logic
-    - [ ] Write unit tests for `generateEntityCluster` utility
-    - [ ] Implement `generateEntityCluster` in a shared utility file (or `FunctionalSerializer.ts`)
+- [x] Task: Create unified cluster generation logic [354fb3e]
+    - [x] Write unit tests for `generateEntityCluster` utility
+    - [x] Implement `generateEntityCluster` in a shared utility file (or `FunctionalSerializer.ts`)
 - [ ] Task: Refactor `FunctionalSerializer.ts` for consistent ordering
     - [ ] Update `FunctionalSerializer.test.ts` with new expected structure
     - [ ] Implement new ordering logic in `serializeToFunctional`
