@@ -8,7 +8,7 @@ const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 function iri(s: string): string { return `<${s}>`; }
 
 function literal(value: string, lang?: string, datatype?: string): string {
-  const escaped = value.replace(/\\/g, '\\').replace(/"/g, '\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
   if (lang) { return `"${escaped}"@${lang}`; }
   if (datatype) { return `"${escaped}"^^<${datatype}>`; }
   return `"${escaped}"`;
@@ -201,8 +201,9 @@ export function serializeToFunctional(model: OntologyModel): string {
   for (const cls of model.classes.values()) {
     if (cls.gciExpressions) {
       for (const expr of cls.gciExpressions) {
-        // Placeholder: Since we can't reliably convert Manchester to Functional, we skip for now
-        // but maintain the logic for future implementation.
+        // Since we store GCIs as functional syntax strings in gciExpressions
+        // we can just push them to complexAxioms.
+        complexAxioms.push(`  SubClassOf(${expr} ${iri(cls.iri)})`);
       }
     }
   }

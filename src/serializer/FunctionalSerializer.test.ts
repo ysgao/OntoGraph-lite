@@ -83,6 +83,22 @@ describe('FunctionalSerializer Clustering', () => {
       'DataPropertyAssertion(<http://example.org#hasAge> <http://example.org#myInd> "25"^^<http://www.w3.org/2001/XMLSchema#integer>)'
     ]);
   });
+
+  it('should escape special characters in literals', () => {
+    const model = createEmptyModel('test.ofn');
+    const ind: OWLIndividual = {
+      iri: 'http://example.org#escInd',
+      type: 'individual',
+      labels: { en: ['Label with "quotes" and \\backslashes\\'] },
+      annotations: {},
+      classIris: [],
+      objectPropertyAssertions: [],
+      dataPropertyAssertions: []
+    };
+
+    const cluster = generateEntityCluster(ind, model);
+    expect(cluster[1]).toContain('"Label with \\"quotes\\" and \\\\backslashes\\\\"@en');
+  });
 });
 
 describe('FunctionalSerializer Full Serialization', () => {
