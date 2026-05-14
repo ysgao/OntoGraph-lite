@@ -41,14 +41,8 @@ function resolveIri(token: string, prefixes: Map<string, string>): string {
 }
 
 function abbreviateIri(iri: string, prefixes: Map<string, string>): string {
-  let bestPfx = '';
-  let bestExp = '';
-  for (const [pfx, exp] of prefixes) {
-    if (iri.startsWith(exp) && exp.length > bestExp.length) {
-      bestPfx = pfx; bestExp = exp;
-    }
-  }
-  return bestExp ? bestPfx + iri.slice(bestExp.length) : `<${iri}>`;
+  if (iri === RDFS_LABEL) { return 'rdfs:label'; }
+  return `<${iri}>`;
 }
 
 // Replace all bare full IRIs in a stored Manchester expression with abbreviated form
@@ -67,7 +61,7 @@ function fmtDataLiteral(value: string, datatype?: string): string {
   const esc = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
     .replace(/\n/g, '\\n').replace(/\r/g, '\\r');
   if (datatype) {
-    return `"${esc}"^^<${datatype}>`;
+    return `"${esc}"^^${abbreviateIri(datatype, new Map())}`;
   }
   return `"${esc}"`;
 }
@@ -128,6 +122,7 @@ function manchesterToFunctional(expr: string): string {
   let pos = 0;
   const peek = (): MToken | undefined => toks[pos];
   const consume = (): MToken => toks[pos++] ?? { t: 'KW', v: '' };
+  const a = (i: string) => abbreviateIri(i, new Map());
 
   function parseOr(): string {
     const parts = [parseAnd()];
@@ -164,7 +159,7 @@ function manchesterToFunctional(expr: string): string {
       const iris: string[] = [];
       while (peek() && peek()?.t !== 'RB') {
         const tk = consume();
-        if (tk.t === 'IRI') iris.push(`<${tk.v}>`);
+        if (tk.t === 'IRI') iris.push(a(tk.v));
       }
       if (peek()?.t === 'RB') consume();
       return `ObjectOneOf(${iris.join(' ')})`;
@@ -178,26 +173,26 @@ function manchesterToFunctional(expr: string): string {
     if (t.t === 'IRI') {
       const iri = consume().v;
       const nxt = peek();
-      if (nxt?.v === 'some') { consume(); return `ObjectSomeValuesFrom(<${iri}> ${parseAtom()})`; }
-      if (nxt?.v === 'only') { consume(); return `ObjectAllValuesFrom(<${iri}> ${parseAtom()})`; }
-      if (nxt?.v === 'value') { consume(); return `ObjectHasValue(<${iri}> ${parseAtom()})`; }
-      if (nxt?.v === 'Self') { consume(); return `ObjectHasSelf(<${iri}>)`; }
+      if (nxt?.v === 'some') { consume(); return `ObjectSomeValuesFrom(${a(iri)} ${parseAtom()})`; }
+      if (nxt?.v === 'only') { consume(); return `ObjectAllValuesFrom(${a(iri)} ${parseAtom()})`; }
+      if (nxt?.v === 'value') { consume(); return `ObjectHasValue(${a(iri)} ${parseAtom()})`; }
+      if (nxt?.v === 'Self') { consume(); return `ObjectHasSelf(${a(iri)})`; }
       if (nxt?.v === 'min') {
         consume(); const n = consume().v;
         const f = peek(); const filler = (f?.t === 'IRI' || f?.t === 'LP' || f?.v === 'not') ? ` ${parseAtom()}` : '';
-        return `ObjectMinCardinality(${n} <${iri}>${filler})`;
+        return `ObjectMinCardinality(${n} ${a(iri)}${filler})`;
       }
       if (nxt?.v === 'max') {
         consume(); const n = consume().v;
         const f = peek(); const filler = (f?.t === 'IRI' || f?.t === 'LP' || f?.v === 'not') ? ` ${parseAtom()}` : '';
-        return `ObjectMaxCardinality(${n} <${iri}>${filler})`;
+        return `ObjectMaxCardinality(${n} ${a(iri)}${filler})`;
       }
       if (nxt?.v === 'exactly') {
         consume(); const n = consume().v;
         const f = peek(); const filler = (f?.t === 'IRI' || f?.t === 'LP' || f?.v === 'not') ? ` ${parseAtom()}` : '';
-        return `ObjectExactCardinality(${n} <${iri}>${filler})`;
+        return `ObjectExactCardinality(${n} ${a(iri)}${filler})`;
       }
-      return `<${iri}>`;
+      return a(iri);
     }
 
     consume();

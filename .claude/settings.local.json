@@ -19,7 +19,8 @@
       "Bash(node *)",
       "Bash(python3 *)",
       "Bash(grep -E \"\\\\.\\(ts|tsx|vue|html\\)$\")",
-      "WebSearch"
+      "WebSearch",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks)"
     ]
   }
 }

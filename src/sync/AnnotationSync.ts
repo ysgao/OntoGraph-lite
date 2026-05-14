@@ -38,14 +38,8 @@ function resolveIri(token: string, prefixes: Map<string, string>): string {
 }
 
 function abbreviateIri(iri: string, prefixes: Map<string, string>): string {
-  let bestPfx = '';
-  let bestExp = '';
-  for (const [pfx, exp] of prefixes) {
-    if (iri.startsWith(exp) && exp.length > bestExp.length) {
-      bestPfx = pfx; bestExp = exp;
-    }
-  }
-  return bestExp ? bestPfx + iri.slice(bestExp.length) : `<${iri}>`;
+  if (iri === RDFS_LABEL) { return 'rdfs:label'; }
+  return `<${iri}>`;
 }
 
 interface AnnotationPair { propIri: string; text: string; lang?: string; }
@@ -102,7 +96,7 @@ function extractLeadingIriTokens(s: string, count: number): string[] {
 
 function generateFunctionalLines(entity: OWLEntity): string[] {
   return entityAnnotationPairs(entity).map(({ propIri, text, lang }) =>
-    `  AnnotationAssertion(<${propIri}> <${entity.iri}> ${fmtLiteral(text, lang)})`
+    `  AnnotationAssertion(${abbreviateIri(propIri, new Map())} ${abbreviateIri(entity.iri, new Map())} ${fmtLiteral(text, lang)})`
   );
 }
 

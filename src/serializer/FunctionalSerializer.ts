@@ -5,7 +5,10 @@ const OWL_THING = `${OWL}Thing`;
 const OWL_NOTHING = `${OWL}Nothing`;
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 
-function iri(s: string): string { return `<${s}>`; }
+function iri(s: string): string {
+  if (s === RDFS_LABEL) { return 'rdfs:label'; }
+  return `<${s}>`;
+}
 
 function literal(value: string, lang?: string, datatype?: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
