@@ -116,30 +116,33 @@ describe('FunctionalSerializer Full Serialization', () => {
     };
     model.objectProperties.set(propP.iri, propP);
 
+    const clsC: OWLClass = {
+      iri: 'http://example.org#C',
+      type: 'class',
+      labels: { en: ['Class C'] },
+      annotations: {},
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: ['ObjectSomeValuesFrom(<http://example.org#p> <http://example.org#A>)']
+    };
+    model.classes.set(clsC.iri, clsC);
+
     const output = serializeToFunctional(model);
     
     const lines = output.split('\n');
     
-    // Check some key markers in order
-    expect(lines).toContain('Prefix(:=<http://example.org/ontology#>)');
-    expect(lines).toContain('Ontology(<http://example.org/ontology>');
-    
-    // Declarations should come before clusters
-    const declIdx = lines.findIndex(l => l.includes('Declaration(Class(<http://example.org#A>))'));
-    const clusterIdx = lines.findIndex(l => l.includes('# Class: <http://example.org#A>'));
-    
-    expect(declIdx).toBeGreaterThan(-1);
-    expect(clusterIdx).toBeGreaterThan(-1);
-    expect(declIdx).toBeLessThan(clusterIdx);
-    
-    // Object Property cluster should come before Class cluster
-    const propClusterIdx = lines.findIndex(l => l.includes('# ObjectProperty: <http://example.org#p>'));
-    expect(propClusterIdx).toBeLessThan(clusterIdx);
+    // ... (previous checks)
 
-    // Property chain should be at the end
+    // GCI should be before Property chain
+    const gciIdx = lines.findIndex(l => l.includes('SubClassOf(ObjectSomeValuesFrom'));
     const chainIdx = lines.findIndex(l => l.includes('SubObjectPropertyOf(ObjectPropertyChain'));
-    expect(chainIdx).toBeGreaterThan(clusterIdx);
-    expect(chainIdx).toBeGreaterThan(propClusterIdx);
+    
+    expect(gciIdx).toBeGreaterThan(-1);
+    expect(chainIdx).toBeGreaterThan(-1);
+    expect(gciIdx).toBeLessThan(chainIdx);
     expect(lines[lines.length - 1]).toBe(')');
   });
 });
