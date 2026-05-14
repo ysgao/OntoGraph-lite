@@ -17,4 +17,4 @@ OntoGraph aims for a "Protégé-familiar" experience translated into the modern,
 ## Technical Standards
 - **Precision:** Maintain strict adherence to OWL 2 specifications. Avoid transformations that lose semantic meaning.
 - **Scale-Awareness:** Always consider the performance implications of features on large ontologies (e.g., SNOMED CT).
-- **Interoperability:** Ensure exported files are compatible with standard ontology tools like Protégé and TopBraid.
+- **Interoperability:** Ensure exported files are compatible with standard ontology tools like Protégé. This includes maintaining the mandatory entity cluster ordering defined in the Constitution.

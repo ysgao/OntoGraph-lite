@@ -97,7 +97,11 @@ A Language Server Protocol server (`server/server.ts`) provides completions and 
 | `esbuild.mjs` | Build config — 6 output bundles |
 | `ContentArrangementInOWLfunctionalSyntaxDocument.md` | Reference for OWL Functional Syntax ordering conventions |
 
-## Conductor Workflow (`conductor/`)
+## Governance & Workflow
+
+All development in this repository is governed by the **[OntoGraph Constitution](file:///.specify/memory/constitution.md)**, which supersedes other practices in case of conflict.
+
+### Conductor Workflow (`conductor/`)
 
 The `conductor/` directory contains project management documents used when driving development:
 

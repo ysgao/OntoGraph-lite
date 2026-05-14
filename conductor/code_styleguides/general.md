@@ -17,6 +17,7 @@ This document outlines general coding principles that apply across all languages
 ## Maintainability
 - Write code that is easy to modify and extend.
 - Minimize dependencies and coupling.
+- **No new runtime dependencies** may be added without documented rationale and explicit approval (as per the Constitution).
 
 ## Documentation
 - Document *why* something is done, not just *what*.

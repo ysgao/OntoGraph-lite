@@ -4,10 +4,11 @@
 
 1. **The Plan is the Source of Truth:** All work must be tracked in `plan.md`
 2. **The Tech Stack is Deliberate:** Changes to the tech stack must be documented in `tech-stack.md` *before* implementation
-3. **Test-Driven Development:** Write unit tests before implementing functionality
+3. **Test-Driven Development (Red-Green-Refactor):** Write unit tests before implementing functionality as per the [Constitution](../.specify/memory/constitution.md)
 4. **High Code Coverage:** Aim for >80% code coverage for all modules
-5. **User Experience First:** Every decision should prioritize user experience
-6. **Non-Interactive & CI-Aware:** Prefer non-interactive commands. Use `CI=true` for watch-mode tools (tests, linters) to ensure single execution.
+5. **Scale-Awareness:** Prioritize performance for SNOMED CT-scale ontologies
+6. **User Experience First:** Every decision should prioritize user experience
+7. **Non-Interactive & CI-Aware:** Prefer non-interactive commands. Use `CI=true` for watch-mode tools (tests, linters) to ensure single execution.
 
 ## Task Workflow
 
@@ -141,12 +142,13 @@ Before marking any task complete, verify:
 - [ ] All tests pass
 - [ ] Code coverage meets requirements (>80%)
 - [ ] Code follows project's code style guidelines (as defined in `code_styleguides/`)
-- [ ] All public functions/methods are documented (e.g., docstrings, JSDoc, GoDoc)
-- [ ] Type safety is enforced (e.g., type hints, TypeScript types, Go types)
-- [ ] No linting or static analysis errors (using the project's configured tools)
-- [ ] Works correctly on mobile (if applicable)
+- [ ] All public functions/methods are documented (e.g., docstrings, JSDoc)
+- [ ] Type safety is enforced (e.g., TypeScript types)
+- [ ] No linting or static analysis errors
+- [ ] Large ontology benchmark pass (`test-ontologies/anatomy.owl`)
+- [ ] OWL Functional Syntax ordering preserved
 - [ ] Documentation updated if needed
-- [ ] No security vulnerabilities introduced
+- [ ] No security vulnerabilities (IPC validation, IRI injection)
 
 ## Development Commands
 
@@ -182,17 +184,9 @@ Before marking any task complete, verify:
 - Test both success and failure cases.
 
 ### Integration Testing
-- Test complete user flows
-- Verify database transactions
-- Test authentication and authorization
-- Check form submissions
-
-### Mobile Testing
-- Test on actual iPhone when possible
-- Use Safari developer tools
-- Test touch interactions
-- Verify responsive layouts
-- Check performance on 3G/4G
+- Test complete user flows (e.g., load ontology -> classify -> check hierarchy)
+- Verify JSON-RPC communication between TS and Java
+- Check entity editor sync with disk
 
 ## Code Review Process
 
@@ -215,22 +209,16 @@ Before requesting review:
    - Integration tests pass
    - Coverage adequate (>80%)
 
-4. **Security**
+4. **Security & Safety**
    - No hardcoded secrets
-   - Input validation present
-   - SQL injection prevented
-   - XSS protection in place
+   - JSON-RPC message validation
+   - IRI injection prevention
+   - Java child process spawned with argument arrays (no shell)
 
 5. **Performance**
-   - Database queries optimized
-   - Images optimized
-   - Caching implemented where needed
-
-6. **Mobile Experience**
-   - Touch targets adequate (44x44px)
-   - Text readable without zooming
-   - Performance acceptable on mobile
-   - Interactions feel native
+   - SNOMED CT scale performance verified
+   - Worker thread usage for large parsing
+   - Java reasoner selection logic (ELK vs HermiT)
 
 ## Commit Guidelines
 
@@ -269,7 +257,7 @@ A task is complete when:
 3. Code coverage meets project requirements
 4. Documentation complete (if applicable)
 5. Code passes all configured linting and static analysis checks
-6. Works beautifully on mobile (if applicable)
+6. Documentation complete (if applicable)
 7. Implementation notes added to `plan.md`
 8. Changes committed with proper message
 9. Git note with task summary attached to the commit

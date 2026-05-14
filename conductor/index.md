@@ -1,5 +1,8 @@
 # Project Context
 
+## Governance
+- [OntoGraph Constitution](../.specify/memory/constitution.md)
+
 ## Definition
 - [Product Definition](./product.md)
 - [Product Guidelines](./product-guidelines.md)

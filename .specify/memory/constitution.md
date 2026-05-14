@@ -96,7 +96,7 @@ The extension MUST remain responsive at SNOMED CT scale (50 000+ classes):
 - The Java reasoner MUST auto-select ELK for ontologies above 5 000 classes
   and HermiT for smaller ones (both thresholds are configurable via settings).
 - Any new feature that iterates over the class hierarchy MUST be benchmarked
-  against `test-ontologies/bfo-core.ofn` before merging.
+  against `test-ontologies/anatomy.owl` before merging.
 
 **Rationale**: The primary production target is SNOMED CT. Algorithms that are
 acceptable at toy-ontology scale routinely become unusable at SNOMED CT scale.
@@ -119,7 +119,7 @@ adversaries. The extension runs with full extension-host privileges inside VS Co
 ## Technical Stack Requirements
 
 **Language/Runtime**: TypeScript 5+ (strict mode), Node.js (extension host,
-LSP server, Worker Threads), Java 11+ (reasoner server).
+LSP server, Worker Threads), Java 21+ (reasoner server).
 
 **Build**: esbuild (6 bundles — see CLAUDE.md); `npm run build` for production.
 Maven shade plugin for the fat JAR.
