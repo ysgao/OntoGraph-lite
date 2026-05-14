@@ -12,9 +12,9 @@
 
 ## Phase 2: Incremental Synchronization
 
-- [ ] Task: Update `AxiomSync.ts` for clustered functional syntax
-    - [ ] Write integration tests for clustered axiom syncing
-    - [ ] Implement `syncEntityClusterFunctional` and update `AxiomSync.ts`
+- [x] Task: Update `AxiomSync.ts` for clustered functional syntax [0a7e0ca]
+    - [x] Write integration tests for clustered axiom syncing
+    - [x] Implement `syncEntityClusterFunctional` and update `AxiomSync.ts`
 - [ ] Task: Update `AnnotationSync.ts` for clustered functional syntax
     - [ ] Write integration tests for clustered annotation syncing
     - [ ] Update `AnnotationSync.ts` to use the shared clustering logic
