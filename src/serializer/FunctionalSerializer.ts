@@ -1,4 +1,5 @@
 import { OWLEntity, OntologyModel, getLabel, OWLClass, OWLObjectProperty, OWLDataProperty, OWLIndividual } from '../model/OntologyModel';
+import { manchesterToFunctional } from '../utils/ExpressionUtils';
 
 const OWL = 'http://www.w3.org/2002/07/owl#';
 const OWL_THING = `${OWL}Thing`;
@@ -130,8 +131,7 @@ export function serializeToFunctional(model: OntologyModel): string {
 
   // 2. Ontology header
   const header = model.metadata.versionIri
-    ? `${iri(ontIri)}
-  ${iri(model.metadata.versionIri)}`
+    ? `${iri(ontIri)}\n  ${iri(model.metadata.versionIri)}`
     : iri(ontIri);
   out.push(`Ontology(${header}`);
 
@@ -200,15 +200,17 @@ export function serializeToFunctional(model: OntologyModel): string {
   }
 
   // 10. General Class Axioms (GCIs)
-  let gciAxioms: string[] = [];
+  const gciAxioms: string[] = [];
   for (const cls of model.classes.values()) {
     if (cls.gciExpressions) {
       for (const expr of cls.gciExpressions) {
-        // Since we store GCIs as functional syntax strings in gciExpressions
-        // we can just push them to gciAxioms.
-        gciAxioms.push(`  SubClassOf(${expr} ${iri(cls.iri)})`);
+        const functionalExpr = manchesterToFunctional(expr);
+        gciAxioms.push(`  SubClassOf(${functionalExpr} ${iri(cls.iri)})`);
       }
     }
+  }
+  for (const axiom of model.standaloneGcis) {
+    gciAxioms.push(`  ${axiom}`);
   }
 
   if (gciAxioms.length > 0) {

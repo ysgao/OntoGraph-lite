@@ -82,6 +82,8 @@ export interface OntologyModel {
   rawContent: string;
   /** Format string for the Java reasoner: 'functional' | 'rdf-xml' | 'owl-xml' | 'turtle' | 'manchester' */
   sourceFormat: string;
+  /** GCI axioms where both the subclass and superclass expressions are complex (no named anchor class) — stored as functional syntax strings */
+  standaloneGcis: string[];
   /** Inferred class hierarchy populated after reasoning; parent IRI → Set of child IRIs */
   inferredSubClasses: Map<string, Set<string>>;
   /** Whether the ontology has been classified by a reasoner */
@@ -148,6 +150,7 @@ export function createEmptyModel(sourceUri: string): OntologyModel {
     sourceUri,
     rawContent: '',
     sourceFormat: 'functional',
+    standaloneGcis: [],
     inferredSubClasses: new Map(),
     isClassified: false,
     classificationNeedsUpdate: false,

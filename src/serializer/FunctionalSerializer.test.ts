@@ -142,7 +142,7 @@ describe('FunctionalSerializer Full Serialization', () => {
       disjointClassIris: [],
       superClassExpressions: [],
       equivalentClassExpressions: [],
-      gciExpressions: ['ObjectSomeValuesFrom(<http://example.org#p> <http://example.org#A>)']
+      gciExpressions: ['http://example.org#p some http://example.org#A']
     };
     model.classes.set(clsC.iri, clsC);
 

@@ -2,6 +2,7 @@ import {
   createEmptyModel, OntologyModel,
   OWLClass, OWLObjectProperty, OWLDataProperty, OWLAnnotationProperty, OWLIndividual,
 } from '../model/OntologyModel';
+import { manchesterToFunctional } from '../utils/ExpressionUtils';
 
 const BUILTIN_PREFIXES: [string, string][] = [
   ['owl:', 'http://www.w3.org/2002/07/owl#'],
@@ -248,17 +249,25 @@ export class FunctionalParser {
     const supExpr = this.readClassExpression();
     this.expectRParen();
     const subIri = this.asIri(subExpr);
+    const supIri = this.asIri(supExpr);
+
     if (subIri) {
       const cls = this.getOrCreateClass(subIri);
-      const supIri = this.asIri(supExpr);
-      if (supIri) { if (this.addUnique(this._superClassSets, subIri, supIri)) cls.superClassIris.push(supIri); }
-      else cls.superClassExpressions.push(supExpr);
-    } else {
-      // GCI: complex left-hand side — attach to the right-hand named class
-      const supIri = this.asIri(supExpr);
       if (supIri) {
-        const cls = this.getOrCreateClass(supIri);
-        cls.gciExpressions.push(subExpr);
+        if (this.addUnique(this._superClassSets, subIri, supIri)) cls.superClassIris.push(supIri);
+      } else {
+        cls.superClassExpressions.push(supExpr);
+      }
+    } else if (supIri) {
+      // GCI: complex left-hand side — attach to the right-hand named class
+      const cls = this.getOrCreateClass(supIri);
+      cls.gciExpressions.push(subExpr);
+    } else {
+      // GCI: both sides complex — store as a complete functional syntax string
+      const subFS = manchesterToFunctional(subExpr);
+      const supFS = manchesterToFunctional(supExpr);
+      if (subFS && supFS) {
+        this.model.standaloneGcis.push(`SubClassOf(${subFS} ${supFS})`);
       }
     }
   }

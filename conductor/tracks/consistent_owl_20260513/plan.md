@@ -18,14 +18,14 @@
 - [x] Task: Update `AnnotationSync.ts` for clustered functional syntax [8ca07bf]
     - [x] Write integration tests for clustered annotation syncing
     - [x] Update `AnnotationSync.ts` to use the shared clustering logic
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Incremental Synchronization' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Incremental Synchronization' (Protocol in workflow.md)
 
 ## Phase 3: Complex Axioms & Final Polish
 
-- [ ] Task: Handle GCIs and Property Chains separately
-    - [ ] Add tests for GCI and Property Chain placement
-    - [ ] Implement logic to move these axioms to the "Complex Axioms" section
-- [ ] Task: Final round-trip verification
-    - [ ] Perform manual edits via UI and verify file structure
-    - [ ] Ensure `FunctionalParser.ts` can read the new arrangement without issues
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Complex Axioms & Final Polish' (Protocol in workflow.md)
+- [x] Task: Handle GCIs and Property Chains separately
+    - [x] Add tests for GCI and Property Chain placement
+    - [x] Implement logic to move these axioms to the "Complex Axioms" section
+- [x] Task: Final round-trip verification
+    - [x] Perform manual edits via UI and verify file structure
+    - [x] Ensure `FunctionalParser.ts` can read the new arrangement without issues
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Complex Axioms & Final Polish' (Protocol in workflow.md)
