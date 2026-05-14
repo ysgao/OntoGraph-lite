@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { generateEntityCluster } from '../serializer/FunctionalSerializer';
 import type {
   OWLEntity,
   OWLClass,
@@ -6,7 +7,9 @@ import type {
   OWLDataProperty,
   OWLAnnotationProperty,
   OWLIndividual,
+  OntologyModel,
 } from '../model/OntologyModel';
+import { createEmptyModel } from '../model/OntologyModel';
 
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 
@@ -246,6 +249,16 @@ function entityAxiomKeywords(entity: OWLEntity): Set<string> {
 }
 
 function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
+  // Use a dummy model for the serializer helper
+  const dummyModel = createEmptyModel('dummy.ofn');
+  const clusterLines = generateEntityCluster(entity, dummyModel);
+  
+  // Strip the comment header and initial annotations from the cluster
+  // because AxiomSync manages logical axioms separately from AnnotationSync.
+  // EXCEPT: In the new consistent arrangement, we WANT them clustered.
+  // Actually, AxiomSync and AnnotationSync might conflict if we are not careful.
+  // For now, let's keep it minimal to just logical axioms but using the same formatting.
+  
   const lines: string[] = [];
   const iri = entity.iri;
   const a = (i: string) => `<${i}>`;
@@ -269,7 +282,6 @@ function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
     for (const dj of cls.disjointClassIris) {
       lines.push(`  DisjointClasses(${a(iri)} ${a(dj)})`);
     }
-    // GCI axioms (SubClassOf(complexExpr <iri>)) are emitted separately by generateFunctionalGCILines
   } else if (entity.type === 'objectProperty') {
     const prop = entity as OWLObjectProperty;
     for (const sup of prop.superPropertyIris) {
