@@ -197,28 +197,34 @@ export function serializeToFunctional(model: OntologyModel): string {
   }
 
   // 10. General Class Axioms (GCIs)
-  let complexAxioms: string[] = [];
+  let gciAxioms: string[] = [];
   for (const cls of model.classes.values()) {
     if (cls.gciExpressions) {
       for (const expr of cls.gciExpressions) {
         // Since we store GCIs as functional syntax strings in gciExpressions
-        // we can just push them to complexAxioms.
-        complexAxioms.push(`  SubClassOf(${expr} ${iri(cls.iri)})`);
-      }
-    }
-  }
-  
-  // 11. Property Chain Axioms
-  for (const p of model.objectProperties.values()) {
-    if (p.propertyChains) {
-      for (const chain of p.propertyChains) {
-        complexAxioms.push(`  SubObjectPropertyOf(ObjectPropertyChain(${chain.map(iri).join(' ')}) ${iri(p.iri)})`);
+        // we can just push them to gciAxioms.
+        gciAxioms.push(`  SubClassOf(${expr} ${iri(cls.iri)})`);
       }
     }
   }
 
-  if (complexAxioms.length > 0) {
-    out.push(...complexAxioms);
+  if (gciAxioms.length > 0) {
+    out.push(...gciAxioms);
+    out.push('');
+  }
+  
+  // 11. Property Chain Axioms
+  let chainAxioms: string[] = [];
+  for (const p of model.objectProperties.values()) {
+    if (p.propertyChains) {
+      for (const chain of p.propertyChains) {
+        chainAxioms.push(`  SubObjectPropertyOf(ObjectPropertyChain(${chain.map(iri).join(' ')}) ${iri(p.iri)})`);
+      }
+    }
+  }
+
+  if (chainAxioms.length > 0) {
+    out.push(...chainAxioms);
     out.push('');
   }
 

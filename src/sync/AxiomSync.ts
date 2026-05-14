@@ -487,14 +487,23 @@ function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): Sync
     if (lines[i].trim() === ')') { closingParenLine = i; break; }
   }
 
+  // GCI insertion point: before Property Chains if they exist, otherwise before closing paren.
+  let gciInsertAt = closingParenLine;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith('SubObjectPropertyOf(ObjectPropertyChain')) {
+      gciInsertAt = i;
+      break;
+    }
+  }
+
   // Regular axiom insertion point: at the first existing regular axiom, or after the entity's
-  // Declaration / last AnnotationAssertion in the document (fallback: before closing paren).
+  // Declaration / last AnnotationAssertion in the document (fallback: before GCI insertion point).
   let regularInsertAt: number;
   if (regularToDelete.length > 0) {
     regularInsertAt = regularToDelete[0];
   } else {
     const anchor = findEntityAnchorLine(lines, entity);
-    regularInsertAt = anchor >= 0 ? anchor + 1 : closingParenLine;
+    regularInsertAt = anchor >= 0 ? anchor + 1 : gciInsertAt;
   }
 
   const edit = new vscode.WorkspaceEdit();
@@ -515,13 +524,13 @@ function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): Sync
     changedRanges.push(...changedLineRanges(regularInsertAt, regularLines));
   }
 
-  // GCI axioms: always at end of Ontology block, before closing paren
+  // GCI axioms: always at end of entity clusters, before Property Chains or closing paren
   for (const i of [...gciToDelete].reverse()) {
     edit.delete(doc.uri, doc.lineAt(i).rangeIncludingLineBreak);
   }
   if (gciLines.length > 0) {
-    edit.insert(doc.uri, new vscode.Position(closingParenLine, 0), gciLines.join('\n') + '\n');
-    changedRanges.push(...changedLineRanges(closingParenLine, gciLines));
+    edit.insert(doc.uri, new vscode.Position(gciInsertAt, 0), gciLines.join('\n') + '\n');
+    changedRanges.push(...changedLineRanges(gciInsertAt, gciLines));
   }
 
   if (regularToDelete.length === 0 && regularLines.length === 0 &&
