@@ -113,13 +113,25 @@ function syncFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult
   const newLines = generateFunctionalLines(entity);
 
   const toDelete: number[] = [];
+  let clusterHeaderIdx = -1;
+  const entityToken = `<${entity.iri}>`;
+  const typeLabel = entity.type.charAt(0).toUpperCase() + entity.type.slice(1);
+  const headerMatch = `# ${typeLabel}: ${entityToken}`;
+
   for (let i = 0; i < lines.length; i++) {
-    if (extractFunctionalSubject(lines[i], prefixes) === entity.iri) { toDelete.push(i); }
+    if (lines[i].startsWith(headerMatch)) {
+      clusterHeaderIdx = i;
+    }
+    if (extractFunctionalSubject(lines[i], prefixes) === entity.iri) {
+      toDelete.push(i);
+    }
   }
 
   let insertAt: number;
   if (toDelete.length > 0) {
     insertAt = toDelete[0];
+  } else if (clusterHeaderIdx >= 0) {
+    insertAt = clusterHeaderIdx + 1;
   } else {
     // Insert before the closing ')' of the Ontology(...) block
     insertAt = lines.length > 1 ? lines.length - 1 : lines.length;
