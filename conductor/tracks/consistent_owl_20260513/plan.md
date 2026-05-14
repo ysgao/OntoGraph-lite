@@ -15,9 +15,9 @@
 - [x] Task: Update `AxiomSync.ts` for clustered functional syntax [0a7e0ca]
     - [x] Write integration tests for clustered axiom syncing
     - [x] Implement `syncEntityClusterFunctional` and update `AxiomSync.ts`
-- [ ] Task: Update `AnnotationSync.ts` for clustered functional syntax
-    - [ ] Write integration tests for clustered annotation syncing
-    - [ ] Update `AnnotationSync.ts` to use the shared clustering logic
+- [x] Task: Update `AnnotationSync.ts` for clustered functional syntax [8ca07bf]
+    - [x] Write integration tests for clustered annotation syncing
+    - [x] Update `AnnotationSync.ts` to use the shared clustering logic
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Incremental Synchronization' (Protocol in workflow.md)
 
 ## Phase 3: Complex Axioms & Final Polish
