@@ -265,19 +265,19 @@ function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
 
   if (entity.type === 'class') {
     const cls = entity as OWLClass;
-    for (const sup of cls.superClassIris) {
-      lines.push(`  SubClassOf(${a(iri)} ${a(sup)})`);
-    }
-    for (const expr of cls.superClassExpressions) {
-      const fn = manchesterToFunctional(expr);
-      if (fn) lines.push(`  SubClassOf(${a(iri)} ${fn})`);
-    }
     for (const eq of cls.equivalentClassIris) {
       lines.push(`  EquivalentClasses(${a(iri)} ${a(eq)})`);
     }
     for (const expr of cls.equivalentClassExpressions) {
       const fn = manchesterToFunctional(expr);
       if (fn) lines.push(`  EquivalentClasses(${a(iri)} ${fn})`);
+    }
+    for (const sup of cls.superClassIris) {
+      lines.push(`  SubClassOf(${a(iri)} ${a(sup)})`);
+    }
+    for (const expr of cls.superClassExpressions) {
+      const fn = manchesterToFunctional(expr);
+      if (fn) lines.push(`  SubClassOf(${a(iri)} ${fn})`);
     }
     for (const dj of cls.disjointClassIris) {
       lines.push(`  DisjointClasses(${a(iri)} ${a(dj)})`);
