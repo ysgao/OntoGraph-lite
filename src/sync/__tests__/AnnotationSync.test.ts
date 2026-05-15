@@ -1,45 +1,95 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as vscode from 'vscode';
 import { syncAnnotationsToDocument } from '../AnnotationSync';
-import { OWLClass } from '../../model/OntologyModel';
+import type { OWLClass } from '../../model/OntologyModel';
 
-// Mock vscode
-vi.mock('vscode', () => {
-  return {
-    Range: vi.fn((s1, c1, s2, c2) => ({ start: { line: s1, character: c1 }, end: { line: s2, character: c2 } })),
-    Position: vi.fn((l, c) => ({ line: l, character: c })),
-    WorkspaceEdit: vi.fn(() => ({
-      replace: vi.fn(),
-      insert: vi.fn(),
-      delete: vi.fn(),
-    })),
-    workspace: {
-      applyEdit: vi.fn(() => Promise.resolve(true)),
-    },
-  };
+// vi.hoisted ensures these are available to the vi.mock factory (which is hoisted
+// before module-level variable declarations are evaluated).
+const { mockReplace, mockInsert, mockDelete, mockApplyEdit } = vi.hoisted(() => ({
+  mockReplace: vi.fn(),
+  mockInsert: vi.fn(),
+  mockDelete: vi.fn(),
+  mockApplyEdit: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock('vscode', () => ({
+  Range: vi.fn((s1, c1, s2, c2) => ({
+    start: { line: s1, character: c1 },
+    end: { line: s2, character: c2 },
+  })),
+  Position: vi.fn((l, c) => ({ line: l, character: c })),
+  WorkspaceEdit: vi.fn(() => ({
+    replace: mockReplace,
+    insert: mockInsert,
+    delete: mockDelete,
+  })),
+  workspace: {
+    applyEdit: mockApplyEdit,
+  },
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockApplyEdit.mockResolvedValue(true);
 });
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function makeFunctionalDoc(content: string): vscode.TextDocument {
+  const lines = content.split('\n');
+  return {
+    getText: () => content,
+    lineAt: (i: number) => ({
+      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
+      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
+      text: lines[i] ?? '',
+    }),
+    uri: { fsPath: 'test.ofn', toString: () => 'file:///test.ofn' },
+    lineCount: lines.length,
+  } as unknown as vscode.TextDocument;
+}
+
+const CAT = 'http://example.org#Cat';
+const DEF = 'http://www.w3.org/2004/02/skos/core#definition';
+const ALT = 'http://www.w3.org/2004/02/skos/core#altLabel';
+
+function makeClass(labels: OWLClass['labels'], annotations: OWLClass['annotations']): OWLClass {
+  return {
+    iri: CAT,
+    type: 'class',
+    labels,
+    annotations,
+    superClassIris: [],
+    equivalentClassIris: [],
+    disjointClassIris: [],
+    superClassExpressions: [],
+    equivalentClassExpressions: [],
+    gciExpressions: [],
+  };
+}
+
+// ── Original integration test (preserved) ─────────────────────────────────────
 
 describe('AnnotationSync Clustered Functional Syntax', () => {
   it('should sync annotations into an existing entity cluster', async () => {
     const content = `Ontology(<http://example.org/ont>
   Declaration(Class(<http://example.org#A>))
-  
+
   # Class: <http://example.org#A> (Class A)
   AnnotationAssertion(rdfs:label <http://example.org#A> "Class A")
 
   SubClassOf(<http://example.org#A> <http://example.org#B>)
 )`;
-    
     const doc = {
       getText: () => content,
       lineAt: (i: number) => ({
         range: { start: { line: i, character: 0 }, end: { line: i, character: content.split('\n')[i].length } },
         rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-        text: content.split('\n')[i]
+        text: content.split('\n')[i],
       }),
       uri: { fsPath: 'test.ofn' },
-      lineCount: content.split('\n').length
-    } as any;
+      lineCount: content.split('\n').length,
+    } as unknown as vscode.TextDocument;
 
     const entity: OWLClass = {
       iri: 'http://example.org#A',
@@ -51,11 +101,371 @@ describe('AnnotationSync Clustered Functional Syntax', () => {
       disjointClassIris: [],
       superClassExpressions: [],
       equivalentClassExpressions: [],
-      gciExpressions: []
+      gciExpressions: [],
     };
 
-    const ranges = await syncAnnotationsToDocument(doc, entity, 'functional');
-    
-    expect(vscode.workspace.applyEdit).toHaveBeenCalled();
+    await syncAnnotationsToDocument(doc, entity, 'functional');
+    expect(mockApplyEdit).toHaveBeenCalled();
+  });
+});
+
+// ── T002: syncFunctional idempotency ──────────────────────────────────────────
+// These tests must FAIL before implementing the diff-based sync (Red phase).
+
+describe('syncFunctional — idempotency (T002)', () => {
+  it('does not apply any edit when model annotation matches file (same single label)', async () => {
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}>`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(makeFunctionalDoc(content), makeClass({ en: ['Cat'] }, {}), 'functional');
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not apply any edit when annotations are identical but in non-model order (definition before label)', async () => {
+    // File stores <definition> BEFORE rdfs:label — the opposite of model enumeration order.
+    // A correct idempotent sync must NOT reorder them.
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}>`,
+      `  AnnotationAssertion(<${DEF}> <${CAT}> "A domestic feline")`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not apply any edit when entity has no annotations and file has none', async () => {
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  SubClassOf(<${CAT}> <http://example.org#Animal>)`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(makeFunctionalDoc(content), makeClass({}, {}), 'functional');
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not apply any edit for multiple annotations in non-model order', async () => {
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  AnnotationAssertion(<${ALT}> <${CAT}> "kitty")`,
+      `  AnnotationAssertion(<${DEF}> <${CAT}> "A domestic feline")`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+});
+
+// ── T003: syncFunctional order-preservation and minimal diff ──────────────────
+// These tests must FAIL before implementing the diff-based sync (Red phase).
+
+describe('syncFunctional — order-preservation and minimal diff (T003)', () => {
+  it('inserts new annotation after last existing without reordering', async () => {
+    // File: [definition (line 3), rdfs:label (line 4)] — non-model order.
+    // Model adds altLabel.
+    // Expected: exactly one insert at line 5, zero deletes, zero replaces.
+    const content = [
+      'Ontology(<http://example.org/ont>',                             // 0
+      `  Declaration(Class(<${CAT}>))`,                                // 1
+      `  # Class: <${CAT}>`,                                           // 2
+      `  AnnotationAssertion(<${DEF}> <${CAT}> "A domestic feline")`,  // 3
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,           // 4
+      `  SubClassOf(<${CAT}> <http://example.org#Animal>)`,            // 5
+      ')',                                                              // 6
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(mockInsert).toHaveBeenCalledOnce();
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    // Insertion must be at line 5 (after rdfs:label at line 4)
+    const insertPos: { line: number } = mockInsert.mock.calls[0][1];
+    expect(insertPos.line).toBe(5);
+
+    // Inserted text must contain the new altLabel annotation
+    const insertedText: string = mockInsert.mock.calls[0][2];
+    expect(insertedText).toContain(`<${ALT}>`);
+    expect(insertedText).toContain('"kitty"');
+  });
+
+  it('deletes removed annotation without touching any other line', async () => {
+    // File: [rdfs:label (line 3), definition (line 4)].
+    // Model removes definition.
+    // Expected: exactly one delete, zero inserts, zero replaces.
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}>`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,    // 3
+      `  AnnotationAssertion(<${DEF}> <${CAT}> "A cat")`,       // 4
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'functional',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(mockDelete).toHaveBeenCalledOnce();
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('inserts first annotation to entity that had none', async () => {
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  SubClassOf(<${CAT}> <http://example.org#Animal>)`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'functional',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(mockInsert).toHaveBeenCalledOnce();
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('simultaneously inserts added and deletes removed, preserving unchanged', async () => {
+    // File: [rdfs:label, definition]. Model replaces definition with altLabel.
+    // Expected: one insert (altLabel) + one delete (definition), zero replaces.
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,     // 2
+      `  AnnotationAssertion(<${DEF}> <${CAT}> "A cat")`,        // 3
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, { [ALT]: ['kitty'] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(mockInsert).toHaveBeenCalledOnce();
+    expect(mockDelete).toHaveBeenCalledOnce();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+});
+
+// ── T005: syncManchester idempotency ──────────────────────────────────────────
+// These tests expose the trailing-newline mismatch in the Manchester idempotency
+// check (existingBlock includes trailing empty lines; newAnnotBlock does not).
+
+function makeManchesterDoc(content: string): vscode.TextDocument {
+  const lines = content.split('\n');
+  return {
+    getText: () => content,
+    lineAt: (i: number) => ({
+      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
+      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
+      text: lines[i] ?? '',
+    }),
+    uri: { fsPath: 'test.omn', toString: () => 'file:///test.omn' },
+    lineCount: lines.length,
+  } as unknown as vscode.TextDocument;
+}
+
+describe('syncManchester — idempotency (T005)', () => {
+  it('does not apply edit when file already has the exact generated annotation block', async () => {
+    // The generator produces: "    Annotations:\n        rdfs:label \"Cat\"@en"
+    // followed by a SubClassOf section (no trailing empty line before it).
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      '        rdfs:label "Cat"@en',
+      `    SubClassOf: <http://example.org#Animal>`,
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not apply edit when file has annotation block followed by trailing empty line only', async () => {
+    // No subsequent section — existingBlock ends with trailing newline from empty line.
+    // This is the common case for the last entity in a file.
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      '        rdfs:label "Cat"@en',
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not apply edit when multiple annotations match in file order', async () => {
+    // Generator order: labels first, then other annotations.
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      `        rdfs:label "Cat"@en,`,
+      `        <${DEF}> "A domestic feline"`,
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does apply edit when Manchester annotation is changed', async () => {
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      '        rdfs:label "OldCat"@en',
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+  });
+});
+
+// ── T007: syncTurtle annotation idempotency ───────────────────────────────────
+
+function makeTurtleDoc(content: string): vscode.TextDocument {
+  const lines = content.split('\n');
+  return {
+    getText: () => content,
+    lineAt: (i: number) => ({
+      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
+      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
+      text: lines[i] ?? '',
+    }),
+    uri: { fsPath: 'test.ttl', toString: () => 'file:///test.ttl' },
+    lineCount: lines.length,
+  } as unknown as vscode.TextDocument;
+}
+
+// Minimal prefix header used by all Turtle tests — matches what real .ttl files have.
+const TTL_PREFIX = [
+  '@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .',
+  '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .',
+  '@prefix owl: <http://www.w3.org/2002/07/owl#> .',
+  '',
+].join('\n');
+
+describe('syncTurtle — annotation idempotency (T007)', () => {
+  it('does not apply edit when annotation is unchanged', async () => {
+    const content = TTL_PREFIX + [
+      `<${CAT}> rdf:type owl:Class ;`,
+      `    rdfs:label "Cat"@en .`,
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeTurtleDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'turtle',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not apply edit when annotation and structural segs are both unchanged', async () => {
+    const content = TTL_PREFIX + [
+      `<${CAT}> rdf:type owl:Class ;`,
+      `    rdfs:subClassOf <http://example.org#Animal> ;`,
+      `    rdfs:label "Cat"@en .`,
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeTurtleDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'turtle',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not apply edit when entity has no annotations and file has none', async () => {
+    const content = TTL_PREFIX + [
+      `<${CAT}> rdf:type owl:Class .`,
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeTurtleDoc(content),
+      makeClass({}, {}),
+      'turtle',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('does apply edit when annotation label changes', async () => {
+    const content = TTL_PREFIX + [
+      `<${CAT}> rdf:type owl:Class ;`,
+      `    rdfs:label "OldCat"@en .`,
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeTurtleDoc(content),
+      makeClass({ en: ['Cat'] }, {}),
+      'turtle',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
   });
 });

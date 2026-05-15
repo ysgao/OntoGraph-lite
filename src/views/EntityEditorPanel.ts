@@ -27,6 +27,11 @@ import { parsedDocVersions } from '../extension';
 
 let panel: vscode.WebviewPanel | undefined;
 let lastIri = '';
+// Always tracks the most recent model provided by showEntityInfo or
+// refreshEntityEditorIfOpen. handleMessage uses this instead of the closure-
+// captured model so that save mutations always target the current activeModel,
+// even after handleDocument has re-parsed and replaced the original model object.
+let currentPanelModel: OntologyModel | undefined;
 const refreshCallbacks: Array<() => void> = [];
 
 // Per-entity override cache: ensures edits made through the panel are always
@@ -44,10 +49,16 @@ let _annotationSyncActive = false;
 let _cachedIndexModel: OntologyModel | undefined;
 let _cachedIndex: OntologyIndex | undefined;
 
+// Decoration applied to lines modified by the entity editor sync.
+// Display-only: does not affect file content or OWL semantics.
+// Styled like VS Code's "modified" gutter indicator (left border + overview ruler).
 const syncHighlightDecoration = vscode.window.createTextEditorDecorationType({
-  backgroundColor: new vscode.ThemeColor('editor.wordHighlightStrongBackground'),
+  borderStyle: 'none none none solid',
+  borderWidth: '0 0 0 3px',
+  borderColor: new vscode.ThemeColor('editorOverviewRuler.modifiedForeground'),
   overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.modifiedForeground'),
-  overviewRulerLane: vscode.OverviewRulerLane.Right,
+  overviewRulerLane: vscode.OverviewRulerLane.Left,
+  isWholeLine: true,
 });
 
 function getIndex(model: OntologyModel): OntologyIndex {
@@ -74,6 +85,7 @@ function fireRefresh(): void {
  */
 export function refreshEntityEditorIfOpen(model: OntologyModel): void {
   if (!panel || !lastIri) { return; }
+  currentPanelModel = model;
   if (!_annotationSyncActive) {
     // External model refresh (e.g. user edited the file directly) — drop any
     // stale save cache so the panel shows what the file actually contains now.
@@ -87,6 +99,8 @@ export function showEntityInfo(
   model: OntologyModel,
   iri: string,
 ): void {
+  if (lastIri !== iri) { clearSyncHighlight(); }
+  currentPanelModel = model;
   lastIri = iri;
 
   if (panel) {
@@ -107,12 +121,12 @@ export function showEntityInfo(
   );
 
   panel.webview.html = buildHtml(panel.webview, context.extensionUri);
-  panel.onDidDispose(() => { panel = undefined; }, null, context.subscriptions);
+  panel.onDidDispose(() => { panel = undefined; clearSyncHighlight(); }, null, context.subscriptions);
 
   panel.webview.onDidReceiveMessage(
     (msg: EntityEditorWebviewToExt) => {
-      if (!panel) { return; }
-      handleMessage(msg, panel, model, context);
+      if (!panel || !currentPanelModel) { return; }
+      handleMessage(msg, panel, currentPanelModel, context);
     },
     undefined,
     context.subscriptions,
@@ -472,17 +486,33 @@ function findEntity(model: OntologyModel, iri: string) {
     ?? model.individuals.get(iri);
 }
 
+// Track the URI whose lines are currently decorated so we can clear them on the
+// next sync or when the entity editor panel is closed.
+let _decoratedUri: string | undefined;
+
 function highlightSyncedRanges(uri: vscode.Uri, ranges: vscode.Range[]): void {
+  // Clear any decoration from a previous sync (possibly on a different document).
+  clearSyncHighlight();
+
   if (ranges.length === 0) { return; }
-  const editors = vscode.window.visibleTextEditors.filter(editor => editor.document.uri.toString() === uri.toString());
+  _decoratedUri = uri.toString();
+  const editors = vscode.window.visibleTextEditors.filter(
+    editor => editor.document.uri.toString() === uri.toString()
+  );
   for (const editor of editors) {
     editor.setDecorations(syncHighlightDecoration, ranges);
   }
-  setTimeout(() => {
-    for (const editor of vscode.window.visibleTextEditors.filter(e => e.document.uri.toString() === uri.toString())) {
+}
+
+function clearSyncHighlight(): void {
+  if (!_decoratedUri) { return; }
+  const target = _decoratedUri;
+  _decoratedUri = undefined;
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (editor.document.uri.toString() === target) {
       editor.setDecorations(syncHighlightDecoration, []);
     }
-  }, 4000);
+  }
 }
 
 async function getSourceDocument(model: OntologyModel): Promise<vscode.TextDocument | undefined> {

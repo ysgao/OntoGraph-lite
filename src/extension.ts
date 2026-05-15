@@ -225,6 +225,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ontograph.classifyOntology', async () => {
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
+      if (activeModel) { refreshEntityEditorIfOpen(activeModel); }
     }),
 
     vscode.commands.registerCommand('ontograph.classifyOntologyStale', async () => {
@@ -236,6 +237,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
+      if (activeModel) { refreshEntityEditorIfOpen(activeModel); }
     }),
 
     vscode.commands.registerCommand('ontograph.checkConsistency', () =>

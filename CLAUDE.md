@@ -161,3 +161,6 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 `test-ontologies/` contains sample files for manual testing:
 - `animals.omn` / `animals.owx` / `animals.ttl` — small examples for all formats
 - `bfo-core.ofn` — large (~1.3 MB) BFO ontology for performance testing
+
+## Recent Changes
+- 001-fix-sync-data-loss: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]

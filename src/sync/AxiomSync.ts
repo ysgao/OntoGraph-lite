@@ -16,6 +16,15 @@ const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
+function detectFunctionalIndent(lines: string[]): string {
+  for (const line of lines) {
+    if (/^\s+[A-Za-z(]/.test(line) && !line.trimStart().startsWith('Prefix')) {
+      return line.match(/^(\s+)/)?.[1] ?? '  ';
+    }
+  }
+  return '  ';
+}
+
 function parsePrefixes(text: string, fmt: 'functional' | 'manchester' | 'turtle'): Map<string, string> {
   const map = new Map<string, string>();
   let re: RegExp;
@@ -337,80 +346,165 @@ function changedLineRanges(startLine: number, lines: readonly string[]): vscode.
   return lines.map((line, i) => new vscode.Range(startLine + i, 0, startLine + i, line.length));
 }
 
+// ── Diff-based insertion helpers ──────────────────────────────────────────────
+
+function getAxiomKeyword(line: string): string | null {
+  const m = line.trimStart().match(/^([A-Za-z]+)\s*\(/);
+  return m ? m[1] : null;
+}
+
+// Relative ordering within a class cluster (lower = earlier).
+// Keywords absent from this map all share priority 99 (property/individual axioms).
+const AXIOM_KW_PRIORITY: Readonly<Record<string, number>> = {
+  EquivalentClasses: 0, EquivalentUnion: 0,
+  SubClassOf: 1,
+  DisjointClasses: 2, DisjointUnion: 2,
+};
+
+// Find where to insert a new axiom with the given keyword.
+// Uses keyword priority so EquivalentClasses always lands before SubClassOf, etc.
+// Falls back to the position of the first removed line of the same keyword (in-place replacement),
+// then to after the last kept line, then to anchor+1.
+function findInsertionPointForKeyword(
+  kw: string,
+  keptLineIdxs: number[],
+  removedLineIdxs: number[],
+  lines: string[],
+  anchor: number,
+  fallbackLine: number,
+): number {
+  const myPriority = AXIOM_KW_PRIORITY[kw] ?? 99;
+  let lastSameIdx = -1;
+  let lastLowerPriorityIdx = -1;
+  let firstHigherPriorityIdx = -1;
+
+  for (const i of keptLineIdxs) {
+    const lineKw = getAxiomKeyword(lines[i]);
+    if (!lineKw) { continue; }
+    const p = AXIOM_KW_PRIORITY[lineKw] ?? 99;
+    if (lineKw === kw) {
+      lastSameIdx = i;
+    } else if (p < myPriority && i > lastLowerPriorityIdx) {
+      lastLowerPriorityIdx = i;
+    } else if (p > myPriority && (firstHigherPriorityIdx < 0 || i < firstHigherPriorityIdx)) {
+      firstHigherPriorityIdx = i;
+    }
+  }
+
+  if (lastSameIdx >= 0) { return lastSameIdx + 1; }
+  if (lastLowerPriorityIdx >= 0) { return lastLowerPriorityIdx + 1; }
+  if (firstHigherPriorityIdx >= 0) { return firstHigherPriorityIdx; }
+  // No kept line established a position; use the first removed line of the same keyword
+  // (the new line replaces it in-place when combined with the delete in the same edit).
+  const firstRemovedSameKw = removedLineIdxs.find(i => getAxiomKeyword(lines[i]) === kw);
+  if (firstRemovedSameKw !== undefined) { return firstRemovedSameKw; }
+  const lastKeptIdx = keptLineIdxs.length > 0 ? keptLineIdxs[keptLineIdxs.length - 1] : -1;
+  if (lastKeptIdx >= 0) { return lastKeptIdx + 1; }
+  return anchor >= 0 ? anchor + 1 : fallbackLine;
+}
+
 function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | null {
   const text = doc.getText();
   const lines = text.split('\n');
   const keywords = entityAxiomKeywords(entity);
-  const regularLines = generateFunctionalAxiomLines(entity);
-  const gciLines = generateFunctionalGCILines(entity);
 
-  // Separate existing axiom lines into regular (entity as subject) and GCI (entity as superclass)
-  const regularToDelete: number[] = [];
-  const gciToDelete: number[] = [];
+  // Collect all existing axiom lines for this entity
+  const existingRegIdxs: number[] = [];
+  const existingGciIdxs: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (!isEntityAxiomLine(lines[i], entity, keywords)) continue;
-    if (isGCIAxiomLine(lines[i], entity)) {
-      gciToDelete.push(i);
-    } else {
-      regularToDelete.push(i);
-    }
+    if (!isEntityAxiomLine(lines[i], entity, keywords)) { continue; }
+    if (isGCIAxiomLine(lines[i], entity)) { existingGciIdxs.push(i); }
+    else { existingRegIdxs.push(i); }
   }
 
-  // Closing paren of Ontology block — GCIs always land before this line
+  // Detect indentation from existing axiom lines; fall back to file convention.
+  const firstAxiomIdx = existingRegIdxs[0] ?? existingGciIdxs[0] ?? -1;
+  const indent = firstAxiomIdx >= 0
+    ? (lines[firstAxiomIdx].match(/^(\s+)/)?.[1] ?? detectFunctionalIndent(lines))
+    : detectFunctionalIndent(lines);
+
+  // Generate model's desired lines using the detected indentation.
+  const modelRegLines = generateFunctionalAxiomLines(entity).map(l => indent + l.trimStart());
+  const modelGciLines = generateFunctionalGCILines(entity).map(l => indent + l.trimStart());
+
+  // Diff: lines only in file → remove; lines only in model → add.
+  const fileRegMap = new Map<string, number>(existingRegIdxs.map(i => [lines[i].trim(), i]));
+  const modelRegSet = new Set(modelRegLines.map(l => l.trim()));
+  const fileGciMap = new Map<string, number>(existingGciIdxs.map(i => [lines[i].trim(), i]));
+  const modelGciSet = new Set(modelGciLines.map(l => l.trim()));
+
+  const regRemoveIdxs = existingRegIdxs.filter(i => !modelRegSet.has(lines[i].trim()));
+  const regAddLines   = modelRegLines.filter(l => !fileRegMap.has(l.trim()));
+  const gciRemoveIdxs = existingGciIdxs.filter(i => !modelGciSet.has(lines[i].trim()));
+  const gciAddLines   = modelGciLines.filter(l => !fileGciMap.has(l.trim()));
+
+  if (regRemoveIdxs.length === 0 && regAddLines.length === 0 &&
+      gciRemoveIdxs.length === 0 && gciAddLines.length === 0) {
+    return null;
+  }
+
+  const anchor = findEntityAnchorLine(lines, entity);
+
+  // GCI boundary: before Property Chains or before closing paren.
   let closingParenLine = lines.length > 1 ? lines.length - 1 : lines.length;
   for (let i = lines.length - 1; i >= 0; i--) {
     if (lines[i].trim() === ')') { closingParenLine = i; break; }
   }
-
-  // GCI insertion point: before Property Chains if they exist, otherwise before closing paren.
   let gciInsertAt = closingParenLine;
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim().startsWith('SubObjectPropertyOf(ObjectPropertyChain')) {
-      gciInsertAt = i;
-      break;
+      gciInsertAt = i; break;
     }
   }
 
-  // Regular axiom insertion point: at the first existing regular axiom, or after the entity's
-  // Declaration / last AnnotationAssertion in the document (fallback: before GCI insertion point).
-  let regularInsertAt: number;
-  if (regularToDelete.length > 0) {
-    regularInsertAt = regularToDelete[0];
-  } else {
-    const anchor = findEntityAnchorLine(lines, entity);
-    regularInsertAt = anchor >= 0 ? anchor + 1 : gciInsertAt;
+  // Lines that stay in the file (not being removed)
+  const regRemoveSet = new Set(regRemoveIdxs);
+  const keptLineIdxs = existingRegIdxs.filter(i => !regRemoveSet.has(i));
+
+  // Group toAdd lines by their insertion point in the original document.
+  const insertsByLine = new Map<number, string[]>();
+  for (const line of regAddLines) {
+    const kw = getAxiomKeyword(line) ?? '';
+    const at = findInsertionPointForKeyword(kw, keptLineIdxs, regRemoveIdxs, lines, anchor, gciInsertAt);
+    if (!insertsByLine.has(at)) { insertsByLine.set(at, []); }
+    insertsByLine.get(at)!.push(line);
   }
 
   const edit = new vscode.WorkspaceEdit();
-  const changedRanges: vscode.Range[] = [];
 
-  // Regular axioms: replace existing block or insert at anchor
-  if (regularToDelete.length > 0) {
-    const newContent = regularLines.length > 0 ? regularLines.join('\n') + '\n' : '';
-    edit.replace(doc.uri, doc.lineAt(regularInsertAt).rangeIncludingLineBreak, newContent);
-    for (const i of [...regularToDelete.slice(1)].reverse()) {
-      edit.delete(doc.uri, doc.lineAt(i).rangeIncludingLineBreak);
-    }
-    if (regularLines.length > 0) {
-      changedRanges.push(...changedLineRanges(regularInsertAt, regularLines));
-    }
-  } else if (regularLines.length > 0) {
-    edit.insert(doc.uri, new vscode.Position(regularInsertAt, 0), regularLines.join('\n') + '\n');
-    changedRanges.push(...changedLineRanges(regularInsertAt, regularLines));
-  }
-
-  // GCI axioms: always at end of entity clusters, before Property Chains or closing paren
-  for (const i of [...gciToDelete].reverse()) {
+  // Deletions (reverse order so line indices stay valid within the WorkspaceEdit)
+  for (const i of [...regRemoveIdxs, ...gciRemoveIdxs].sort((a, b) => b - a)) {
     edit.delete(doc.uri, doc.lineAt(i).rangeIncludingLineBreak);
   }
-  if (gciLines.length > 0) {
-    edit.insert(doc.uri, new vscode.Position(gciInsertAt, 0), gciLines.join('\n') + '\n');
-    changedRanges.push(...changedLineRanges(gciInsertAt, gciLines));
+
+  // Regular insertions
+  for (const [lineIdx, insertLines] of insertsByLine) {
+    edit.insert(doc.uri, new vscode.Position(lineIdx, 0), insertLines.join('\n') + '\n');
   }
 
-  if (regularToDelete.length === 0 && regularLines.length === 0 &&
-      gciToDelete.length === 0 && gciLines.length === 0) {
-    return null;
+  // GCI insertions
+  if (gciAddLines.length > 0) {
+    edit.insert(doc.uri, new vscode.Position(gciInsertAt, 0), gciAddLines.join('\n') + '\n');
+  }
+
+  // Compute changedRanges in post-edit coordinates.
+  // Post-edit line = orig_line − deleted_before + inserted_before.
+  const changedRanges: vscode.Range[] = [];
+  const allRemovesSorted = [...regRemoveIdxs, ...gciRemoveIdxs].sort((a, b) => a - b);
+  const allInsertions: Array<[number, string[]]> = [
+    ...[...insertsByLine.entries()],
+    ...(gciAddLines.length > 0 ? [[gciInsertAt, gciAddLines] as [number, string[]]] : []),
+  ].sort((a, b) => a[0] - b[0]);
+
+  for (const [origLine, insertedLines] of allInsertions) {
+    const deletedBefore  = allRemovesSorted.filter(d => d < origLine).length;
+    const insertedBefore = allInsertions
+      .filter(([pos]) => pos < origLine)
+      .reduce((sum, [, ls]) => sum + ls.length, 0);
+    const postStart = origLine - deletedBefore + insertedBefore;
+    for (let i = 0; i < insertedLines.length; i++) {
+      changedRanges.push(new vscode.Range(postStart + i, 0, postStart + i, insertedLines[i].length));
+    }
   }
 
   return { edit, changedRanges };
@@ -579,6 +673,17 @@ function syncAxiomsManchester(doc: vscode.TextDocument, entity: OWLEntity): Sync
   // If nothing to delete and nothing to add, no-op
   if (managedRanges.length === 0 && newSections === '') return null;
 
+  // Idempotency: if the existing managed section text equals the new content, skip the write.
+  // trimEnd() strips trailing whitespace/empty lines that appear between the last section
+  // and the next frame keyword (or EOF), which are included in managedRanges.end but not
+  // in the generated output.
+  if (managedRanges.length > 0 && newSections !== '') {
+    const existingText = managedRanges
+      .map(r => lines.slice(r.start, r.end).join('\n'))
+      .join('\n');
+    if (existingText.trimEnd() === newSections.trimEnd()) { return null; }
+  }
+
   const edit = new vscode.WorkspaceEdit();
   let changedAt = frame.start + 1;
 
@@ -745,11 +850,24 @@ function syncAxiomsTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResu
   const allSegs = [...newStructSegs, ...newAnnotSegs];
   if (allSegs.length === 0) return null;
 
+  // Detect continuation indent from the existing block; fall back to 4 spaces.
+  const existingIndent = (() => {
+    for (let i = blockStart + 1; i < blockEnd; i++) {
+      const m = lines[i].match(/^(\s+)/);
+      if (m) { return m[1]; }
+    }
+    return '    ';
+  })();
+
   const rebuiltLines: string[] = [];
   rebuiltLines.push(`${subjectToken} ${allSegs[0]}${allSegs.length === 1 ? ' .' : ' ;'}`);
   for (let i = 1; i < allSegs.length; i++) {
-    rebuiltLines.push(`    ${allSegs[i]}${i === allSegs.length - 1 ? ' .' : ' ;'}`);
+    rebuiltLines.push(`${existingIndent}${allSegs[i]}${i === allSegs.length - 1 ? ' .' : ' ;'}`);
   }
+
+  // Idempotency: skip write if rebuilt block matches existing block exactly.
+  const existingBlock = lines.slice(blockStart, blockEnd).join('\n');
+  if (rebuiltLines.join('\n') === existingBlock) { return null; }
 
   const edit = new vscode.WorkspaceEdit();
   const replaceStart = doc.lineAt(blockStart).range.start;

@@ -1,4 +1,4 @@
-# Tech Stack: OntoGraph
+1# Tech Stack: OntoGraph
 
 ## Core Technologies
 - **Extension Layer:** TypeScript (Node.js) - used for VS Code extension logic, command registration, and view management.
