@@ -21,7 +21,13 @@
       "Bash(grep -E \"\\\\.\\(ts|tsx|vue|html\\)$\")",
       "WebSearch",
       "Bash(.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks)",
-      "Bash(bash *)"
+      "Bash(bash *)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh use abbreviated IRI for the RDFS scheme annotation properties in OWL documents by following the same approach for rdfs:label. *)",
+      "Bash(.specify/scripts/bash/setup-plan.sh *)",
+      "Bash(.specify/scripts/bash/update-agent-context.sh claude *)",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh *)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh The annotations for annotation properties skos:definition and rdfs:comment require more space for text entries. Change the field to area of multiple lines in the UI of entity editor. *)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh the URLs in all annotations should be displayed as clickable links. *)"
     ]
   }
 }
