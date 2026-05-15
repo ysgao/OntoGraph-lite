@@ -4,10 +4,17 @@ import { manchesterToFunctional } from '../utils/ExpressionUtils';
 const OWL = 'http://www.w3.org/2002/07/owl#';
 const OWL_THING = `${OWL}Thing`;
 const OWL_NOTHING = `${OWL}Nothing`;
-const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
+const RDFS_PREFIX = 'http://www.w3.org/2000/01/rdf-schema#';
+const RDFS_ANN_TO_TOKEN = new Map<string, string>([
+  [`${RDFS_PREFIX}label`,       'rdfs:label'],
+  [`${RDFS_PREFIX}comment`,     'rdfs:comment'],
+  [`${RDFS_PREFIX}seeAlso`,     'rdfs:seeAlso'],
+  [`${RDFS_PREFIX}isDefinedBy`, 'rdfs:isDefinedBy'],
+]);
 
 function iri(s: string): string {
-  if (s === RDFS_LABEL) { return 'rdfs:label'; }
+  const token = RDFS_ANN_TO_TOKEN.get(s);
+  if (token !== undefined) { return token; }
   return `<${s}>`;
 }
 
@@ -31,7 +38,7 @@ export function generateEntityCluster(entity: OWLEntity, model: OntologyModel): 
   // Annotations (Labels first)
   for (const [lang, values] of Object.entries(entity.labels)) {
     for (const val of values) {
-      out.push(`AnnotationAssertion(${iri(RDFS_LABEL)} ${iri(entity.iri)} ${literal(val, lang || undefined)})`);
+      out.push(`AnnotationAssertion(${iri(`${RDFS_PREFIX}label`)} ${iri(entity.iri)} ${literal(val, lang || undefined)})`);
     }
   }
 

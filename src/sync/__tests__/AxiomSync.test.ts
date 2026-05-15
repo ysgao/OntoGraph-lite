@@ -533,3 +533,31 @@ describe('syncAxiomsTurtle — annotation file-order preservation', () => {
     expect(altIdx).toBeGreaterThan(labelIdx);
   });
 });
+
+// ── T008 (US1): syncAxiomsTurtle writes rdfs:comment abbreviated ──────────────
+// These tests must FAIL before the write-path fix: abbreviateIri only handles rdfs:label.
+
+const RDFS_COMMENT = 'http://www.w3.org/2000/01/rdf-schema#comment';
+
+describe('syncAxiomsTurtle — rdfs:comment abbreviated (T008)', () => {
+  it('writes rdfs:comment abbreviated token when adding a new rdfs:comment annotation', async () => {
+    // File has only rdfs:label. Model adds rdfs:comment.
+    // Expected: rebuilt block contains "rdfs:comment", not "<http://...#comment>".
+    const content = [
+      `<${A}> rdf:type owl:Class ;`,
+      `    rdfs:subClassOf <${B}> ;`,
+      `    rdfs:label "A"@en .`,
+    ].join('\n');
+
+    await syncAxiomsToDocument(
+      makeTurtleDoc(content),
+      makeClassWithLabelAndAnnot([B], 'A', { [RDFS_COMMENT]: ['An animal class'] }),
+      'turtle',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    const replacedText: string = mockReplace.mock.calls[0][2];
+    expect(replacedText).toContain('rdfs:comment');
+    expect(replacedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
+  });
+});

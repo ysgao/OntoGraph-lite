@@ -14,7 +14,13 @@ import { createEmptyModel, BUILTIN_ANNOTATION_PROP_IRIS } from '../model/Ontolog
 
 const BUILTIN_ANN_SET = new Set(BUILTIN_ANNOTATION_PROP_IRIS);
 
-const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
+const RDFS_PREFIX = 'http://www.w3.org/2000/01/rdf-schema#';
+const RDFS_ANN_TO_TOKEN = new Map<string, string>([
+  [`${RDFS_PREFIX}label`,       'rdfs:label'],
+  [`${RDFS_PREFIX}comment`,     'rdfs:comment'],
+  [`${RDFS_PREFIX}seeAlso`,     'rdfs:seeAlso'],
+  [`${RDFS_PREFIX}isDefinedBy`, 'rdfs:isDefinedBy'],
+]);
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -53,7 +59,8 @@ function resolveIri(token: string, prefixes: Map<string, string>): string {
 }
 
 function abbreviateIri(iri: string, prefixes: Map<string, string>): string {
-  if (iri === RDFS_LABEL) { return 'rdfs:label'; }
+  const token = RDFS_ANN_TO_TOKEN.get(iri);
+  if (token !== undefined) { return token; }
   return `<${iri}>`;
 }
 
@@ -83,7 +90,7 @@ function entityAnnotationSegs(entity: OWLEntity, prefixes: Map<string, string>):
   const segs: string[] = [];
   for (const [lang, vals] of Object.entries(entity.labels)) {
     for (const v of vals) {
-      segs.push(`${abbreviateIri(RDFS_LABEL, prefixes)} ${fmtLiteral(v, lang || undefined)}`);
+      segs.push(`${abbreviateIri(`${RDFS_PREFIX}label`, prefixes)} ${fmtLiteral(v, lang || undefined)}`);
     }
   }
   for (const [propIri, vals] of Object.entries(entity.annotations)) {

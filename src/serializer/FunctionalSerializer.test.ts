@@ -21,11 +21,11 @@ describe('FunctionalSerializer Clustering', () => {
     };
 
     const cluster = generateEntityCluster(cls, model);
-    
+
     expect(cluster).toEqual([
       '# Class: <http://example.org#A> (Class A)',
       'AnnotationAssertion(rdfs:label <http://example.org#A> "Class A"@en)',
-      'AnnotationAssertion(<http://www.w3.org/2000/01/rdf-schema#comment> <http://example.org#A> "A comment"@en)',
+      'AnnotationAssertion(rdfs:comment <http://example.org#A> "A comment"@en)',
       '',
       'EquivalentClasses(<http://example.org#A> <http://example.org#C>)',
       'SubClassOf(<http://example.org#A> <http://example.org#B>)'
@@ -82,6 +82,31 @@ describe('FunctionalSerializer Clustering', () => {
       'ObjectPropertyAssertion(<http://example.org#partOf> <http://example.org#myInd> <http://example.org#otherInd>)',
       'DataPropertyAssertion(<http://example.org#hasAge> <http://example.org#myInd> "25"^^<http://www.w3.org/2001/XMLSchema#integer>)'
     ]);
+  });
+
+  it('should abbreviate rdfs:seeAlso annotation property IRI', () => {
+    const model = createEmptyModel('test.ofn');
+    const cls: OWLClass = {
+      iri: 'http://example.org#A',
+      type: 'class',
+      labels: {},
+      annotations: {
+        'http://www.w3.org/2000/01/rdf-schema#seeAlso': ['http://example.org#B'],
+        'http://www.w3.org/2000/01/rdf-schema#isDefinedBy': ['http://example.org#ont'],
+      },
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+
+    const cluster = generateEntityCluster(cls, model);
+
+    expect(cluster.some(l => l.startsWith('AnnotationAssertion(rdfs:seeAlso '))).toBe(true);
+    expect(cluster.some(l => l.startsWith('AnnotationAssertion(rdfs:isDefinedBy '))).toBe(true);
+    expect(cluster.some(l => l.includes('<http://www.w3.org/2000/01/rdf-schema#'))).toBe(false);
   });
 
   it('should escape special characters in literals', () => {

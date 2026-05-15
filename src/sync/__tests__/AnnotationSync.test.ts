@@ -493,6 +493,105 @@ describe('syncTurtle — file-order preservation (T008)', () => {
   });
 });
 
+// ── T002 (US1): rdfs:comment abbreviated IRI — Red phase ─────────────────────
+// These tests must FAIL before the fix: abbreviateIri only handles rdfs:label.
+
+const RDFS_COMMENT = 'http://www.w3.org/2000/01/rdf-schema#comment';
+
+describe('syncFunctional — rdfs:comment abbreviated (T004)', () => {
+  it('writes rdfs:comment abbreviated token when adding a new rdfs:comment annotation', async () => {
+    // File has only rdfs:label. Model adds rdfs:comment.
+    // Expected: written line contains "rdfs:comment", not "<http://...#comment>".
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}>`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    const insertedText: string = mockInsert.mock.calls[0][2];
+    expect(insertedText).toContain('rdfs:comment');
+    expect(insertedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
+  });
+});
+
+describe('syncManchester — rdfs:comment abbreviated (T006)', () => {
+  it('writes rdfs:comment abbreviated token when adding a new rdfs:comment annotation', async () => {
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      '        rdfs:label "Cat"@en',
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    const replacedText: string = mockReplace.mock.calls[0][2];
+    expect(replacedText).toContain('rdfs:comment');
+    expect(replacedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
+  });
+});
+
+// ── T010/T012 (US2): round-trip fidelity when file already has rdfs:comment ──
+// These tests must FAIL before the read-path fix: parsers don't recognise
+// the 'rdfs:comment' abbreviated token unless the rdfs: prefix is in the map.
+
+describe('syncFunctional — idempotent with rdfs:comment in file (T010)', () => {
+  it('is a no-op when file already contains AnnotationAssertion(rdfs:comment ...) with no prefix map', async () => {
+    // No Prefix(rdfs:=<...>) declaration in this file — relies on RDFS_TOKEN_TO_IRI map.
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}>`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      `  AnnotationAssertion(rdfs:comment <${CAT}> "A domestic feline")`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncManchester — idempotent with rdfs:comment in file (T012)', () => {
+  it('is a no-op when file already contains rdfs:comment abbreviated token with no prefix map', async () => {
+    // No Prefix: rdfs: <...> declaration — relies on RDFS_TOKEN_TO_IRI map.
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      '        rdfs:label "Cat"@en,',
+      '        rdfs:comment "A domestic feline"',
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+});
+
 // ── T007: syncTurtle annotation idempotency ───────────────────────────────────
 
 function makeTurtleDoc(content: string): vscode.TextDocument {

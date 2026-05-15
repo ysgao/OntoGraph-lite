@@ -2,7 +2,16 @@ import * as vscode from 'vscode';
 import type { OWLEntity } from '../model/OntologyModel';
 import { BUILTIN_ANNOTATION_PROP_IRIS } from '../model/OntologyModel';
 
-const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
+const RDFS_PREFIX = 'http://www.w3.org/2000/01/rdf-schema#';
+const RDFS_ANN_TO_TOKEN = new Map<string, string>([
+  [`${RDFS_PREFIX}label`,       'rdfs:label'],
+  [`${RDFS_PREFIX}comment`,     'rdfs:comment'],
+  [`${RDFS_PREFIX}seeAlso`,     'rdfs:seeAlso'],
+  [`${RDFS_PREFIX}isDefinedBy`, 'rdfs:isDefinedBy'],
+]);
+const RDFS_TOKEN_TO_IRI = new Map<string, string>(
+  [...RDFS_ANN_TO_TOKEN.entries()].map(([k, v]) => [v, k]),
+);
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -38,7 +47,8 @@ function resolveIri(token: string, prefixes: Map<string, string>): string {
 }
 
 function abbreviateIri(iri: string, prefixes: Map<string, string>): string {
-  if (iri === RDFS_LABEL) { return 'rdfs:label'; }
+  const token = RDFS_ANN_TO_TOKEN.get(iri);
+  if (token !== undefined) { return token; }
   return `<${iri}>`;
 }
 
@@ -48,7 +58,7 @@ function entityAnnotationPairs(entity: OWLEntity): AnnotationPair[] {
   const pairs: AnnotationPair[] = [];
   for (const [lang, vals] of Object.entries(entity.labels)) {
     for (const v of vals) {
-      pairs.push({ propIri: RDFS_LABEL, text: v, lang: lang || undefined });
+      pairs.push({ propIri: `${RDFS_PREFIX}label`, text: v, lang: lang || undefined });
     }
   }
   for (const [propIri, vals] of Object.entries(entity.annotations)) {
@@ -115,9 +125,8 @@ function parseFunctionalAnnotationItem(
 
   const tokens = extractLeadingIriTokens(inner, 1);
   if (tokens.length < 1) return null;
-  // rdfs:label is written as the abbreviated token; resolve to full IRI explicitly.
   const propToken = tokens[0];
-  const propIri = propToken === 'rdfs:label' ? RDFS_LABEL : resolveIri(propToken, prefixes);
+  const propIri = RDFS_TOKEN_TO_IRI.get(propToken) ?? resolveIri(propToken, prefixes);
 
   const litMatch = line.match(/"((?:[^"\\]|\\.)*)"\s*(?:@([A-Za-z][A-Za-z0-9-]*))?/);
   if (!litMatch) return null;
@@ -254,7 +263,7 @@ function parseManchesterAnnotationLine(
   const tokens = extractLeadingIriTokens(trimmed, 1);
   if (tokens.length < 1) { return null; }
   const propToken = tokens[0];
-  const propIri = propToken === 'rdfs:label' ? RDFS_LABEL : resolveIri(propToken, prefixes);
+  const propIri = RDFS_TOKEN_TO_IRI.get(propToken) ?? resolveIri(propToken, prefixes);
   const litMatch = trimmed.match(/"((?:[^"\\]|\\.)*)"\s*(?:@([A-Za-z][A-Za-z0-9-]*))?/);
   if (!litMatch) { return null; }
   const rawText = litMatch[1]
