@@ -163,10 +163,10 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-core.ofn` — large (~1.3 MB) BFO ontology for performance testing
 
 ## Recent Changes
+- 004-annotation-url-links: Added TypeScript 5+ (strict mode), browser IIFE bundle via esbuild + VS Code Extension API (webview), jsdom (existing dev dep for tests)
 - 003-multiline-annotation-fields: Added TypeScript 5+ (strict mode), browser IIFE bundle via esbuild + VS Code Extension API (webview), esbuild (bundler)
 - 002-abbreviate-rdfs-iris: Extended IRI abbreviation rule to all 4 RDFS annotation properties (rdfs:label, rdfs:comment, rdfs:seeAlso, rdfs:isDefinedBy) in sync layer and serializer
-- 001-fix-sync-data-loss: Diff-based sync for all formats — idempotency and minimal diff
 
 ## Active Technologies
-- TypeScript 5+ (strict mode), browser IIFE bundle via esbuild + VS Code Extension API (webview), esbuild (bundler) (003-multiline-annotation-fields)
-- N/A — annotation values are strings stored in the in-memory `OntologyModel` and persisted via `AnnotationSync` (003-multiline-annotation-fields)
+- TypeScript 5+ (strict mode), browser IIFE bundle via esbuild + VS Code Extension API (webview), jsdom (existing dev dep for tests) (004-annotation-url-links)
+- N/A — display-only feature; no change to OWL file serialization (004-annotation-url-links)
