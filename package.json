@@ -126,6 +126,12 @@
         "icon": "$(search)"
       },
       {
+        "command": "ontograph.openDLQuery",
+        "title": "OntoGraph: Open DL Query",
+        "category": "OntoGraph",
+        "icon": "$(symbol-class)"
+      },
+      {
         "command": "ontograph.addEntity",
         "title": "OntoGraph: Add Entity...",
         "icon": "$(add)"

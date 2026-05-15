@@ -72,6 +72,16 @@ const sparqlEditorBuild = esbuild.build({
   target: 'es2020',
 });
 
+// DL Query webview bundle (browser)
+const dlQueryBuild = esbuild.build({
+  ...baseConfig,
+  entryPoints: ['webview-src/dl-query/DLQueryApp.ts'],
+  outfile: 'dist/dl-query-webview.js',
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2020',
+});
+
 await Promise.all([
   extensionBuild,
   parserWorkerBuild,
@@ -79,4 +89,5 @@ await Promise.all([
   graphWebviewBuild,
   classEditorBuild,
   sparqlEditorBuild,
+  dlQueryBuild,
 ]).catch(() => process.exit(1));

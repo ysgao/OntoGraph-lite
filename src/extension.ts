@@ -14,6 +14,8 @@ import { addEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
 import { showEntityInfo, refreshEntityEditorIfOpen } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
+import { openDLQuery } from './commands/openDLQuery';
+import { updateDLQueryModel } from './views/DLQueryPanel';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
 import { ParserRegistry } from './parser/ParserRegistry';
@@ -255,6 +257,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ontograph.openSparqlEditor', () =>
       openSparqlEditor(context, activeModel)),
 
+    vscode.commands.registerCommand('ontograph.openDLQuery', () =>
+      openDLQuery(context, reasonerBridge, activeModel, revealInTreeView)),
+
     vscode.commands.registerCommand('ontograph.entityEditor', (item?: { iri?: string }) => {
       const iri = item?.iri;
       if (!iri) { void vscode.window.showWarningMessage('OntoGraph: Right-click an entity to open the editor.'); return; }
@@ -351,6 +356,7 @@ export function activate(context: vscode.ExtensionContext): void {
       activeModel = model;
       refreshAllViews(model);
       refreshEntityEditorIfOpen(model);
+      updateDLQueryModel(model);
 
       const { classes, objectProperties, dataProperties, individuals } = model;
       const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;

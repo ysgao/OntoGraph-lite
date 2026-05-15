@@ -8,6 +8,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -64,6 +66,8 @@ public class ReasonerServer {
                     return success(idNode, checkConsistency(params, service));
                 case "convertFormat":
                     return success(idNode, convertFormat(params, service));
+                case "dlQuery":
+                    return success(idNode, dlQuery(params, service));
                 default:
                     return error(idNode, "Unknown method: " + method);
             }
@@ -140,6 +144,42 @@ public class ReasonerServer {
         String output = service.convertFormat(content, fromFormat, toFormat);
         ObjectNode node = MAPPER.createObjectNode();
         node.put("output", output);
+        return node;
+    }
+
+    private static ObjectNode dlQuery(JsonNode params, OntologyService service) throws Exception {
+        String format = params.path("format").asText(null);
+        String engine = params.path("engine").asText("auto");
+        String classExpression = params.path("classExpression").asText();
+
+        List<String> queryTypes = new ArrayList<>();
+        JsonNode qtNode = params.path("queryTypes");
+        if (qtNode.isArray()) {
+            for (JsonNode n : qtNode) { queryTypes.add(n.asText()); }
+        }
+
+        org.semanticweb.owlapi.model.OWLOntology ontology;
+        int contentLength;
+        if (params.has("filePath")) {
+            String filePath = params.path("filePath").asText();
+            ontology = service.loadFromFile(filePath, format);
+            contentLength = (int) new java.io.File(filePath).length();
+        } else {
+            String content = params.path("content").asText();
+            ontology = service.loadFromString(content, format);
+            contentLength = content.length();
+        }
+
+        OntologyService.DLQueryResult result =
+            service.dlQuery(ontology, classExpression, queryTypes, engine, contentLength);
+
+        ObjectNode node = MAPPER.createObjectNode();
+        node.set("directSuperClasses", MAPPER.valueToTree(result.directSuperClasses));
+        node.set("superClasses",       MAPPER.valueToTree(result.superClasses));
+        node.set("equivalentClasses",  MAPPER.valueToTree(result.equivalentClasses));
+        node.set("directSubClasses",   MAPPER.valueToTree(result.directSubClasses));
+        node.set("subClasses",         MAPPER.valueToTree(result.subClasses));
+        node.set("instances",          MAPPER.valueToTree(result.instances));
         return node;
     }
 

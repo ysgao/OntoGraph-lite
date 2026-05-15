@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as readline from 'readline';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { DLQueryResult } from '../model/OntologyModel.js';
 
 export interface ClassificationResult {
   consistent: boolean;
@@ -16,6 +17,8 @@ export interface ConsistencyResult {
   consistent: boolean;
   explanation?: string[];
 }
+
+export type { DLQueryResult };
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -159,6 +162,38 @@ export class ReasonerBridge implements vscode.Disposable {
   async convertFormat(content: string, fromFormat: string, toFormat: string): Promise<string> {
     if (!this.proc) { await this.start(); }
     return this.request('convertFormat', { content, fromFormat, toFormat }) as Promise<string>;
+  }
+
+  async dlQuery(
+    format: string,
+    content: string | null,
+    filePath: string | null,
+    classExpression: string,
+    queryTypes: string[],
+    engine = 'auto',
+  ): Promise<DLQueryResult> {
+    if (!this.proc) { await this.start(); }
+
+    let params: Record<string, unknown>;
+    let tempFile: string | undefined;
+    const rawContent = content ?? '';
+
+    if (!filePath && rawContent.length > 512_000) {
+      const id = this.nextId;
+      tempFile = path.join(os.tmpdir(), `ontograph-${id}.owl`);
+      await fs.promises.writeFile(tempFile, rawContent, 'utf8');
+      params = { format, filePath: tempFile, classExpression, queryTypes, engine };
+    } else if (filePath) {
+      params = { format, filePath, classExpression, queryTypes, engine };
+    } else {
+      params = { format, content: rawContent, classExpression, queryTypes, engine };
+    }
+
+    try {
+      return await this.request('dlQuery', params) as DLQueryResult;
+    } finally {
+      if (tempFile) { await fs.promises.unlink(tempFile).catch(() => {}); }
+    }
   }
 
   dispose(): void {

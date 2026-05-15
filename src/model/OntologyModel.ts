@@ -1,5 +1,14 @@
 export type EntityType = 'class' | 'objectProperty' | 'dataProperty' | 'annotationProperty' | 'individual';
 
+export interface DLQueryResult {
+  directSuperClasses: string[];
+  superClasses:       string[];
+  equivalentClasses:  string[];
+  directSubClasses:   string[];
+  subClasses:         string[];
+  instances:          string[];
+}
+
 export interface OWLEntity {
   iri: string;
   type: EntityType;

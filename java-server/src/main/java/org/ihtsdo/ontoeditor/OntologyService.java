@@ -1,6 +1,8 @@
 package org.ihtsdo.ontoeditor;
 
 import org.semanticweb.owlapi.apibinding.OWLManager;
+import org.semanticweb.owlapi.expression.OWLEntityChecker;
+import org.semanticweb.owlapi.expression.ShortFormEntityChecker;
 import org.semanticweb.owlapi.formats.*;
 import org.semanticweb.owlapi.io.FileDocumentSource;
 import org.semanticweb.owlapi.io.StringDocumentSource;
@@ -8,6 +10,9 @@ import org.semanticweb.owlapi.io.StringDocumentTarget;
 import org.semanticweb.owlapi.model.*;
 import org.semanticweb.owlapi.reasoner.InferenceType;
 import org.semanticweb.owlapi.reasoner.OWLReasoner;
+import org.semanticweb.owlapi.util.BidirectionalShortFormProviderAdapter;
+import org.semanticweb.owlapi.util.SimpleShortFormProvider;
+import org.semanticweb.owlapi.util.mansyntax.ManchesterOWLSyntaxParser;
 
 import java.io.File;
 import java.util.*;
@@ -42,6 +47,26 @@ public class OntologyService {
         ConsistencyResult(boolean consistent, List<String> explanation) {
             this.consistent = consistent;
             this.explanation = explanation;
+        }
+    }
+
+    public static class DLQueryResult {
+        public final List<String> directSuperClasses;
+        public final List<String> superClasses;
+        public final List<String> equivalentClasses;
+        public final List<String> directSubClasses;
+        public final List<String> subClasses;
+        public final List<String> instances;
+
+        DLQueryResult(List<String> directSuperClasses, List<String> superClasses,
+                      List<String> equivalentClasses, List<String> directSubClasses,
+                      List<String> subClasses, List<String> instances) {
+            this.directSuperClasses = directSuperClasses;
+            this.superClasses = superClasses;
+            this.equivalentClasses = equivalentClasses;
+            this.directSubClasses = directSubClasses;
+            this.subClasses = subClasses;
+            this.instances = instances;
         }
     }
 
@@ -185,7 +210,87 @@ public class OntologyService {
         return target.toString();
     }
 
+    /**
+     * Execute a DL query: evaluate a Manchester Syntax class expression against the ontology
+     * and return entities matching the requested relationship types.
+     *
+     * @param ontology      Loaded ontology (use loadFromFile or loadFromString first).
+     * @param classExpression Manchester Syntax class expression, e.g. "Animal and hasLegs some xsd:integer".
+     * @param queryTypes    Subset of: directSuperClasses, superClasses, equivalentClasses,
+     *                      directSubClasses, subClasses, instances.
+     * @param engine        "auto", "elk", or "hermit".
+     * @param contentLength Used for auto engine selection (proxy for ontology size).
+     */
+    public DLQueryResult dlQuery(OWLOntology ontology, String classExpression,
+                                  List<String> queryTypes, String engine, int contentLength)
+            throws Exception {
+        OWLClassExpression expr = parseManchesterExpression(classExpression, ontology);
+
+        boolean useElk = shouldUseElk(engine, contentLength);
+        OWLReasoner reasoner = useElk
+            ? ElkAdapter.createReasoner(ontology)
+            : HermiTAdapter.createReasoner(ontology);
+        try {
+            reasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS);
+
+            List<String> directSuperClasses = new ArrayList<>();
+            List<String> superClasses       = new ArrayList<>();
+            List<String> equivalentClasses  = new ArrayList<>();
+            List<String> directSubClasses   = new ArrayList<>();
+            List<String> subClasses         = new ArrayList<>();
+            List<String> instances          = new ArrayList<>();
+
+            for (String qt : queryTypes) {
+                switch (qt) {
+                    case "directSuperClasses":
+                        for (OWLClass c : reasoner.getSuperClasses(expr, true).getFlattened())
+                            directSuperClasses.add(c.getIRI().toString());
+                        break;
+                    case "superClasses":
+                        for (OWLClass c : reasoner.getSuperClasses(expr, false).getFlattened())
+                            superClasses.add(c.getIRI().toString());
+                        break;
+                    case "equivalentClasses":
+                        for (OWLClass c : reasoner.getEquivalentClasses(expr).getEntities())
+                            equivalentClasses.add(c.getIRI().toString());
+                        break;
+                    case "directSubClasses":
+                        for (OWLClass c : reasoner.getSubClasses(expr, true).getFlattened())
+                            directSubClasses.add(c.getIRI().toString());
+                        break;
+                    case "subClasses":
+                        for (OWLClass c : reasoner.getSubClasses(expr, false).getFlattened())
+                            subClasses.add(c.getIRI().toString());
+                        break;
+                    case "instances":
+                        for (OWLNamedIndividual i : reasoner.getInstances(expr, false).getFlattened())
+                            instances.add(i.getIRI().toString());
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            return new DLQueryResult(directSuperClasses, superClasses, equivalentClasses,
+                                     directSubClasses, subClasses, instances);
+        } finally {
+            reasoner.dispose();
+        }
+    }
+
     // ---- private helpers -------------------------------------------------------
+
+    private static OWLClassExpression parseManchesterExpression(String expression, OWLOntology ontology) {
+        SimpleShortFormProvider sfp = new SimpleShortFormProvider();
+        BidirectionalShortFormProviderAdapter bsf = new BidirectionalShortFormProviderAdapter(
+            ontology.getOWLOntologyManager(), ontology.getImportsClosure(), sfp);
+        OWLEntityChecker checker = new ShortFormEntityChecker(bsf);
+        ManchesterOWLSyntaxParser parser = OWLManager.createManchesterParser();
+        parser.setDefaultOntology(ontology);
+        parser.setOWLEntityChecker(checker);
+        parser.setStringToParse(expression);
+        return parser.parseClassExpression();
+    }
 
     private static boolean shouldUseElk(String engine, int contentLength) {
         if ("elk".equalsIgnoreCase(engine)) return true;
