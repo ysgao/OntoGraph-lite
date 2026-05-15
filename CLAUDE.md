@@ -163,4 +163,9 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-core.ofn` — large (~1.3 MB) BFO ontology for performance testing
 
 ## Recent Changes
+- 001-fix-sync-data-loss: Added TypeScript 5+, Node.js (extension host) + VS Code Extension API (`vscode.WorkspaceEdit`, `vscode.TextDocument`), Vites
 - 001-fix-sync-data-loss: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+
+## Active Technologies
+- TypeScript 5+, Node.js (extension host) + VS Code Extension API (`vscode.WorkspaceEdit`, `vscode.TextDocument`), Vites (001-fix-sync-data-loss)
+- OWL files on disk (`.ofn`, `.omn`, `.ttl`) — read via `vscode.TextDocument`, written via `vscode.workspace.applyEdit` (001-fix-sync-data-loss)

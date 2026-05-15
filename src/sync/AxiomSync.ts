@@ -10,7 +10,9 @@ import type {
   OWLIndividual,
   OntologyModel,
 } from '../model/OntologyModel';
-import { createEmptyModel } from '../model/OntologyModel';
+import { createEmptyModel, BUILTIN_ANNOTATION_PROP_IRIS } from '../model/OntologyModel';
+
+const BUILTIN_ANN_SET = new Set(BUILTIN_ANNOTATION_PROP_IRIS);
 
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 
@@ -836,18 +838,54 @@ function syncAxiomsTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResu
   const segments = splitTurtlePredicates(blockText);
   if (segments.length === 0) return null;
 
-  // Extract subject token from first segment
+  // Extract subject token and first predicate-object segment from first block segment
   const firstSeg = segments[0];
   const subjectMatch = firstSeg.match(subjectRe);
   const subjectToken = subjectMatch ? subjectMatch[0].trim() : entityAbbrev;
+  const firstPredSeg = subjectMatch ? firstSeg.slice(subjectMatch[0].length).trim() : firstSeg;
 
-  // Generate both structural and annotation segments from entity model.
-  // This is a combined single-pass operation so both are written atomically,
-  // avoiding the two-edit race that would occur if annotation sync and axiom sync
-  // ran as separate applyEdit calls (each incrementing doc.version independently).
+  // Structural segments are always regenerated from the model (authoritative).
   const newStructSegs = generateTurtleStructuralSegs(entity, prefixes);
-  const newAnnotSegs = entityAnnotationSegs(entity, prefixes);
-  const allSegs = [...newStructSegs, ...newAnnotSegs];
+
+  // Extract existing annotation segments from the file block in file order and key them.
+  // This preserves the on-disk annotation order for unchanged annotations.
+  const existingAnnotSegs: Array<{ seg: string; key: string }> = [];
+  const allFileSegs = [firstPredSeg, ...segments.slice(1)].filter(Boolean);
+  for (const seg of allFileSegs) {
+    const pred = seg.split(/\s+/)[0];
+    const predIri = resolveIri(pred, prefixes);
+    if (BUILTIN_ANN_SET.has(predIri)) {
+      const litMatch = seg.match(/"((?:[^"\\]|\\.)*)"\s*(?:@([A-Za-z][A-Za-z0-9-]*))?/);
+      if (litMatch) {
+        const rawText = litMatch[1]
+          .replace(/\\n/g, '\n').replace(/\\r/g, '\r')
+          .replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        const lang = litMatch[2] || undefined;
+        existingAnnotSegs.push({ seg, key: `${predIri}|${rawText}|${lang ?? ''}` });
+      }
+    }
+  }
+  const fileAnnotKeySet = new Set(existingAnnotSegs.map(x => x.key));
+
+  // Model annotation segments with their canonical keys.
+  const modelAnnotSegs = entityAnnotationSegs(entity, prefixes).map(seg => {
+    const pred = seg.split(/\s+/)[0];
+    const predIri = resolveIri(pred, prefixes);
+    const litMatch = seg.match(/"((?:[^"\\]|\\.)*)"\s*(?:@([A-Za-z][A-Za-z0-9-]*))?/);
+    if (!litMatch) { return null; }
+    const rawText = litMatch[1]
+      .replace(/\\n/g, '\n').replace(/\\r/g, '\r')
+      .replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    const lang = litMatch[2] || undefined;
+    return { seg, key: `${predIri}|${rawText}|${lang ?? ''}` };
+  }).filter((x): x is { seg: string; key: string } => x !== null);
+  const modelAnnotKeySet = new Set(modelAnnotSegs.map(x => x.key));
+
+  // Diff: kept annotations in file order, new annotations appended.
+  const keptAnnot = existingAnnotSegs.filter(x => modelAnnotKeySet.has(x.key));
+  const toAddAnnot = modelAnnotSegs.filter(x => !fileAnnotKeySet.has(x.key));
+
+  const allSegs = [...newStructSegs, ...keptAnnot.map(x => x.seg), ...toAddAnnot.map(x => x.seg)];
   if (allSegs.length === 0) return null;
 
   // Detect continuation indent from the existing block; fall back to 4 spaces.

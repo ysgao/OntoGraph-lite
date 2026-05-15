@@ -466,3 +466,70 @@ describe('syncAxiomsTurtle — idempotency (T014)', () => {
     expect(mockApplyEdit).not.toHaveBeenCalled();
   });
 });
+
+// ── Turtle — annotation file-order preservation ────────────────────────────────
+// These tests must FAIL before the fix: syncAxiomsTurtle rebuilds the block
+// with annotation segs in model iteration order, so when the file stores
+// annotations in a different order the idempotency check fails.
+
+const DEF = 'http://www.w3.org/2004/02/skos/core#definition';
+const ALT = 'http://www.w3.org/2004/02/skos/core#altLabel';
+
+function makeClassWithLabelAndAnnot(
+  superClassIris: string[],
+  label: string,
+  annotations: Record<string, string[]>,
+): ReturnType<typeof makeClass> {
+  return {
+    ...makeClass(superClassIris),
+    labels: { en: [label] },
+    annotations,
+  };
+}
+
+describe('syncAxiomsTurtle — annotation file-order preservation', () => {
+  it('is idempotent when file annotation order differs from model order', async () => {
+    // File: [definition, rdfs:label] — opposite of model order (labels first).
+    // Model has same content. Sync must recognise key sets are equal → no edit.
+    const content = [
+      `<${A}> rdf:type owl:Class ;`,
+      `    rdfs:subClassOf <${B}> ;`,
+      `    <${DEF}> "An animal" ;`,
+      `    rdfs:label "A"@en .`,
+    ].join('\n');
+
+    await syncAxiomsToDocument(
+      makeTurtleDoc(content),
+      makeClassWithLabelAndAnnot([B], 'A', { [DEF]: ['An animal'] }),
+      'turtle',
+    );
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('appends new annotation without reordering existing file-order annotations', async () => {
+    // File: [definition, rdfs:label]. Model adds altLabel.
+    // After sync: definition then rdfs:label (original file order), altLabel appended.
+    const content = [
+      `<${A}> rdf:type owl:Class ;`,
+      `    rdfs:subClassOf <${B}> ;`,
+      `    <${DEF}> "An animal" ;`,
+      `    rdfs:label "A"@en .`,
+    ].join('\n');
+
+    await syncAxiomsToDocument(
+      makeTurtleDoc(content),
+      makeClassWithLabelAndAnnot([B], 'A', { [DEF]: ['An animal'], [ALT]: ['creature'] }),
+      'turtle',
+    );
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(mockReplace).toHaveBeenCalledOnce();
+
+    const replacedText: string = mockReplace.mock.calls[0][2];
+    const defIdx = replacedText.indexOf(`<${DEF}>`);
+    const labelIdx = replacedText.indexOf('rdfs:label');
+    const altIdx = replacedText.indexOf(`<${ALT}>`);
+    expect(defIdx).toBeGreaterThanOrEqual(0);
+    expect(labelIdx).toBeGreaterThan(defIdx);
+    expect(altIdx).toBeGreaterThan(labelIdx);
+  });
+});

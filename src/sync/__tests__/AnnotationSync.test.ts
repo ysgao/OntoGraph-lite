@@ -384,6 +384,115 @@ describe('syncManchester — idempotency (T005)', () => {
   });
 });
 
+// ── T006: syncManchester file-order preservation ──────────────────────────────
+// These tests must FAIL before the fix: the current full-text comparison
+// generates a model-order block which differs from a file that stores
+// annotations in a different order, causing a spurious rewrite.
+
+describe('syncManchester — file-order preservation (T006)', () => {
+  it('is idempotent when file annotation order differs from model order', async () => {
+    // File: [definition, rdfs:label] — opposite of model iteration order.
+    // Model iterates labels first, then annotations by IRI key.
+    // A correct sync must recognise the key sets are equal and return null.
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      `        <${DEF}> "A domestic feline",`,
+      `        rdfs:label "Cat"@en`,
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('appends new annotation without reordering existing file-order annotations', async () => {
+    // File: [definition, rdfs:label] — reverse model order.
+    // Model adds altLabel. Existing two annotations must stay in file order.
+    const content = [
+      `Class: <${CAT}>`,
+      '    Annotations:',
+      `        <${DEF}> "A domestic feline",`,
+      `        rdfs:label "Cat"@en`,
+      '',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeManchesterDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
+      'manchester',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    // Must replace (not raw insert+delete) since the block is rebuilt
+    expect(mockReplace).toHaveBeenCalledOnce();
+
+    // The replaced text must contain definition before rdfs:label (file order)
+    // and altLabel appended at the end.
+    const replacedText: string = mockReplace.mock.calls[0][2];
+    const defIdx = replacedText.indexOf(`<${DEF}>`);
+    const labelIdx = replacedText.indexOf('rdfs:label');
+    const altIdx = replacedText.indexOf(`<${ALT}>`);
+    expect(defIdx).toBeGreaterThanOrEqual(0);
+    expect(labelIdx).toBeGreaterThan(defIdx);
+    expect(altIdx).toBeGreaterThan(labelIdx);
+  });
+});
+
+// ── T008: syncTurtle file-order preservation ──────────────────────────────────
+// Same class of bug: model-order annotation segs in rebuilt block differ from
+// a file that stores annotations in a different order.
+
+describe('syncTurtle — file-order preservation (T008)', () => {
+  it('is idempotent when file annotation order differs from model order', async () => {
+    // File: [definition, rdfs:label] — opposite of model iteration order.
+    const content = TTL_PREFIX + [
+      `<${CAT}> rdf:type owl:Class ;`,
+      `    <${DEF}> "A domestic feline" ;`,
+      `    rdfs:label "Cat"@en .`,
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeTurtleDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
+      'turtle',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('appends new annotation without reordering existing file-order annotations', async () => {
+    // File: [definition, rdfs:label]. Model adds altLabel.
+    const content = TTL_PREFIX + [
+      `<${CAT}> rdf:type owl:Class ;`,
+      `    <${DEF}> "A domestic feline" ;`,
+      `    rdfs:label "Cat"@en .`,
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeTurtleDoc(content),
+      makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
+      'turtle',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(mockReplace).toHaveBeenCalledOnce();
+
+    const replacedText: string = mockReplace.mock.calls[0][2];
+    const defIdx = replacedText.indexOf(`<${DEF}>`);
+    const labelIdx = replacedText.indexOf('rdfs:label');
+    const altIdx = replacedText.indexOf(`<${ALT}>`);
+    expect(defIdx).toBeGreaterThanOrEqual(0);
+    expect(labelIdx).toBeGreaterThan(defIdx);
+    expect(altIdx).toBeGreaterThan(labelIdx);
+  });
+});
+
 // ── T007: syncTurtle annotation idempotency ───────────────────────────────────
 
 function makeTurtleDoc(content: string): vscode.TextDocument {

@@ -1,25 +1,23 @@
 # Implementation Plan: Fix Spurious OWL File Changes on Sync
 
-**Branch**: `001-fix-sync-data-loss` | **Date**: 2026-05-14 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `specs/001-fix-sync-data-loss/spec.md`
+**Branch**: `001-fix-sync-data-loss` | **Date**: 2026-05-15 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `/specs/001-fix-sync-data-loss/spec.md`
 
 ## Summary
 
-The sync layer (`AnnotationSync.ts`, `AxiomSync.ts`) rewrites entity annotation and axiom blocks from the in-memory model's enumeration order on every save, regardless of whether anything changed. `entityAnnotationPairs()` always emits `rdfs:label` annotations first, then others — so files that store annotations in a different order receive a spurious reordering diff on every sync. Axiom sync similarly deletes and regenerates all axiom lines even when only one was added.
-
-The fix switches every sync function from "delete all, regenerate from model" to a **diff-based approach**: compare the file's current annotation/axiom set to the model's desired set; apply only the delta (insert new items, delete removed items). When the delta is empty the function returns `null` without touching the file.
+The incremental sync layer produces spurious file changes when the in-memory model stores annotations in a different order than the on-disk file. Two sync functions use full-text comparison against a model-order-generated block instead of a key-based diff: `AnnotationSync.syncManchester` (live path for `.omn`) and `AxiomSync.syncAxiomsTurtle` (live path for `.ttl`). The fix applies the same key-based diff pattern already used by `AnnotationSync.syncFunctional` to both affected functions, preserving existing annotation order in the file and appending new annotations without reordering.
 
 ## Technical Context
 
-**Language/Version**: TypeScript 5+ (strict mode), Node.js (extension host)
-**Primary Dependencies**: VS Code Extension API (`vscode.TextDocument`, `vscode.WorkspaceEdit`, `vscode.Position`, `vscode.Range`)
-**Storage**: OWL files on disk (`.ofn`, `.omn`, `.ttl`)
-**Testing**: Vitest — test files in `src/sync/__tests__/`
-**Target Platform**: VS Code extension host (Node.js)
-**Project Type**: VS Code extension
-**Performance Goals**: Sync must remain sub-second for entities with up to 200 annotations; no regression on SNOMED CT–scale files
-**Constraints**: No full file re-parse on sync; in-place edit only; no new runtime dependencies
-**Scale/Scope**: Handles individual entity edits inside ontologies up to 50 000+ classes
+**Language/Version**: TypeScript 5+, Node.js (extension host)
+**Primary Dependencies**: VS Code Extension API (`vscode.WorkspaceEdit`, `vscode.TextDocument`), Vitest
+**Storage**: OWL files on disk (`.ofn`, `.omn`, `.ttl`) — read via `vscode.TextDocument`, written via `vscode.workspace.applyEdit`
+**Testing**: Vitest (`npm test`); test files in `src/sync/__tests__/`
+**Target Platform**: VS Code Extension Host (Node.js, no browser globals)
+**Project Type**: VS Code Extension — bug fix to sync layer only
+**Performance Goals**: Sync must not iterate the full file more than once per operation; SNOMED CT scale (50k classes, anatomy.owl benchmark) must still pass
+**Constraints**: No model changes; no new runtime dependencies; fix must not break existing T002, T005, T007, T012, T014 idempotency tests
+**Scale/Scope**: Three OWL formats (`.ofn`, `.omn`, `.ttl`); two sync modules (`AnnotationSync.ts`, `AxiomSync.ts`)
 
 ## Constitution Check
 
@@ -27,13 +25,13 @@ The fix switches every sync function from "delete all, regenerate from model" to
 
 | Principle | Status | Notes |
 |-----------|--------|-------|
-| I. Test-First | ✅ PASS | Failing tests written before every implementation task (TDD enforced per workflow) |
-| II. Simplicity & YAGNI | ✅ PASS | Diff logic added inline to each sync function; no new abstractions, no new layers |
-| III. OWL Standards Compliance | ✅ PASS | Output format is unchanged; only the edit strategy changes. New axioms inserted per constitution ordering (EquivalentClasses before SubClassOf) |
-| IV. Scale-Aware Architecture | ✅ PASS | Sync is entity-scoped (touches only the edited entity's lines); no full-file iteration added |
-| V. Security & Safety | ✅ PASS | No new input surfaces; IRI resolution and prefix-map parsing are unchanged |
+| **I. Test-First** | PASS — plan mandates Red phase (failing tests) before any implementation | New tests T-NEW-1 through T-NEW-6 must be written and confirmed failing before coding |
+| **II. Simplicity & YAGNI** | PASS — key-based diff reuses existing `AnnotationKey` type and key format; no new abstractions | No model changes; no new types beyond one private helper function |
+| **III. OWL Standards Compliance** | PASS — no serializer changes; sync layer output is semantically identical to current, just order-preserving | Round-trip fidelity is not affected |
+| **IV. Scale-Aware Architecture** | PASS — fix does not add iteration passes; anatomy.owl benchmark (T020) must pass after fix | Each sync function still O(n) in file lines |
+| **V. Security & Safety** | PASS — no new IRI parsing paths; regex reused from existing `parseFunctionalAnnotationItem` | No injection vectors introduced |
 
-**Post-design re-check**: All gates pass. The diff-based approach adds no new abstractions and introduces no ordering deviations.
+**Post-design re-check**: All gates still pass. The fix is narrowly scoped to two functions and introduces no new abstractions or dependencies.
 
 ## Project Structure
 
@@ -41,207 +39,142 @@ The fix switches every sync function from "delete all, regenerate from model" to
 
 ```text
 specs/001-fix-sync-data-loss/
-├── plan.md              # This file
-├── research.md          # Phase 0 — root cause analysis and fix strategy
-├── data-model.md        # Phase 1 — AnnotationItem, AxiomItem, SyncDiff types
+├── plan.md              # This file (/speckit.plan command output)
+├── research.md          # Phase 0 output — root cause analysis
+├── data-model.md        # Phase 1 output — affected entities and invariants
+├── quickstart.md        # Phase 1 output — developer verification guide
 └── tasks.md             # Phase 2 output (/speckit.tasks command)
 ```
-
-No contracts directory — this is a pure internal bug fix with no public API surface changes.
 
 ### Source Code (repository root)
 
 ```text
-src/
-└── sync/
-    ├── AnnotationSync.ts        # Modified: all three format sync functions
-    ├── AxiomSync.ts             # Modified: functional and Manchester axiom syncs + Turtle combined sync
-    └── __tests__/
-        ├── AnnotationSync.test.ts  # Extended with idempotency + order-preservation tests
-        └── AxiomSync.test.ts       # Extended with idempotency + minimal-diff tests
+src/sync/
+├── AnnotationSync.ts      # Bug 1: syncManchester() — full-text comparison → key-based diff
+└── AxiomSync.ts           # Bug 2: syncAxiomsTurtle() — model-order annotation segs → file-order
+
+src/sync/__tests__/
+├── AnnotationSync.test.ts # Add T-NEW-1, T-NEW-2, T-NEW-5 (Manchester ordering scenarios)
+└── AxiomSync.test.ts      # Add T-NEW-3, T-NEW-4, T-NEW-6 (Turtle ordering scenarios)
 ```
 
-No other files are touched. The serializer, parser, model, and extension layers are unaffected.
+**Structure Decision**: Single-project; changes are entirely within existing sync module files and their test counterparts. No new files needed except quickstart.md.
 
-**Structure Decision**: Single project, modifications confined to `src/sync/`. Tests live alongside the source files per project convention.
+## Implementation Phases
 
----
+### Phase 1: Red — Failing Tests
 
-## Phase 1: Fix AnnotationSync — Functional Syntax
+> TDD gate: tests must be written and confirmed failing **before** any implementation code is changed.
 
-**Goal**: `syncFunctional` in `AnnotationSync.ts` must be idempotent and order-preserving.
+**Task 1.1 — Manchester annotation ordering tests (AnnotationSync.test.ts)**
 
-### Algorithm change (syncFunctional)
+Add to `src/sync/__tests__/AnnotationSync.test.ts`:
 
-**Current**: Collect all `AnnotationAssertion` line indices for the entity → `toDelete`. Replace the first with all model-generated lines; delete the rest. Always produces an edit, always emits in model order.
+- **T-NEW-1** (`syncManchester — idempotency when file order ≠ model order`): File has `[skos:definition, rdfs:label]` order; model has `[rdfs:label, skos:definition]` order (because labels are iterated before annotations in the model). Assert `syncAnnotationsToDocument` returns `null` and `mockApplyEdit` is not called.
+- **T-NEW-2** (`syncManchester — add annotation preserves file order`): File has `[skos:definition, rdfs:label]`; model adds a new `skos:altLabel`. Assert only one `insert` call, zero `delete` calls, and the inserted line comes after the last existing annotation line.
+- **T-NEW-5** (`syncManchester — add to empty annotation section`): Entity has no annotations; model adds one. Assert the `Annotations:` block is created with exactly one item.
 
-**New**:
-1. Parse the file for all `AnnotationAssertion` lines matching this entity → `fileItems: Array<{key, lineIdx, generatedLine}>` (key = `propIri|text|lang`).
-2. Generate the desired annotation lines from the model → `modelItems: Map<key, generatedLine>`.
-3. `toRemove` = entries in `fileItems` whose key is absent from `modelItems`.
-4. `toAdd` = entries in `modelItems` whose key is absent from the file key set.
-5. If `toRemove` is empty and `toAdd` is empty → return `null` (no edit).
-6. Delete lines in `toRemove` (in reverse line-index order).
-7. Insert lines in `toAdd` after `fileItems[fileItems.length - 1].lineIdx` (last existing annotation line); if no existing annotations, insert after the cluster header or entity anchor.
+**Task 1.2 — Turtle annotation ordering tests (AxiomSync.test.ts)**
 
-**Preserves**: existing annotation order for unchanged items.
+Add to `src/sync/__tests__/AxiomSync.test.ts`:
 
-### Tasks
+- **T-NEW-3** (`syncAxiomsTurtle — idempotency when file annotation order ≠ model order`): File has annotations in reverse model order. Assert `syncAxiomsToDocument` returns `null`.
+- **T-NEW-4** (`syncAxiomsTurtle — add annotation preserves file order`): File has `[skos:definition, rdfs:label]`; model adds `skos:altLabel`. Assert rebuilt block has definition and label in original order, altLabel appended.
+- **T-NEW-6** (`syncAxiomsTurtle — add to entity with no prior annotations`): File has structural segs only; model adds one annotation. Assert exactly one annotation predicate is appended.
 
-- [ ] Task 1.1: Write failing tests for `syncFunctional` idempotency and order-preservation
-  - Test: same annotation set in file and model → `applyEdit` NOT called
-  - Test: annotations in non-model order (definition before label) + no model change → `applyEdit` NOT called
-  - Test: new annotation added → exactly one insert edit, no deletes, existing lines unchanged
-  - Test: annotation removed → exactly one delete edit, no other lines touched
-  - Run tests; confirm they fail before any implementation
-
-- [ ] Task 1.2: Implement diff-based `syncFunctional` in `AnnotationSync.ts`
-  - Add `buildAnnotationItemKey(propIri, text, lang?)` helper
-  - Rewrite the body of `syncFunctional` to compute `toAdd`/`toRemove` before building the edit
-  - Early return `{ edit: new WorkspaceEdit(), addedRanges: [] }` with empty edit object if no delta; or return `null`
-  - Run tests; confirm they pass
+Confirm all six new tests **fail** before proceeding:
+```bash
+npm test -- src/sync/__tests__/AnnotationSync.test.ts
+npm test -- src/sync/__tests__/AxiomSync.test.ts
+```
 
 ---
 
-## Phase 2: Fix AnnotationSync — Manchester and Turtle Formats
+### Phase 2: Green — Manchester Annotation Sync Fix
 
-**Goal**: `syncManchester` and `syncTurtle` share the same idempotency and order-preservation requirements.
+**Task 2.1 — Add `parseManchesterAnnotationLine` helper to `AnnotationSync.ts`**
 
-### syncManchester
+New private function:
+```typescript
+function parseManchesterAnnotationLine(
+  line: string,
+  prefixes: Map<string, string>,
+): AnnotationKey | null
+```
 
-Manchester stores all annotations in a single `Annotations: … ,\n    …` block. The idempotency fix here is simpler: compare the **generated block string** to the **existing block string** (after normalising whitespace). If equal → return `null`.
+- Trims leading whitespace.
+- Extracts first token (property IRI) using `extractLeadingIriTokens`.
+- Resolves to full IRI (handles `rdfs:label` → RDFS_LABEL expansion).
+- Extracts literal value and language tag with the same regex as `parseFunctionalAnnotationItem`.
+- Returns `null` for the `Annotations:` header line and any continuation lines that don't match.
 
-For order-preservation: regenerate the block in file order (track existing annotation order from the parsed block, emit unchanged annotations first, append new ones at the end).
+**Task 2.2 — Rewrite `syncManchester` body**
 
-### syncTurtle
+Replace the current logic (generate block → full-text compare → replace section) with:
 
-`syncTurtle` in `AnnotationSync.ts` uses `entityAnnotationPairs` which emits in model order. Apply the same diff-based approach as functional syntax but for Turtle predicate segments.
-
-### Tasks
-
-- [ ] Task 2.1: Write failing tests for `syncManchester` idempotency
-  - Test: same annotation content → no edit applied
-  - Test: new annotation added → block update contains only the addition at the end
-  - Run and confirm failures
-
-- [ ] Task 2.2: Implement idempotency check and order-preservation in `syncManchester`
-  - Before building the edit, compare the new block to the extracted existing block
-  - If identical → return `null`
-  - For order: preserve existing annotation items in document order; append new ones after
-
-- [ ] Task 2.3: Write failing tests for `syncTurtle` (AnnotationSync) idempotency
-  - Test: same annotation set in Turtle file → no edit
-  - Test: add annotation → single segment addition, existing segments unmoved
-  - Run and confirm failures
-
-- [ ] Task 2.4: Implement diff-based annotation handling in `syncTurtle` (AnnotationSync)
-  - Apply same diff-key approach used for functional syntax to the Turtle predicate segment list
-
----
-
-## Phase 3: Fix AxiomSync — Functional Syntax
-
-**Goal**: `syncAxiomsFunctional` must return `null` when the axiom set is unchanged, and produce a minimal diff (only new axiom lines added, only removed axiom lines deleted) when it does change.
-
-### Algorithm change (syncAxiomsFunctional)
-
-**Current**: `regularToDelete` = all existing regular-axiom line indices → replace first with all new lines, delete the rest. Always a block rewrite.
-
-**New**:
-1. Collect existing regular axiom lines for the entity → `fileAxioms: Array<{normalised, lineIdx, keyword}>`.
-2. Generate desired axiom lines from model → `modelAxioms: Array<{normalised, keyword}>` (same normalisation).
-3. `toRemove` = entries in `fileAxioms` absent from `modelAxioms` (by normalised content).
-4. `toAdd` = entries in `modelAxioms` absent from `fileAxioms`.
+1. Find the `Annotations:` section within the entity frame (existing frame-finding logic unchanged).
+2. Parse each line within the section with `parseManchesterAnnotationLine` → collect `{ key, lineIdx }` items in file order.
+3. Build `modelItems` from `entityAnnotationPairs(entity)` (existing helper).
+4. Compute `toRemove` (in file, key not in model set) and `toAdd` (in model, key not in file set).
 5. If both empty → return `null`.
-6. Delete `toRemove` lines (reverse order).
-7. Insert `toAdd` lines:
-   - New EquivalentClasses axioms: after last existing EquivalentClasses line, or before first SubClassOf if no EquivalentClasses exist.
-   - New SubClassOf axioms: after last existing SubClassOf line, or after anchor if none.
-   - New DisjointClasses axioms: after last existing DisjointClasses line, or after last SubClassOf.
-   - Other entity types: after last existing axiom of the same keyword type, or at anchor.
+6. If `toRemove` or `toAdd` non-empty:
+   - Delete `toRemove` lines in reverse order.
+   - Insert `toAdd` lines after the last kept annotation line (or after the `Annotations:` header if all existing were removed, or create a new `Annotations:` block if the section didn't exist).
+7. Return `{ edit, addedRanges }`.
 
-Apply same approach to GCI lines (they use a separate toDelete/insert already).
-
-### Tasks
-
-- [ ] Task 3.1: Write failing tests for `syncAxiomsFunctional` idempotency
-  - Test: same axiom set in file and model → `applyEdit` NOT called
-  - Test: add one SubClassOf → diff has exactly one insert, zero deletes (excluding the replaced range trick)
-  - Test: remove one SubClassOf → diff has exactly one delete, zero inserts
-  - Test: EquivalentClasses insertion preserves ordering before SubClassOf
-  - Run and confirm failures
-
-- [ ] Task 3.2: Implement diff-based `syncAxiomsFunctional` in `AxiomSync.ts`
-  - Add `normaliseAxiomLine(line, prefixes)` helper (trims whitespace, resolves abbreviated IRIs for comparison)
-  - Rewrite regular-axiom portion of `syncAxiomsFunctional`
-  - Preserve GCI handling (already separate; add no-op check for GCIs too)
-  - Run tests; confirm they pass
+Confirm all six new tests pass AND all existing tests still pass:
+```bash
+npm test -- src/sync/__tests__/AnnotationSync.test.ts
+```
 
 ---
 
-## Phase 4: Fix AxiomSync — Manchester and Turtle Formats
+### Phase 3: Green — Turtle Axiom Sync Fix
 
-**Goal**: Manchester axiom sections and the Turtle combined sync share the same no-op requirement.
+**Task 3.1 — Rewrite annotation handling in `syncAxiomsTurtle`**
 
-### syncAxiomsManchester
+Replace the current annotation seg generation (model-order) with file-order extraction + key-based diff:
 
-Manchester axiom sections (SubClassOf:, EquivalentTo:, etc.) are already written as blocks. Idempotency check: compare generated section string to existing section string. If equal → no edit for that section.
+1. Identify annotation predicate segs from the existing block (IRI in `BUILTIN_ANN_SET`).
+2. Parse each annotation seg into a canonical key: `${resolvedPropIri}|${literalText}|${lang ?? ''}`.
+3. Build model annotation key set from `entityAnnotationSegs(entity, prefixes)` parsed the same way.
+4. Compute `toRemove` and `toAdd`.
+5. Rebuild block: `structuralSegs` (unchanged, model-driven) + `keptAnnotSegs` (file order, minus removed) + `newAnnotSegs` (appended).
+6. Existing idempotency check (`rebuiltLines.join('\n') === existingBlock`) naturally handles the case when nothing changed — no special casing needed.
 
-### syncAxiomsTurtle (combined annotation + axiom)
-
-`syncAxiomsTurtle` in `AxiomSync.ts` rebuilds the entire Turtle subject block from scratch (structural + annotation segments). Apply diff-based segment comparison: if `allSegs` generated equals the segments extracted from the current block → return `null`.
-
-### Tasks
-
-- [ ] Task 4.1: Write failing tests for `syncAxiomsManchester` idempotency
-  - Test: same axiom sections → no edit
-  - Test: add one SubClassOf item → only that item appears in diff
-  - Run and confirm failures
-
-- [ ] Task 4.2: Implement idempotency checks in `syncAxiomsManchester`
-  - Add per-section content comparison before building the edit
-  - Return `null` if all sections unchanged
-
-- [ ] Task 4.3: Write failing tests for `syncAxiomsTurtle` (combined) idempotency
-  - Test: no annotation or axiom changes → no edit
-  - Test: add structural segment → minimal diff
-  - Test: add annotation segment → minimal diff
-  - Run and confirm failures
-
-- [ ] Task 4.4: Implement idempotency check in `syncAxiomsTurtle`
-  - Compare `rebuiltLines.join('\n')` to `lines.slice(blockStart, blockEnd).join('\n')` before applying
-  - If equal → return `null`
+Confirm all six new tests pass AND all existing Turtle tests still pass:
+```bash
+npm test -- src/sync/__tests__/AxiomSync.test.ts
+```
 
 ---
 
-## Phase 5: Integration Verification
+### Phase 4: Full Verification
 
-**Goal**: Confirm all six sync functions pass the full test suite and real-file round-trips.
+**Task 4.1 — Full test suite**
 
-### Tasks
+```bash
+npm test
+npm run compile
+```
 
-- [ ] Task 5.1: Run full test suite; confirm all tests pass
-  - `npm test` — zero failures
-  - Coverage ≥ 80% for modified files
+All tests must pass. Coverage on modified files ≥ 80%. No type errors.
 
-- [ ] Task 5.2: Type-check; confirm no regressions
-  - `npm run compile` — zero errors
+**Task 4.2 — Anatomy.owl benchmark**
 
-- [ ] Task 5.3: Manual round-trip verification
-  - Open `test-ontologies/animals.omn` in VS Code with extension loaded
-  - Add annotation to a class → verify git diff shows exactly one added line
-  - Add SubClassOf axiom → verify git diff shows exactly one added line
-  - Open and close entity editor without editing → verify git diff is empty
-  - Repeat with `animals.ttl` and a `.ofn` test file
+```bash
+npm test -- src/sync/__tests__/sync-anatomy-bench.test.ts
+```
 
-- [ ] Task 5.4: Conductor — User Manual Verification 'Fix Spurious OWL File Changes on Sync' (Protocol in workflow.md)
+Must complete within existing time budget (Principle IV).
 
----
+**Task 4.3 — Manual verification**
+
+Open `test-ontologies/animals.omn` in VS Code with the extension active:
+1. Open a class, do NOT change anything, save → `git diff` empty.
+2. Add one annotation, save → `git diff` shows exactly +1 `AnnotationAssertion` or `Annotations:` item line, 0 deletions.
+3. Open `test-ontologies/animals.ttl`, repeat steps 1–2 for Turtle.
 
 ## Complexity Tracking
 
-No constitution violations. The diff-based approach is strictly simpler than the current "replace all" strategy — it adds a comparison step and removes the unconditional block rewrite.
-
-| Item | Principle | Resolution |
-|------|-----------|------------|
-| Principle IV anatomy.owl benchmark | IV. Scale-Aware Architecture | `sync-anatomy-bench.test.ts` added (T020): asserts both sync functions complete a no-op scan of the 302k-line anatomy.owl in < 500ms. Benchmark skips gracefully when the file is absent (not committed to git). Measured: two scans take ~250ms combined on development hardware. |
+No constitution violations. The fix is narrowly scoped: two functions, same key-based diff pattern already present in the codebase.

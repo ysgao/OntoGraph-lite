@@ -243,13 +243,25 @@ function findManchesterEntityFrame(
   return null;
 }
 
-function generateManchesterAnnotationBlock(entity: OWLEntity, prefixes: Map<string, string>): string {
-  const pairs = entityAnnotationPairs(entity);
-  if (pairs.length === 0) { return ''; }
-  const items = pairs.map(({ propIri, text, lang }) =>
-    `        ${abbreviateIri(propIri, prefixes)} ${fmtLiteral(text, lang)}`
-  );
-  return '    Annotations:\n' + items.join(',\n');
+// Parse one annotation item line from within a Manchester Annotations: section.
+// Returns null for the header line, blank lines, or lines that don't match.
+function parseManchesterAnnotationLine(
+  line: string,
+  prefixes: Map<string, string>,
+): AnnotationKey | null {
+  const trimmed = line.trimStart().replace(/,\s*$/, '');
+  if (!trimmed || /^Annotations\s*:/.test(trimmed)) { return null; }
+  const tokens = extractLeadingIriTokens(trimmed, 1);
+  if (tokens.length < 1) { return null; }
+  const propToken = tokens[0];
+  const propIri = propToken === 'rdfs:label' ? RDFS_LABEL : resolveIri(propToken, prefixes);
+  const litMatch = trimmed.match(/"((?:[^"\\]|\\.)*)"\s*(?:@([A-Za-z][A-Za-z0-9-]*))?/);
+  if (!litMatch) { return null; }
+  const rawText = litMatch[1]
+    .replace(/\\n/g, '\n').replace(/\\r/g, '\r')
+    .replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  const lang = litMatch[2] || undefined;
+  return { propIri, text: rawText, lang, key: `${propIri}|${rawText}|${lang ?? ''}` };
 }
 
 function syncManchester(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | null {
@@ -271,35 +283,65 @@ function syncManchester(doc: vscode.TextDocument, entity: OWLEntity): SyncResult
     }
   }
 
-  const newAnnotBlock = generateManchesterAnnotationBlock(entity, prefixes);
-
-  // Idempotency: if the existing annotations block already matches the desired
-  // block, skip the write entirely to avoid spurious reformatting diffs.
-  // trimEnd() strips trailing empty lines that appear at the end of a section
-  // (before the next frame or EOF) but are absent from the generated block.
+  // Parse existing annotation items in file order; strip trailing commas for clean rebuild.
+  const fileItems: Array<{ key: string; lineText: string }> = [];
   if (annotStart >= 0) {
-    const existingBlock = lines.slice(annotStart, annotEnd).join('\n');
-    if (existingBlock.trimEnd() === newAnnotBlock.trimEnd()) { return null; }
-  } else if (newAnnotBlock === '') {
-    return null;
+    for (let i = annotStart + 1; i < annotEnd; i++) {
+      const parsed = parseManchesterAnnotationLine(lines[i], prefixes);
+      if (parsed) {
+        fileItems.push({ key: parsed.key, lineText: lines[i].replace(/,\s*$/, '') });
+      }
+    }
   }
+  const fileKeySet = new Set(fileItems.map(f => f.key));
+
+  // Build model items and key set.
+  const modelPairs = entityAnnotationPairs(entity);
+  const modelKeySet = new Set(
+    modelPairs.map(({ propIri, text: t, lang }) => annotationModelKey(propIri, t, lang))
+  );
+  const toAdd = modelPairs.filter(
+    ({ propIri, text: t, lang }) => !fileKeySet.has(annotationModelKey(propIri, t, lang))
+  );
+  const toRemoveKeys = new Set(fileItems.filter(f => !modelKeySet.has(f.key)).map(f => f.key));
+
+  // Key-based idempotency: order in file does not matter.
+  if (toAdd.length === 0 && toRemoveKeys.size === 0) { return null; }
+
+  // Detect item indentation from existing lines; fall back to 8 spaces.
+  const itemIndent = fileItems.length > 0
+    ? (fileItems[0].lineText.match(/^(\s+)/)?.[1] ?? '        ')
+    : '        ';
+
+  // Rebuild block: kept items in file order (original text) + new items appended.
+  const keptLines = fileItems.filter(f => !toRemoveKeys.has(f.key)).map(f => f.lineText);
+  const newLines = toAdd.map(({ propIri, text: t, lang }) =>
+    `${itemIndent}${abbreviateIri(propIri, prefixes)} ${fmtLiteral(t, lang)}`
+  );
+  const allItemLines = [...keptLines, ...newLines];
+
+  const headerIndent = annotStart >= 0
+    ? (lines[annotStart].match(/^(\s+)/)?.[1] ?? '    ')
+    : '    ';
+  const newAnnotBlock = allItemLines.length > 0
+    ? `${headerIndent}Annotations:\n${allItemLines.join(',\n')}`
+    : '';
 
   const edit = new vscode.WorkspaceEdit();
   let insertAt: number;
 
   if (annotStart >= 0) {
-    // Replace existing Annotations section
     const startPos = doc.lineAt(annotStart).range.start;
-    const endLineIdx = annotEnd - 1;
-    const endPos = doc.lineAt(endLineIdx).rangeIncludingLineBreak.end;
+    const endPos = doc.lineAt(annotEnd - 1).rangeIncludingLineBreak.end;
     edit.replace(doc.uri, new vscode.Range(startPos, endPos),
       newAnnotBlock.length > 0 ? newAnnotBlock + '\n' : '');
     insertAt = annotStart;
   } else {
-    // Insert after frame header line
     insertAt = frame.start + 1;
     if (newAnnotBlock.length > 0) {
       edit.insert(doc.uri, doc.lineAt(insertAt).range.start, newAnnotBlock + '\n');
+    } else {
+      return null;
     }
   }
 
@@ -385,12 +427,36 @@ function syncTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | n
     if (!BUILTIN_ANN_SET.has(predIri)) { structuralSegs.push(seg); }
   }
 
-  // Generate new annotation segments
-  const newAnnotSegs = entityAnnotationPairs(entity).map(({ propIri, text, lang }) =>
-    `${abbreviateIri(propIri, prefixes)} ${fmtLiteral(text, lang)}`
-  );
+  // Extract existing annotation segments from the file block (file order) and build keys.
+  const existingAnnotSegs: Array<{ seg: string; key: string }> = [];
+  const allFileSegs = [firstPredSeg, ...segments.slice(1)].filter(Boolean);
+  for (const seg of allFileSegs) {
+    const pred = seg.split(/\s+/)[0];
+    const predIri = resolveIri(pred, prefixes);
+    if (BUILTIN_ANN_SET.has(predIri)) {
+      const litMatch = seg.match(/"((?:[^"\\]|\\.)*)"\s*(?:@([A-Za-z][A-Za-z0-9-]*))?/);
+      if (litMatch) {
+        const rawText = litMatch[1]
+          .replace(/\\n/g, '\n').replace(/\\r/g, '\r')
+          .replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        const lang = litMatch[2] || undefined;
+        existingAnnotSegs.push({ seg, key: annotationModelKey(predIri, rawText, lang) });
+      }
+    }
+  }
+  const fileAnnotKeySet = new Set(existingAnnotSegs.map(x => x.key));
 
-  const allSegs = [...structuralSegs, ...newAnnotSegs];
+  // Model annotation items with keys.
+  const modelAnnotItems = entityAnnotationPairs(entity).map(({ propIri, text: t, lang }) => ({
+    seg: `${abbreviateIri(propIri, prefixes)} ${fmtLiteral(t, lang)}`,
+    key: annotationModelKey(propIri, t, lang),
+  }));
+  const modelAnnotKeySet = new Set(modelAnnotItems.map(x => x.key));
+
+  const keptAnnot = existingAnnotSegs.filter(x => modelAnnotKeySet.has(x.key));
+  const toAddAnnot = modelAnnotItems.filter(x => !fileAnnotKeySet.has(x.key));
+
+  const allSegs = [...structuralSegs, ...keptAnnot.map(x => x.seg), ...toAddAnnot.map(x => x.seg)];
   if (allSegs.length === 0) { return null; }
 
   // Detect the continuation indent used by the existing block (fall back to 4 spaces).
@@ -419,11 +485,12 @@ function syncTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | n
   const replaceEnd = doc.lineAt(blockEnd - 1).rangeIncludingLineBreak.end;
   edit.replace(doc.uri, new vscode.Range(replaceStart, replaceEnd), rebuiltLines.join('\n') + '\n');
 
-  // Decorate the annotation lines at the end of the rebuilt block
-  const annotLineStart = blockStart + rebuiltLines.length - newAnnotSegs.length;
-  const addedRanges = newAnnotSegs.map((_, i) => {
+  // Decorate only the newly added annotation lines at the end of the rebuilt block.
+  const numAdded = toAddAnnot.length;
+  const annotLineStart = blockStart + rebuiltLines.length - numAdded;
+  const addedRanges = toAddAnnot.map((_, i) => {
     const lineIdx = annotLineStart + i;
-    return new vscode.Range(lineIdx, 0, lineIdx, rebuiltLines[rebuiltLines.length - newAnnotSegs.length + i].length);
+    return new vscode.Range(lineIdx, 0, lineIdx, rebuiltLines[rebuiltLines.length - numAdded + i].length);
   });
 
   return { edit, addedRanges };
