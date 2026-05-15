@@ -23,7 +23,7 @@ npm run package         # Create .vsix for VS Code marketplace
 cd java-server && mvn clean package   # Builds fat JAR via maven-shade-plugin
 ```
 
-The pre-built JAR at `resources/java/onto-reasoner-server.jar` is used at runtime. Rebuild only needed when changing Java code.
+The built JAR at `java-server/target/onto-reasoner-server.jar` is used at runtime. Rebuild only needed when changing Java code.
 
 ## Running Tests
 
@@ -163,8 +163,9 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-core.ofn` — large (~1.3 MB) BFO ontology for performance testing
 
 ## Recent Changes
+- 005-dl-query-webview: Added TypeScript 5+ (strict), Java 21+ + OWLAPI 5, HermiT, ELK, CodeMirror 6, VS Code Extension API
+- 005-dl-query-webview: Added TypeScript 5+ (strict), Java 21+ + OWLAPI 5, HermiT, ELK, CodeMirror 6, VS Code Extension API
 - 005-dl-query-webview: Added DL Query webview (browser IIFE bundle), new `dlQuery` JSON-RPC method in Java reasoner (OWLAPI 5 ManchesterOWLSyntaxParser), ReasonerBridge extension, DLQueryPanel + DLQueryMessages, VS Code command `ontograph.openDLQuery`
-- 004-annotation-url-links: Added TypeScript 5+ (strict mode), browser IIFE bundle via esbuild + VS Code Extension API (webview), jsdom (existing dev dep for tests)
-- 003-multiline-annotation-fields: Added TypeScript 5+ (strict mode), browser IIFE bundle via esbuild + VS Code Extension API (webview), esbuild (bundler)
 
 ## Active Technologies
+- N/A (in-memory ontology; temp class never persisted) (005-dl-query-webview)

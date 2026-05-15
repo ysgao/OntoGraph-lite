@@ -44,7 +44,7 @@ export class ReasonerBridge implements vscode.Disposable {
     const config = vscode.workspace.getConfiguration('ontograph.reasoner');
     const javaPath: string = config.get('javaPath') ?? 'java';
     const jvmArgs: string[] = config.get('jvmArgs') ?? ['-Xmx4g'];
-    const jarPath = path.join(this.extensionPath, 'resources', 'java', 'onto-reasoner-server.jar');
+    const jarPath = path.join(this.extensionPath, 'java-server', 'target', 'onto-reasoner-server.jar');
 
     this.statusBarItem.text = '$(loading~spin) Reasoner: starting…';
 

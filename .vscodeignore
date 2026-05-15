@@ -7,7 +7,12 @@
 **/out/**
 **/out-webview/**
 **/java-server/src/**
-**/java-server/target/**
+**/java-server/pom.xml
+**/java-server/target/classes/**
+**/java-server/target/generated-sources/**
+**/java-server/target/maven-archiver/**
+**/java-server/target/maven-status/**
+**/java-server/target/onto-reasoner-server-*.jar
 **/test-ontologies/**
 tsconfig*.json
 esbuild.mjs

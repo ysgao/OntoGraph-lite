@@ -104,6 +104,36 @@ Only the requested `queryTypes` keys are populated; unselected types are absent 
 
 ---
 
+## Decision 7: Reasoning Invocation Pattern — EquivalentClasses + Classify
+
+**Decision**: Wrap the user's class expression as `EquivalentClasses(TempQueryClass, <expression>)`, add it to the in-memory ontology alongside a declaration axiom for `TempQueryClass`, run full `precomputeInferences(CLASS_HIERARCHY, CLASS_ASSERTIONS)`, then query the **named** `TempQueryClass` via `getSuperClasses(tempClass, ...)`, `getSubClasses(tempClass, ...)`, `getEquivalentClasses(tempClass)`, and `getInstances(tempClass, ...)`.
+
+**Rationale**: ELK (the scalable reasoner used for ontologies > 5 000 classes) only supports hierarchy queries against **named** OWL classes after a full classification; it does not support ad-hoc expression queries (`getSuperClasses(OWLClassExpression, ...)`) with anonymous expressions. HermiT supports both, but using the named-class approach is engine-agnostic. Protégé uses this same EquivalentClasses + classify pattern in its DL Query tab. A fresh `OWLOntologyManager` is used per request, so the temp class and its axiom are discarded automatically when the manager goes out of scope — they are never written to the user's source file.
+
+**Alternatives considered**:
+- *Ad-hoc expression query (`reasoner.getSuperClasses(expr, direct)` with anonymous expr)*: Works with HermiT only; ELK rejects it or returns incomplete results — rejected.
+- *SubClassOf axiom instead of EquivalentClasses*: Would capture superclasses but not allow symmetric subclass/equivalent inference. EquivalentClasses gives TempQueryClass a complete position in the hierarchy — preferred.
+
+**Filter note**: `getEquivalentClasses(tempClass)` includes `TempQueryClass` itself in the result set. The implementation must filter out the `urn:ontograph:dlquery#TempQuery` IRI before returning equivalent class results to the caller.
+
+---
+
+---
+
+## Decision 8: TypeScript-Owned TempClass Lifecycle with Java Expression Parsing
+
+**Decision**: TempClass **lifecycle ownership** moves to TypeScript (`DLQueryPanel.ts`): a module-level `executing` flag and `Set<string>` of temporary class IRIs are maintained by the panel closure. TempClass is tracked in the set before `bridge.dlQuery()` is called and removed in a `try/finally` block after (even on error). The Java `dlQuery()` method continues to own Manchester expression **parsing** (via `AnnotationValueShortFormProvider` + `BidirectionalShortFormProviderAdapter`) and EquivalentClasses axiom construction. Wire format is unchanged.
+
+**Rationale**: The spec (FR-002, FR-016, clarification 2026-05-15) requires TypeScript to own TempClass lifetime — so that sync-to-disk is inhibited, cleanup is guaranteed, and concurrent Execute clicks are rejected. Full Manchester expression parsing with rdfs:label resolution (required for SNOMED expressions like `'Body structure' and 'All or part of' some 'Entire liver'`) depends on OWLAPI's `AnnotationValueShortFormProvider` and entity index — there is no equivalent in TypeScript today. Delegating expression semantics to Java while TypeScript manages the lifecycle window is the minimal compliant implementation (Constitution II).
+
+**Sync inhibition detail**: In practice, `AnnotationSync` and `AxiomSync` are triggered by explicit user actions (entity edits), not automatically. The `temporaryClassIris` guard in those functions is defensive — required for correctness by construction (FR-016) — but unlikely to fire in normal usage.
+
+**Alternatives considered**:
+- *Full TypeScript EquivalentClasses construction*: Requires a Manchester expression → OWL AST transpiler in TypeScript with OWLAPI-equivalent rdfs:label resolution; not available without significant new infrastructure — deferred.
+- *Reuse classify() endpoint (no dlQuery() method)*: classify() returns the full hierarchy of all classes; extracting TempClass's position and instances would require additional RPC calls; the existing dlQuery() method returns targeted results more efficiently — retained.
+
+---
+
 ## Unresolved Items
 
 None — all NEEDS CLARIFICATION items from the spec were resolved above.

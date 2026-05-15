@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { test, expect } from 'vitest';
@@ -10,7 +10,7 @@ import { serializeToFunctional } from '../serializer/FunctionalSerializer';
 import { createEmptyModel } from '../model/OntologyModel';
 
 const ROOT = join(__dirname, '../../test-ontologies');
-const JAR = join(__dirname, '../../resources/java/onto-reasoner-server.jar');
+const JAR = join(__dirname, '../../java-server/target/onto-reasoner-server.jar');
 const JAVA = process.env.JAVA_HOME
   ? join(process.env.JAVA_HOME, 'bin', 'java')
   : 'java';
@@ -255,6 +255,69 @@ test('Phase3: HermiT classify animals.omn — raw Manchester preserves complex e
   expect(koalaEdge?.[0], 'Koala inferred under Marsupial').toBe(marsupialIri);
 });
 
+// ── dlQuery ───────────────────────────────────────────────────────────────────
+
+test('Phase3: dlQuery animals.omn — directSuperClasses of Koala includes Marsupial', { timeout: 60_000 }, () => {
+  const omn = readFileSync(join(ROOT, 'animals.omn'), 'utf8');
+  console.log('── dlQuery directSuperClasses(Koala) ─────────────────────────────');
+
+  const [r] = rpc([{
+    id: 20,
+    method: 'dlQuery',
+    params: {
+      format: 'manchester',
+      content: omn,
+      engine: 'hermit',
+      classExpression: 'Koala',
+      queryTypes: ['directSuperClasses'],
+    },
+  }]) as { id: number; result: { directSuperClasses: string[]; superClasses: string[]; equivalentClasses: string[]; directSubClasses: string[]; subClasses: string[]; instances: string[] } }[];
+
+  const marsupialIri = 'http://example.org/animals#Marsupial';
+  expect(r.result.directSuperClasses, 'directSuperClasses of Koala includes Marsupial').toContain(marsupialIri);
+});
+
+test('Phase3: dlQuery animals.omn — directSubClasses of conjunction includes Koala', { timeout: 60_000 }, () => {
+  const omn = readFileSync(join(ROOT, 'animals.omn'), 'utf8');
+  console.log('── dlQuery directSubClasses(Mammal and hasHabitat some Forest) ────');
+
+  const [r] = rpc([{
+    id: 21,
+    method: 'dlQuery',
+    params: {
+      format: 'manchester',
+      content: omn,
+      engine: 'hermit',
+      classExpression: 'Mammal and hasHabitat some Forest',
+      queryTypes: ['directSubClasses'],
+    },
+  }]) as { id: number; result: { directSuperClasses: string[]; superClasses: string[]; equivalentClasses: string[]; directSubClasses: string[]; subClasses: string[]; instances: string[] } }[];
+
+  const koalaIri = 'http://example.org/animals#Koala';
+  expect(r.result.directSubClasses, 'directSubClasses of conjunction includes Koala').toContain(koalaIri);
+});
+
+test('Phase3: dlQuery animals.omn — invalid expression returns error response', { timeout: 30_000 }, () => {
+  const omn = readFileSync(join(ROOT, 'animals.omn'), 'utf8');
+  console.log('── dlQuery invalid expression ─────────────────────────────────────');
+
+  const [r] = rpc([{
+    id: 22,
+    method: 'dlQuery',
+    params: {
+      format: 'manchester',
+      content: omn,
+      engine: 'hermit',
+      classExpression: '(Animal and (',
+      queryTypes: ['directSuperClasses'],
+    },
+  }]) as { id: number; error?: { message: string }; result?: unknown }[];
+
+  expect(r.error, 'error key present for invalid expression').toBeDefined();
+  expect(typeof r.error!.message, 'error.message is a string').toBe('string');
+  expect(r.error!.message.length, 'error.message is non-empty').toBeGreaterThan(0);
+});
+
 // ── Functional syntax — raw preserves complex expressions ────────────────────
 
 test('Phase3: HermiT classify bfo-core.ofn — raw functional preserves complex expressions', { timeout: 60_000 }, () => {
@@ -276,3 +339,38 @@ test('Phase3: HermiT classify bfo-core.ofn — raw functional preserves complex 
   const edge = raw.result.hierarchy.find(([p, c]) => p === continuantIri && c === indContinuantIri);
   expect(edge, 'independent continuant inferred under continuant').toBeDefined();
 });
+
+// ── T024: anatomy.owl dlQuery benchmark ──────────────────────────────────────
+// anatomy.owl is SNOMED CT-derived (>>50k classes, all-numeric IRIs) — ELK auto-selects.
+// SC-001 guarantees 3s for <50k classes; this benchmark verifies no crash and
+// completes within 30s for large-scale EL ontologies.
+// Full IRI form required: SNOMED numeric-only local names are not valid Manchester identifiers.
+
+const ANATOMY_PATH = join(ROOT, 'anatomy.owl');
+
+test.skipIf(!existsSync(ANATOMY_PATH))(
+  'Phase3: dlQuery anatomy.owl benchmark — ELK directSuperClasses of a leaf class under 30s',
+  { timeout: 60_000 },
+  () => {
+    console.log('── dlQuery anatomy.owl benchmark ─────────────────────────────────');
+
+    const start = Date.now();
+    const [r] = rpc([{
+      id: 30,
+      method: 'dlQuery',
+      params: {
+        format: 'functional',
+        filePath: ANATOMY_PATH,
+        engine: 'auto',
+        classExpression: '<http://snomed.info/id/10013000>',
+        queryTypes: ['directSuperClasses'],
+      },
+    }]) as { id: number; result?: { directSuperClasses: string[] }; error?: { message: string } }[];
+    const elapsed = Date.now() - start;
+
+    console.log(`  elapsed: ${elapsed}ms`);
+    expect(r.error, 'dlQuery completes without error').toBeUndefined();
+    expect(r.result!.directSuperClasses.length, 'at least one direct superclass returned').toBeGreaterThan(0);
+    expect(elapsed, `dlQuery completes in < 30000ms (actual: ${elapsed}ms)`).toBeLessThan(30_000);
+  },
+);

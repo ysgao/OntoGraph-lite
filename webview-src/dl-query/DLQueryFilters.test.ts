@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { filterGroups } from './DLQueryFilters.js';
+import { DEFAULT_QUERY_TYPES } from '../../src/views/DLQueryMessages.js';
 import type { ResultGroup } from '../../src/views/DLQueryMessages.js';
 
 const OWL_THING   = 'http://www.w3.org/2002/07/owl#Thing';
@@ -108,5 +109,19 @@ describe('filterGroups — owl:Thing / owl:Nothing (T020)', () => {
     expect(hidden[0]!.entities.map(e => e.iri)).not.toContain(OWL_THING);
     const restored = filterGroups(groups, '', true, true);
     expect(restored[0]!.entities.map(e => e.iri)).toContain(OWL_THING);
+  });
+});
+
+// ── T010: DEFAULT_QUERY_TYPES default checkbox configuration (FR-005) ─────────
+
+describe('T010: DEFAULT_QUERY_TYPES default checkbox configuration', () => {
+  it('contains exactly directSuperClasses, directSubClasses, subClasses (FR-005)', () => {
+    expect(DEFAULT_QUERY_TYPES).toContain('directSuperClasses');
+    expect(DEFAULT_QUERY_TYPES).toContain('directSubClasses');
+    expect(DEFAULT_QUERY_TYPES).toContain('subClasses');
+    expect(DEFAULT_QUERY_TYPES).not.toContain('superClasses');
+    expect(DEFAULT_QUERY_TYPES).not.toContain('equivalentClasses');
+    expect(DEFAULT_QUERY_TYPES).not.toContain('instances');
+    expect(DEFAULT_QUERY_TYPES).toHaveLength(3);
   });
 });

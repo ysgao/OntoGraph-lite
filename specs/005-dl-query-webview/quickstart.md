@@ -64,6 +64,15 @@ npm run compile:webview
 9. Close the ontology file.
    - The Execute button becomes disabled.
 
+10. **Concurrent Execute guard** — Click Execute twice in rapid succession before the first result appears.
+    - Only one query fires (visible from the Java process log or by watching the loading spinner not duplicating).
+    - The second click is silently ignored while the first is in flight.
+
+11. **rdfs:label resolution (anatomy.owl)** — Open `test-ontologies/anatomy.owl` (requires the file to be present; skip if absent).
+    - Enter `'Body structure' and some 'Entire liver'` in the Query (class expression) field.
+    - Click Execute.
+    - Results appear without a "class name not found" error, confirming that quoted rdfs:label names resolve correctly via `AnnotationValueShortFormProvider`.
+
 ---
 
 ## Key File Locations

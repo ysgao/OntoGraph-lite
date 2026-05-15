@@ -78,3 +78,4 @@ Error cases:
 - Engine selection follows existing logic: auto → ELK if class count > 5000, HermiT otherwise.
 - Only the requested `queryTypes` are computed; other lists return empty arrays to avoid unnecessary reasoner invocations.
 - `owl:Thing` and `owl:Nothing` are included in results if the reasoner returns them — filtering is the client's responsibility (FR-007, FR-008).
+- **EquivalentClasses approach (Decision 7)**: The Java server wraps the `classExpression` string as `EquivalentClasses(TempQueryClass, <expression>)` for a temporary named class (`urn:ontograph:dlquery#TempQuery`), runs full `precomputeInferences()`, then queries `TempQueryClass`'s position in the inferred hierarchy. The wire format is unchanged — this is an internal implementation detail of the server. `TempQueryClass` is filtered from the `equivalentClasses` list before returning the response.

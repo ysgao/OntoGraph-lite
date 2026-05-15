@@ -134,13 +134,5 @@ describe('ReasonerBridge.dlQuery', () => {
 });
 
 // ── T024: anatomy.owl dlQuery benchmark ──────────────────────────────────────
-// Requires the JAR to be rebuilt after Java changes. Run manually with:
-//   cd java-server && mvn clean package
-// then remove `.skip` below.
-
-describe.skip('ReasonerBridge.dlQuery — anatomy.owl benchmark (T024)', () => {
-  it('executes dlQuery for subclasses of a top-level class in under 3000ms', () => {
-    // Placeholder — see Phase3Reasoner.test.ts pattern for real Java integration tests
-    expect(true).toBe(true);
-  });
-});
+// Real benchmark lives in src/parser/Phase3Reasoner.test.ts (spawnSync pattern).
+// anatomy.owl is >>50k classes so ELK auto-selects; 30s wall-clock limit applies.

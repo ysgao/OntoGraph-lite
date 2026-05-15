@@ -8,8 +8,10 @@ import org.semanticweb.owlapi.io.FileDocumentSource;
 import org.semanticweb.owlapi.io.StringDocumentSource;
 import org.semanticweb.owlapi.io.StringDocumentTarget;
 import org.semanticweb.owlapi.model.*;
+import org.semanticweb.owlapi.model.OWLOntologySetProvider;
 import org.semanticweb.owlapi.reasoner.InferenceType;
 import org.semanticweb.owlapi.reasoner.OWLReasoner;
+import org.semanticweb.owlapi.util.AnnotationValueShortFormProvider;
 import org.semanticweb.owlapi.util.BidirectionalShortFormProviderAdapter;
 import org.semanticweb.owlapi.util.SimpleShortFormProvider;
 import org.semanticweb.owlapi.util.mansyntax.ManchesterOWLSyntaxParser;
@@ -226,6 +228,14 @@ public class OntologyService {
             throws Exception {
         OWLClassExpression expr = parseManchesterExpression(classExpression, ontology);
 
+        OWLOntologyManager manager = ontology.getOWLOntologyManager();
+        OWLDataFactory df = manager.getOWLDataFactory();
+
+        IRI tempIri = IRI.create("urn:ontograph:dlquery#TempQuery");
+        OWLClass tempClass = df.getOWLClass(tempIri);
+        manager.addAxiom(ontology, df.getOWLDeclarationAxiom(tempClass));
+        manager.addAxiom(ontology, df.getOWLEquivalentClassesAxiom(tempClass, expr));
+
         boolean useElk = shouldUseElk(engine, contentLength);
         OWLReasoner reasoner = useElk
             ? ElkAdapter.createReasoner(ontology)
@@ -243,27 +253,29 @@ public class OntologyService {
             for (String qt : queryTypes) {
                 switch (qt) {
                     case "directSuperClasses":
-                        for (OWLClass c : reasoner.getSuperClasses(expr, true).getFlattened())
+                        for (OWLClass c : reasoner.getSuperClasses(tempClass, true).getFlattened())
                             directSuperClasses.add(c.getIRI().toString());
                         break;
                     case "superClasses":
-                        for (OWLClass c : reasoner.getSuperClasses(expr, false).getFlattened())
+                        for (OWLClass c : reasoner.getSuperClasses(tempClass, false).getFlattened())
                             superClasses.add(c.getIRI().toString());
                         break;
                     case "equivalentClasses":
-                        for (OWLClass c : reasoner.getEquivalentClasses(expr).getEntities())
-                            equivalentClasses.add(c.getIRI().toString());
+                        for (OWLClass c : reasoner.getEquivalentClasses(tempClass).getEntities()) {
+                            if (!tempIri.equals(c.getIRI()))
+                                equivalentClasses.add(c.getIRI().toString());
+                        }
                         break;
                     case "directSubClasses":
-                        for (OWLClass c : reasoner.getSubClasses(expr, true).getFlattened())
+                        for (OWLClass c : reasoner.getSubClasses(tempClass, true).getFlattened())
                             directSubClasses.add(c.getIRI().toString());
                         break;
                     case "subClasses":
-                        for (OWLClass c : reasoner.getSubClasses(expr, false).getFlattened())
+                        for (OWLClass c : reasoner.getSubClasses(tempClass, false).getFlattened())
                             subClasses.add(c.getIRI().toString());
                         break;
                     case "instances":
-                        for (OWLNamedIndividual i : reasoner.getInstances(expr, false).getFlattened())
+                        for (OWLNamedIndividual i : reasoner.getInstances(tempClass, false).getFlattened())
                             instances.add(i.getIRI().toString());
                         break;
                     default:
@@ -281,10 +293,52 @@ public class OntologyService {
     // ---- private helpers -------------------------------------------------------
 
     private static OWLClassExpression parseManchesterExpression(String expression, OWLOntology ontology) {
-        SimpleShortFormProvider sfp = new SimpleShortFormProvider();
-        BidirectionalShortFormProviderAdapter bsf = new BidirectionalShortFormProviderAdapter(
-            ontology.getOWLOntologyManager(), ontology.getImportsClosure(), sfp);
-        OWLEntityChecker checker = new ShortFormEntityChecker(bsf);
+        OWLOntologyManager manager = ontology.getOWLOntologyManager();
+        OWLDataFactory df = manager.getOWLDataFactory();
+        Set<OWLOntology> ontologies = ontology.getImportsClosure();
+
+        // Label-based checker: resolves 'quoted rdfs:label names' like 'Body structure'
+        OWLOntologySetProvider setProvider = ontologies::stream;
+        List<OWLAnnotationProperty> labelProps = Collections.singletonList(df.getRDFSLabel());
+        AnnotationValueShortFormProvider labelSfp = new AnnotationValueShortFormProvider(
+            labelProps, Collections.emptyMap(), setProvider);
+        BidirectionalShortFormProviderAdapter labelBsf = new BidirectionalShortFormProviderAdapter(
+            manager, ontologies, labelSfp);
+        ShortFormEntityChecker labelChecker = new ShortFormEntityChecker(labelBsf);
+
+        // Local-name checker: resolves unquoted names like Mammal, hasHabitat
+        BidirectionalShortFormProviderAdapter localBsf = new BidirectionalShortFormProviderAdapter(
+            manager, ontologies, new SimpleShortFormProvider());
+        ShortFormEntityChecker localChecker = new ShortFormEntityChecker(localBsf);
+
+        // Combined: try label first, fall back to local name
+        OWLEntityChecker checker = new OWLEntityChecker() {
+            @Override public OWLClass getOWLClass(String n) {
+                OWLClass c = labelChecker.getOWLClass(n);
+                return c != null ? c : localChecker.getOWLClass(n);
+            }
+            @Override public OWLObjectProperty getOWLObjectProperty(String n) {
+                OWLObjectProperty p = labelChecker.getOWLObjectProperty(n);
+                return p != null ? p : localChecker.getOWLObjectProperty(n);
+            }
+            @Override public OWLDataProperty getOWLDataProperty(String n) {
+                OWLDataProperty p = labelChecker.getOWLDataProperty(n);
+                return p != null ? p : localChecker.getOWLDataProperty(n);
+            }
+            @Override public OWLAnnotationProperty getOWLAnnotationProperty(String n) {
+                OWLAnnotationProperty p = labelChecker.getOWLAnnotationProperty(n);
+                return p != null ? p : localChecker.getOWLAnnotationProperty(n);
+            }
+            @Override public OWLDatatype getOWLDatatype(String n) {
+                OWLDatatype t = labelChecker.getOWLDatatype(n);
+                return t != null ? t : localChecker.getOWLDatatype(n);
+            }
+            @Override public OWLNamedIndividual getOWLIndividual(String n) {
+                OWLNamedIndividual i = labelChecker.getOWLIndividual(n);
+                return i != null ? i : localChecker.getOWLIndividual(n);
+            }
+        };
+
         ManchesterOWLSyntaxParser parser = OWLManager.createManchesterParser();
         parser.setDefaultOntology(ontology);
         parser.setOWLEntityChecker(checker);

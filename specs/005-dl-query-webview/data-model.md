@@ -139,6 +139,26 @@ public static class DLQueryResult {
 
 ---
 
+## TempQueryClass (TypeScript-owned lifecycle, Java-owned expression)
+
+A temporary OWL named class used per `dlQuery` request to enable engine-agnostic hierarchy queries.
+
+| Field | Value |
+|-------|-------|
+| IRI | `urn:ontograph:dlquery#TempQuery` |
+| Lifetime | Single Execute window: tracked by `DLQueryPanel.ts` in `temporaryClassIris: Set<string>` before `bridge.dlQuery()` call; removed in `finally` block (even on error) |
+| Axioms added | `Declaration(TempQueryClass)` + `EquivalentClasses(TempQueryClass, <expr>)` — constructed by Java `OntologyService.dlQuery()` in its fresh `OWLOntologyManager` |
+| TypeScript model impact | TempClass IRI added to `temporaryClassIris` set; sync-to-disk is inhibited for this IRI during the Execute window |
+| Persisted? | Never — the Java fresh manager is discarded after classification; TypeScript removes IRI from `temporaryClassIris` in `finally`; no sync fires |
+
+**Ownership split**:
+- **TypeScript** owns: when TempClass is "in scope" (start of Execute), cleanup guarantee (finally block), sync inhibition guard, concurrent Execute prevention.
+- **Java** owns: parsing the Manchester class expression (via `AnnotationValueShortFormProvider` for rdfs:label resolution), constructing the EquivalentClasses axiom, classification, and extracting TempClass hierarchy position.
+
+**Invariant**: `TempQueryClass` is always filtered out of `equivalentClasses` results before returning `DLQueryResult`. It never appears in `directSuperClasses`, `superClasses`, `directSubClasses`, `subClasses`, or `instances` because the reasoner does not infer self-membership in those sets.
+
+---
+
 ## Entity Type Inference
 
 The webview needs to know the entity type of each result item to route the `navigate` message correctly.

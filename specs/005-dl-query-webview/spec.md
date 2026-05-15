@@ -5,6 +5,15 @@
 **Status**: Draft  
 **Input**: User description: "create a new webview for DL Query that has a similar UI to Protege app but do not need the button for 'Add to ontology'"
 
+## Clarifications
+
+### Session 2026-05-15
+
+- Q: How should the query expression be submitted to the reasoner? → A: The expression is wrapped internally as an `EquivalentClasses` axiom for a temporary named class; full classification is then run on the extended ontology.
+- Q: Which reasoning invocation pattern should Execute use — ad-hoc reasoner query or full classify pipeline? → A: Execute calls the full classification service (HermiT or ELK) on the ontology extended with the temporary EquivalentClasses axiom; results are read from the inferred hierarchy of the temporary class.
+- Q: Where does TempQueryClass live and what is the source of truth for Execute? → A: TempQueryClass is added to the TypeScript runtime OntologyModel before classification and removed after results are collected; Execute uses the live in-memory model (including any unsaved edits from the Entity Editor), not the saved file. The runtime model must never sync to disk during Execute execution.
+- Q: Is the DL Query expression syntax the same as the EquivalentClasses expression in the Entity Editor? → A: Yes — the DL Query "Query (class expression)" input accepts exactly the same Manchester Syntax as the EquivalentClasses axiom field in the Entity Editor, including quoted rdfs:label names (e.g., `'Body structure'`). The classification button in the class hierarchy panel differs in that it classifies the synchronized OWL document on disk; DL Query classifies the runtime model.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Execute a DL Query and View Results (Priority: P1)
@@ -76,52 +85,58 @@ An ontology developer sees an interesting entity in the DL Query results and cli
 ### Edge Cases
 
 - What happens when the query expression is empty and the user clicks Execute?
-- How does the panel behave when the reasoner has not yet classified the ontology?
 - What happens when a query returns zero results for all selected query types?
-- How are very long class expression strings handled in the input text area (scrolling vs. resize)?
+- How are very long class expression strings handled in the input area (scrolling vs. resize)?
 - What happens if the ontology is closed or replaced while results are displayed?
+- What happens if the temporary EquivalentClasses axiom causes an inconsistency in the ontology?
+- **Execute fails mid-way (parse error, reasoner error, timeout):** `TempQueryClass` MUST still be removed from the runtime OntologyModel; the error message is shown in the results area; no sync to disk occurs.
+- **Unsaved Entity Editor changes:** Execute operates on the live runtime model, which includes any pending entity edits made in the Entity Editor that have not yet been saved. This is intentional — DL Query queries the current working state, not the last-saved state.
+- **Concurrent Execute clicks:** If Execute is clicked while a previous query is still running, the second click MUST be ignored or the in-progress query MUST be cancelled before starting the new one to prevent double-mutation of the runtime model.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The DL Query panel MUST provide a multiline text area for entering Manchester Syntax class expressions, labelled "Query (class expression)".
-- **FR-002**: The panel MUST include an "Execute" button that submits the entered class expression to the reasoner.
-- **FR-003**: The panel MUST display a "Query results" area that lists entities returned by the reasoner.
+- **FR-001**: The DL Query panel MUST provide a Manchester Syntax expression editor (CodeMirror with syntax highlighting and entity autocompletion), labelled "Query (class expression)".
+- **FR-002**: The panel MUST include an "Execute" button. When clicked, the system MUST: (1) parse the expression as an anonymous class expression, (2) add a `TempQueryClass` declaration and `EquivalentClasses(TempQueryClass, <expression>)` axiom to the **TypeScript runtime OntologyModel** (the live in-memory model, which includes any unsaved Entity Editor changes), (3) invoke the full classification service (HermiT or ELK) on the runtime model, (4) read the inferred hierarchy position of `TempQueryClass` for all checked query types, (5) return those results, and (6) remove `TempQueryClass` and its `EquivalentClasses` axiom from the runtime OntologyModel. The sync-to-disk mechanism MUST be inhibited throughout steps 2–6 so the temporary axiom is never written to the source file. Cleanup (step 6) MUST occur even if the classification fails or throws an error.
+- **FR-003**: The panel MUST display a "Query results" area that lists entities returned for each checked query type.
 - **FR-004**: The panel MUST provide checkboxes for the following six query relationship types: Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, Instances.
 - **FR-005**: The "Direct superclasses", "Direct subclasses", and "Subclasses" checkboxes MUST be checked by default when the panel is opened.
 - **FR-006**: The panel MUST provide a "Result filters" section with a "Name contains" text field that filters the displayed results in real time (client-side, no re-query needed).
 - **FR-007**: The panel MUST provide a "Display owl:Thing (in superclass results)" checkbox, checked by default, under "Result filters".
 - **FR-008**: The panel MUST provide a "Display owl:Nothing (in subclass results)" checkbox, checked by default, under "Result filters".
-- **FR-009**: When the class expression is syntactically invalid, the panel MUST display a human-readable error message in or near the results area.
+- **FR-009**: When the class expression is syntactically invalid or the classifier rejects the temporary axiom, the panel MUST display a human-readable error message in or near the results area.
 - **FR-010**: The panel MUST NOT include an "Add to ontology" button.
 - **FR-011**: The Execute button MUST be disabled when no ontology is loaded in the extension.
 - **FR-012**: The results area MUST show an empty-state message when a valid query returns no results for any checked query type.
-- **FR-013**: Results MUST be grouped or labelled by query type when multiple relationship types are checked.
+- **FR-013**: Results MUST be grouped and labelled by query type when multiple relationship types are checked; only groups for checked types are shown.
 - **FR-014**: The panel layout MUST follow the Protégé DL Query arrangement: query input at the top, results panel on the left, "Query for" checkboxes and "Result filters" on the right.
-- **FR-015**: Each entity in the results list MUST be clickable; clicking an entity MUST set it as the focused entity in the left sidebar hierarchy views (Classes, Properties, or Individuals tree, as appropriate for the entity type).
+- **FR-015**: Each entity in the results list MUST be clickable; clicking an entity MUST set it as the focused entity in the left sidebar hierarchy views (Classes or Individuals tree, as appropriate for the entity type).
+- **FR-016**: The classification triggered by Execute MUST use the same reasoner engine (HermiT or ELK) selected in the extension settings; the temporary `TempQueryClass` declaration and `EquivalentClasses` axiom MUST be removed from the **TypeScript runtime OntologyModel** after results are collected (or on error), MUST NOT be written to the source file, and MUST NOT cause the extension's sync-to-disk mechanism to fire at any point during Execute execution. The DL Query Execute operation and the sidebar Classify command are distinct: Classify operates on the saved/synchronized OWL document; Execute operates on the live runtime model.
 
 ### Key Entities
 
-- **DL Query Expression**: A Manchester Syntax class expression string entered by the user; the input to the reasoner query operation.
-- **Query Result Set**: The set of OWL entities (classes or individuals) returned by the reasoner for a given expression and query type combination.
-- **Query Type**: One of six relationship types (Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, Instances) selected via checkboxes.
+- **DL Query Expression**: A Manchester Syntax class expression string entered by the user, using the same syntax as the EquivalentClasses axiom field in the Entity Editor (including quoted rdfs:label names). Internally wrapped as `EquivalentClasses(TempQueryClass, <expression>)` before classification.
+- **TempQueryClass**: A temporary named OWL class added to the TypeScript runtime OntologyModel for the duration of a single DL query Execute; removed from the runtime model after results are collected or on error; never persisted to disk.
+- **Query Result Set**: The inferred hierarchy position of TempQueryClass — superclasses, subclasses, equivalent classes, or instances — as returned by the classifier after the full classify operation.
+- **Query Type**: One of six relationship types (Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, Instances) selected via checkboxes; determines which parts of TempQueryClass's inferred position are returned.
 - **Result Filter**: A substring applied client-side to the displayed result set without re-querying the reasoner.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: A user can enter a class expression, click Execute, and see results within 3 seconds for ontologies under 50,000 classes.
+- **SC-001**: A user can enter a class expression, click Execute, and see results within 3 seconds for ontologies under 50,000 classes (time includes classification of the ontology extended with the temporary EquivalentClasses axiom).
 - **SC-002**: The "Name contains" filter updates the displayed results within 200 milliseconds of each keystroke.
 - **SC-003**: All six query type checkboxes operate independently; checking or unchecking one updates the displayed results without requiring re-execution of the full query. Direct superclasses, Direct subclasses, and Subclasses are checked by default on panel open.
-- **SC-006**: Clicking an entity in the results list navigates the sidebar hierarchy to that entity within 500 milliseconds.
 - **SC-004**: 100% of syntactically invalid class expressions display a human-readable error message rather than a silent failure or crash.
 - **SC-005**: The panel layout matches the Protégé DL Query panel: query input at top, results on the left, query options and result filters on the right.
+- **SC-006**: Clicking an entity in the results list navigates the sidebar hierarchy to that entity within 500 milliseconds.
 
 ## Assumptions
 
-- The existing Java reasoner server already integrated in OntoGraph supports DL query operations for the six relationship types listed; if not, extending the reasoner is in scope for this feature.
+- The existing Java reasoner server classify endpoint is reused for DL query; the server receives the runtime OntologyModel (serialized, already containing `TempQueryClass` and its `EquivalentClasses` axiom) and performs full classification.
+- `TempQueryClass` and its `EquivalentClasses` axiom are added to the TypeScript runtime OntologyModel before serialization/classification and removed from it after results are returned; they are never written to the user's source file. The sidebar Classify command is distinct: it operates on the saved/synchronized OWL document.
 - Manchester Syntax parsing for class expressions reuses the existing Manchester parser already present in the codebase.
 - The panel is implemented as a VS Code webview, consistent with the existing entity-editor and graph webviews.
 - The panel is accessible from a VS Code command (e.g., "Open DL Query") when an OWL ontology file is open.
