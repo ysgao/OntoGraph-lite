@@ -42,7 +42,7 @@
   - Test: file has `[rdfs:label, definition]`, model removes `definition` → exactly one `delete` edit, no other edits
   - Confirm tests fail before proceeding to T004
 
-- [~] T004 [US1] [US2] Implement diff-based `syncFunctional` in `src/sync/AnnotationSync.ts`:
+- [x] T004 86170f7 [US1] [US2] Implement diff-based `syncFunctional` in `src/sync/AnnotationSync.ts`:
   - Build `fileItems: Array<{key: string, lineIdx: number, line: string}>` from all `AnnotationAssertion` lines for the entity; key = `propIri + "|" + text + "|" + (lang ?? "")`
   - Build `modelItems: Map<key, line>` from `entityAnnotationPairs(entity)`
   - `toRemove` = fileItems whose key is absent from modelItems
@@ -53,12 +53,12 @@
 
 ### TDD — Manchester Syntax (Red phase before Green)
 
-- [ ] T005 [P] [US1] [US2] Write failing tests for `syncManchester` idempotency and order-preservation in `src/sync/__tests__/AnnotationSync.test.ts`:
+- [x] T005 86170f7 [P] [US1] [US2] Write failing tests for `syncManchester` idempotency and order-preservation in `src/sync/__tests__/AnnotationSync.test.ts`:
   - Test: Manchester file and model have same annotations in any order → `applyEdit` NOT called
   - Test: add one annotation → block update appends the new item, existing items appear first in original order
   - Confirm tests fail before T006
 
-- [ ] T006 [P] [US1] [US2] Implement idempotency and order-preservation in `syncManchester` in `src/sync/AnnotationSync.ts`:
+- [x] T006 86170f7 [P] [US1] [US2] Implement idempotency and order-preservation in `syncManchester` in `src/sync/AnnotationSync.ts`:
   - After generating `newAnnotBlock`, parse the existing `Annotations:` block in the file into the same normalised item set
   - If the two sets are equal AND the existing block is non-empty → return `null`
   - For order-preservation: collect existing annotation items from the file block; emit unchanged items in document order first, then append new items
@@ -66,12 +66,12 @@
 
 ### TDD — Turtle Syntax (Red phase before Green)
 
-- [ ] T007 [P] [US1] [US2] Write failing tests for `syncTurtle` annotation idempotency and minimal diff in `src/sync/__tests__/AnnotationSync.test.ts`:
+- [x] T007 86170f7 [P] [US1] [US2] Write failing tests for `syncTurtle` annotation idempotency and minimal diff in `src/sync/__tests__/AnnotationSync.test.ts`:
   - Test: Turtle file and model have same annotation segments → `applyEdit` NOT called
   - Test: add one annotation segment → single segment added at end, existing segments unmoved
   - Confirm tests fail before T008
 
-- [ ] T008 [P] [US1] [US2] Implement diff-based annotation handling in `syncTurtle` in `src/sync/AnnotationSync.ts`:
+- [x] T008 86170f7 [P] [US1] [US2] Implement diff-based annotation handling in `syncTurtle` in `src/sync/AnnotationSync.ts`:
   - Apply same key-based diff used in `syncFunctional` to Turtle predicate segments
   - `toRemove` = existing annotation segments whose key is absent from model
   - `toAdd` = model annotation keys absent from file
@@ -91,18 +91,18 @@
 
 ### TDD — Functional Syntax (Red phase before Green)
 
-- [ ] T009 [P] [US1] [US3] Write failing tests for `syncAxiomsFunctional` idempotency in `src/sync/__tests__/AxiomSync.test.ts`:
+- [x] T009 86170f7 [P] [US1] [US3] Write failing tests for `syncAxiomsFunctional` idempotency in `src/sync/__tests__/AxiomSync.test.ts`:
   - Test: file and model have the same axiom set → `applyEdit` NOT called
   - Test: class with SubClassOf + EquivalentClasses unchanged → no edit
   - Confirm tests fail before T011
 
-- [ ] T010 [P] [US1] [US3] Write failing tests for `syncAxiomsFunctional` minimal diff in `src/sync/__tests__/AxiomSync.test.ts`:
+- [x] T010 86170f7 [P] [US1] [US3] Write failing tests for `syncAxiomsFunctional` minimal diff in `src/sync/__tests__/AxiomSync.test.ts`:
   - Test: class has 3 `SubClassOf` lines, model adds 1 more → diff has exactly one `insert` edit, zero `delete` edits, existing lines untouched
   - Test: `EquivalentClasses` addition inserts before any `SubClassOf` lines (constitution ordering)
   - Test: axiom removal → exactly one `delete` edit
   - Confirm tests fail before T011
 
-- [ ] T011 [P] [US1] [US3] Implement diff-based `syncAxiomsFunctional` in `src/sync/AxiomSync.ts`:
+- [x] T011 86170f7 [P] [US1] [US3] Implement diff-based `syncAxiomsFunctional` in `src/sync/AxiomSync.ts`:
   - Build `fileAxioms: Array<{normalised: string, lineIdx: number, keyword: string}>` from all regular axiom lines for the entity; normalised = trim whitespace
   - Build `modelAxioms: Array<{normalised: string, keyword: string}>` from `generateFunctionalAxiomLines`
   - `toRemove` = fileAxioms whose normalised content is absent from modelAxioms
@@ -115,24 +115,24 @@
 
 ### TDD — Manchester Syntax (Red phase before Green)
 
-- [ ] T012 [P] [US1] [US3] Write failing tests for `syncAxiomsManchester` idempotency in `src/sync/__tests__/AxiomSync.test.ts`:
+- [x] T012 86170f7 [P] [US1] [US3] Write failing tests for `syncAxiomsManchester` idempotency in `src/sync/__tests__/AxiomSync.test.ts`:
   - Test: Manchester file and model have same axiom sections → `applyEdit` NOT called
   - Test: add one `SubClassOf:` item → only that item appears in the diff
   - Confirm tests fail before T013
 
-- [ ] T013 [P] [US1] [US3] Implement idempotency checks in `syncAxiomsManchester` in `src/sync/AxiomSync.ts`:
+- [x] T013 86170f7 [P] [US1] [US3] Implement idempotency checks in `syncAxiomsManchester` in `src/sync/AxiomSync.ts`:
   - After generating `newSections`, compare to the concatenation of existing managed sections extracted from the file
   - If the strings are equal → return `null`
   - Run tests; confirm T012 passes
 
 ### TDD — Turtle Combined Sync (Red phase before Green)
 
-- [ ] T014 [P] [US1] [US3] Write failing tests for `syncAxiomsTurtle` idempotency in `src/sync/__tests__/AxiomSync.test.ts`:
+- [x] T014 86170f7 [P] [US1] [US3] Write failing tests for `syncAxiomsTurtle` idempotency in `src/sync/__tests__/AxiomSync.test.ts`:
   - Test: Turtle file content unchanged (no annotation or axiom change) → `applyEdit` NOT called
   - Test: add one structural predicate segment → one segment added, others unchanged
   - Confirm tests fail before T015
 
-- [ ] T015 [P] [US1] [US3] Implement idempotency check in `syncAxiomsTurtle` in `src/sync/AxiomSync.ts`:
+- [x] T015 86170f7 [P] [US1] [US3] Implement idempotency check in `syncAxiomsTurtle` in `src/sync/AxiomSync.ts`:
   - After building `rebuiltLines`, compare `rebuiltLines.join('\n')` to `lines.slice(blockStart, blockEnd).join('\n')`
   - If equal → return `null`
   - Run tests; confirm T014 passes
@@ -145,15 +145,17 @@
 
 **Purpose**: Full suite confirmation, type safety, and manual round-trip verification.
 
-- [ ] T016 Run `npm test` — all tests pass; coverage ≥ 80% for `src/sync/AnnotationSync.ts` and `src/sync/AxiomSync.ts`
+- [x] T016 86170f7 Run `npm test` — all tests pass; coverage ≥ 80% for `src/sync/AnnotationSync.ts` and `src/sync/AxiomSync.ts`
 
-- [ ] T017 [P] Run `npm run compile` — zero TypeScript errors
+- [x] T017 86170f7 [P] Run `npm run compile` — zero TypeScript errors
 
 - [ ] T018 Manual round-trip verification per `specs/001-fix-sync-data-loss/plan.md §Phase 5`:
   - Open `test-ontologies/animals.omn` → add annotation to a class → confirm `git diff` shows exactly one added line
   - Add SubClassOf axiom → confirm `git diff` shows exactly one added axiom line
   - Open and close entity editor without editing → confirm `git diff` remains empty
   - Repeat with a `.ttl` test file
+
+- [ ] T019 Conductor — Manual Verification 'Fix Spurious OWL File Changes on Sync' per `specs/001-fix-sync-data-loss/plan.md §Phase 5 Task 5.4` (protocol in `conductor/workflow.md`)
 
 ---
 
