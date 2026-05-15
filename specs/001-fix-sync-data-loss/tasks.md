@@ -157,6 +157,8 @@
 
 - [ ] T019 Conductor — Manual Verification 'Fix Spurious OWL File Changes on Sync' per `specs/001-fix-sync-data-loss/plan.md §Phase 5 Task 5.4` (protocol in `conductor/workflow.md`)
 
+- [x] T020 86170f7 [P] Principle IV benchmark — add `src/sync/__tests__/sync-anatomy-bench.test.ts` asserting both sync functions complete a no-op scan of `test-ontologies/anatomy.owl` (302k lines) in < 500ms each
+
 ---
 
 ## Dependencies & Execution Order

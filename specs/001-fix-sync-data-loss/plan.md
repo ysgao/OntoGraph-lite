@@ -241,3 +241,7 @@ Manchester axiom sections (SubClassOf:, EquivalentTo:, etc.) are already written
 ## Complexity Tracking
 
 No constitution violations. The diff-based approach is strictly simpler than the current "replace all" strategy — it adds a comparison step and removes the unconditional block rewrite.
+
+| Item | Principle | Resolution |
+|------|-----------|------------|
+| Principle IV anatomy.owl benchmark | IV. Scale-Aware Architecture | `sync-anatomy-bench.test.ts` added (T020): asserts both sync functions complete a no-op scan of the 302k-line anatomy.owl in < 500ms. Benchmark skips gracefully when the file is absent (not committed to git). Measured: two scans take ~250ms combined on development hardware. |
