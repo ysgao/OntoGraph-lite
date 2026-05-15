@@ -1,25 +1,29 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: (unversioned template) → 1.0.0
-Bump type: MAJOR — first-ever ratified version; replaces blank template
+Version change: 1.0.0 → 1.1.0
+Bump type: MINOR — new "Testing Standards" section added with materially expanded
+  test-framework guidance; Technical Stack Requirements updated accordingly.
 
 Modified principles:
-  All principles are NEW (template had no concrete values)
+  Technical Stack Requirements — Testing line expanded; detailed guidance moved to
+    the new Testing Standards section.
 
 Added sections:
-  - Core Principles (I–V)
-  - Technical Stack Requirements
-  - Development Workflow
-  - Governance
+  - Testing Standards (test runner, file placement, import style, VS Code mocking,
+    test categories, benchmark pattern, coverage enforcement)
 
 Removed sections:
-  - None (no prior content)
+  - None
 
 Templates reviewed:
-  ✅ .specify/templates/plan-template.md   — Constitution Check section is dynamically filled per plan; no update needed
-  ✅ .specify/templates/spec-template.md   — Structure aligns with Principle I (user stories as acceptance tests); no update needed
-  ✅ .specify/templates/tasks-template.md  — Task phases and TDD ordering align with Principle I; no update needed
+  ✅ .specify/templates/plan-template.md  — "Testing" field in Technical Context
+       block now has a concrete example value to use (Vitest); no structural change
+       needed.
+  ✅ .specify/templates/spec-template.md  — Acceptance Scenarios structure unchanged;
+       no update needed.
+  ✅ .specify/templates/tasks-template.md — Test task examples are framework-neutral;
+       no update needed.
 
 Follow-up TODOs:
   None — all fields resolved from project context.
@@ -124,14 +128,110 @@ LSP server, Worker Threads), Java 21+ (reasoner server).
 **Build**: esbuild (6 bundles — see CLAUDE.md); `npm run build` for production.
 Maven shade plugin for the fat JAR.
 
-**Testing**: Vitest (`npm test`). Test files live alongside source under
-`src/**/*.test.ts`. No separate `tests/` directory.
+**Testing**: Vitest 1.6.0 (`npm test` / `npm run test:watch`). See the
+[Testing Standards](#testing-standards) section for file placement, mocking
+conventions, and test categories.
 
 **Key Libraries**: OWLAPI 5 (Java), HermiT, ELK, Peggy (Manchester grammar),
 VS Code Extension API.
 
 **No new runtime dependencies** may be added without documenting the rationale
 in the relevant plan.md and obtaining explicit user approval.
+
+## Testing Standards
+
+### Runner
+
+**Vitest 1.6.0** is the sole test runner. Commands:
+
+```
+npm test            # single run (CI)
+npm run test:watch  # watch mode (development)
+```
+
+No `jest`, `mocha`, or other runners MUST be added.
+
+### File Placement
+
+Test files MUST follow one of two co-location patterns, chosen consistently
+within a module:
+
+1. **Alongside source** (preferred for single-file modules):
+   `src/<module>/Foo.test.ts` next to `src/<module>/Foo.ts`.
+2. **`__tests__` subdirectory** (acceptable when a module has multiple related
+   test files): `src/<module>/__tests__/Foo.test.ts`.
+
+There is NO top-level `tests/` directory. All test files live under `src/`.
+
+### Import Style
+
+Always use named imports from `'vitest'`:
+
+```typescript
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+```
+
+Do not use globals (`test`, `expect` without imports) or the `@vitest/globals`
+package.
+
+### Mocking VS Code APIs
+
+Tests MUST NOT start a real VS Code extension host. The `vscode` module is
+mocked with a hand-rolled stub:
+
+```typescript
+const { mockReplace, mockApplyEdit } = vi.hoisted(() => ({
+  mockReplace: vi.fn(),
+  mockApplyEdit: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock('vscode', () => ({
+  Range: vi.fn((s1, c1, s2, c2) => ({
+    start: { line: s1, character: c1 },
+    end: { line: s2, character: c2 },
+  })),
+  Position: vi.fn((l, c) => ({ line: l, character: c })),
+  WorkspaceEdit: vi.fn(() => ({ replace: mockReplace })),
+  workspace: { applyEdit: mockApplyEdit },
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockApplyEdit.mockResolvedValue(true);
+});
+```
+
+Rules:
+- `vi.hoisted()` MUST be used when mock factory closures need to reference
+  variables declared in module scope (avoids temporal dead zone errors).
+- `vi.clearAllMocks()` MUST be called in `beforeEach` whenever `vi.fn()` mocks
+  are defined at module scope.
+- Stub only the VS Code surface area the code under test actually uses — do not
+  copy a full vscode stub that the module doesn't need.
+
+### Test Categories
+
+| Category | When to write | Pattern |
+|----------|---------------|---------|
+| **Unit** | Pure TypeScript functions (parsers, serializer, model) | Read fixture files from `test-ontologies/`; no mocking required |
+| **Integration** | Code that calls VS Code APIs (sync layer, commands) | Mock `vscode` module as above; supply document content as inline strings |
+| **Benchmark** | Any path touching the class hierarchy (Principle IV) | Load `test-ontologies/anatomy.owl`; skip gracefully if absent |
+
+### Benchmark Pattern
+
+Benchmark tests MUST:
+
+1. Check for `anatomy.owl` existence and call `describe.skip` if absent, so CI
+   is not broken on machines without the large file.
+2. Assert wall-clock time is below an explicit threshold (e.g., `< 1000 ms`).
+3. Use a no-op fixture (model matches file) so `applyEdit` is never reached and
+   timing captures only the scan path.
+
+### Coverage
+
+Coverage threshold: **>80% for all new code** (Principle I). Coverage is verified
+by running `npm test` — no separate coverage command is needed; the threshold is
+enforced per-run.
 
 ## Development Workflow
 
@@ -177,4 +277,4 @@ the plan's Complexity Tracking table with explicit justification.
 
 Runtime development guidance: `conductor/workflow.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-14 | **Last Amended**: 2026-05-14
+**Version**: 1.1.0 | **Ratified**: 2026-05-14 | **Last Amended**: 2026-05-15
