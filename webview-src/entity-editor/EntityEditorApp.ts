@@ -1,4 +1,5 @@
 import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
+import { createAnnotationDisplayElement } from './annotationValueDisplay';
 import { EditorState, StateField } from '@codemirror/state';
 import {
   Decoration,
@@ -909,12 +910,43 @@ function renderAnnotationsSection(container: HTMLElement): void {
         tdLang.appendChild(langInput);
       }
 
-      // Col 3: editable value
+      // Col 3: display/edit value
       const tdValue = document.createElement('td');
       const valueWidget = createValueWidget(entry.propIri, entry.value, (v) => {
         annotationState[i] = { ...annotationState[i], value: v };
         checkForChanges();
       });
+      valueWidget.style.display = 'none';
+
+      let currentDisplay = createAnnotationDisplayElement(
+        entry.value,
+        (url) => { vscode.postMessage({ type: 'openExternal', url }); },
+      );
+
+      function attachRowHandlers(displayDiv: HTMLElement): void {
+        displayDiv.addEventListener('click', (e) => {
+          const t = e.target as HTMLElement;
+          if (t.tagName === 'A' || t.tagName === 'IMG') { return; }
+          displayDiv.style.display = 'none';
+          valueWidget.style.display = '';
+          (valueWidget as HTMLElement).focus();
+        });
+      }
+      attachRowHandlers(currentDisplay);
+
+      (valueWidget as HTMLElement).addEventListener('blur', () => {
+        valueWidget.style.display = 'none';
+        const fresh = createAnnotationDisplayElement(
+          annotationState[i].value,
+          (url) => { vscode.postMessage({ type: 'openExternal', url }); },
+        );
+        attachRowHandlers(fresh);
+        currentDisplay.replaceWith(fresh);
+        currentDisplay = fresh;
+        currentDisplay.style.display = '';
+      });
+
+      tdValue.appendChild(currentDisplay);
       tdValue.appendChild(valueWidget);
 
       // Col 4: delete button
@@ -1552,6 +1584,9 @@ function injectStyles(): void {
     }
     .annotation-value-input:focus { outline: none; border-color: var(--input-border); }
     textarea.annotation-value-input { min-height: 4.5em; resize: vertical; }
+    .annotation-value-display { cursor: text; padding: 3px 6px; min-height: 1.5em; white-space: pre-wrap; word-break: break-all; }
+    .annotation-link { color: var(--vscode-textLink-foreground); text-decoration: underline; cursor: pointer; }
+    .annotation-image-preview { display: block; max-width: 100%; max-height: 200px; margin-top: 4px; }
     .lang-tag-input {
       background: var(--input-bg); color: var(--fg);
       border: 1px solid var(--input-border);

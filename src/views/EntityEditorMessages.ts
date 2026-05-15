@@ -72,6 +72,7 @@ export interface RequestCompletionMessage { type: 'requestCompletion'; requestId
 export interface ValidateMessage { type: 'validate'; requestId: number; text: string }
 export interface NavigateMessage { type: 'navigate'; iri: string }
 export interface FocusEntityMessage { type: 'focusEntity'; iri: string }
+export interface OpenExternalMessage { type: 'openExternal'; url: string }
 
 export interface SaveEntityMessage {
   type: 'save';
@@ -111,4 +112,5 @@ export type EntityEditorWebviewToExt =
   | ValidateMessage
   | NavigateMessage
   | FocusEntityMessage
+  | OpenExternalMessage
   | SaveEntityMessage;

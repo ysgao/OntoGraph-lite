@@ -155,6 +155,10 @@ function handleMessage(
       void vscode.commands.executeCommand('ontograph.focusEntity', { iri: msg.iri });
       break;
 
+    case 'openExternal':
+      void vscode.env.openExternal(vscode.Uri.parse(msg.url));
+      break;
+
     case 'requestCompletion': {
       const index = getIndex(model);
       const entities = index.searchByLabel(msg.prefix, 50);
@@ -649,7 +653,7 @@ function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
     content="default-src 'none';
              script-src 'nonce-${nonce}' ${webview.cspSource};
              style-src ${webview.cspSource} 'unsafe-inline';
-             img-src ${webview.cspSource} data:;">
+             img-src ${webview.cspSource} data: https:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OntoGraph: Entity Info</title>
   <style>
