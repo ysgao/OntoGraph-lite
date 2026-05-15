@@ -80,7 +80,7 @@
 
 - [x] T012 Run `npm run build` to produce the updated `dist/entity-editor-webview.js` bundle and confirm the build completes without errors
 
-- [ ] T013 Perform manual verification in VS Code per the steps in `specs/003-multiline-annotation-fields/quickstart.md`: open `test-ontologies/animals.omn`, open entity editor for a class, confirm `skos:definition` → textarea, `rdfs:comment` → textarea, `rdfs:label` → single-line input; add a new `skos:definition`, save, reopen and confirm round-trip
+- [x] T013 9190e44 Perform manual verification in VS Code per the steps in `specs/003-multiline-annotation-fields/quickstart.md`: open `test-ontologies/animals.omn`, open entity editor for a class, confirm `skos:definition` → textarea, `rdfs:comment` → textarea, `rdfs:label` → single-line input; add a new `skos:definition`, save, reopen and confirm round-trip
 
 ---
 
