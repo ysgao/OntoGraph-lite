@@ -3,7 +3,7 @@
 **Branch**: `002-abbreviate-rdfs-iris` | **Date**: 2026-05-15 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/002-abbreviate-rdfs-iris/spec.md`
 
-**Status**: T001–T016 complete — all 80 tests passing, zero type errors (2026-05-15).
+**Status**: ✅ Complete — all 80 tests passing, zero type errors, manual verification signed off (2026-05-15).
 
 ## Summary
 

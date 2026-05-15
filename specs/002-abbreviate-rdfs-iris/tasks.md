@@ -93,7 +93,7 @@
 - [x] T015 157d0ae [P] Run `npm run compile` — zero TypeScript type errors
 - [x] T016 157d0ae [P] Principle IV benchmark — confirm both sync functions complete a no-op scan of `test-ontologies/anatomy.owl` (302k lines) in < 500ms each (existing `src/sync/__tests__/sync-anatomy-bench.test.ts`)
 
-- [ ] T017 Manual round-trip verification per `specs/002-abbreviate-rdfs-iris/quickstart.md` (7 scenarios):
+- [x] T017 8914baf Manual round-trip verification per `specs/002-abbreviate-rdfs-iris/quickstart.md` (7 scenarios):
   - Scenario 1: no-op save on `.ofn` → empty git diff ✓
   - Scenario 2: add `rdfs:comment` in `.ofn` → abbreviated token in diff ✓
   - Scenario 3: no-op save on `.omn` → empty git diff ✓
@@ -102,7 +102,7 @@
   - Scenario 6: add `rdfs:comment` in `.ttl` → abbreviated token in diff ✓
   - Scenario 7: `rdfs:seeAlso` / `rdfs:isDefinedBy` spot check ✓
 
-- [ ] T018 Conductor — Manual Verification 'Abbreviate RDFS Annotation Property IRIs': confirmed `git diff` behaviour matches all acceptance scenarios in `specs/002-abbreviate-rdfs-iris/spec.md §User Stories`
+- [x] T018 8914baf Conductor — Manual Verification 'Abbreviate RDFS Annotation Property IRIs': confirmed `git diff` behaviour matches all acceptance scenarios in `specs/002-abbreviate-rdfs-iris/spec.md §User Stories`
 
 ---
 
