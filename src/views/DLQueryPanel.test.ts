@@ -47,7 +47,14 @@ import type { ExtensionContext } from 'vscode';
 const fakeContext = { extensionUri: 'fake-uri', subscriptions: [] } as unknown as ExtensionContext;
 const fakeBridge  = { dlQuery: mockDlQuery } as unknown as ReasonerBridge;
 const fakeReveal  = vi.fn();
-const fakeModel   = { classes: new Map(), individuals: new Map() } as unknown as OntologyModel;
+const fakeModel: OntologyModel   = {
+  classes: new Map(), individuals: new Map(),
+  objectProperties: new Map(), dataProperties: new Map(), annotationProperties: new Map(),
+  metadata: { imports: [], annotations: {} },
+  sourceUri: '', rawContent: '', sourceFormat: 'functional',
+  standaloneGcis: [], inferredSubClasses: new Map(),
+  isClassified: false, classificationNeedsUpdate: false,
+} as unknown as OntologyModel;
 
 function getMessageHandler(): (msg: DLQueryWebviewToExt) => void {
   const [[handler]] = mockOnMessage.mock.calls as [[(msg: DLQueryWebviewToExt) => void]];
@@ -187,6 +194,74 @@ describe('DLQueryPanel', () => {
     );
   });
 
+  // ── T027: TypeScript TempClass lifecycle (Phase 8) ──────────────────────────
+
+  it('T027a: concurrent Execute — second execute message while first is in flight calls dlQuery only once', async () => {
+    let resolveFirst!: (v: unknown) => void;
+    const firstPromise = new Promise(res => { resolveFirst = res; });
+    mockDlQuery.mockReturnValueOnce(firstPromise);
+
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    const handler = getMessageHandler();
+
+    // First Execute fires
+    handler({ type: 'execute', classExpression: 'Dog', queryTypes: ['directSuperClasses'] });
+    // Second Execute arrives while first is still pending
+    handler({ type: 'execute', classExpression: 'Cat', queryTypes: ['directSuperClasses'] });
+
+    // Resolve the first
+    resolveFirst({ directSuperClasses: [], superClasses: [], equivalentClasses: [], directSubClasses: [], subClasses: [], instances: [] });
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(([m]) => (m as { type: string }).type === 'dlQueryResult'));
+
+    expect(mockDlQuery).toHaveBeenCalledOnce();
+  });
+
+  it('T027b: temporaryClassIris contains TempClass IRI during dlQuery call', async () => {
+    const { temporaryClassIris } = await import('./DLQueryPanel.js');
+    const TEMP_IRI = 'urn:ontograph:dlquery#TempQuery';
+    let irisWereSet = false;
+
+    mockDlQuery.mockImplementationOnce(async () => {
+      irisWereSet = temporaryClassIris.has(TEMP_IRI);
+      return { directSuperClasses: [], superClasses: [], equivalentClasses: [], directSubClasses: [], subClasses: [], instances: [] };
+    });
+
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    getMessageHandler()({ type: 'execute', classExpression: 'Dog', queryTypes: ['directSuperClasses'] });
+
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(([m]) => (m as { type: string }).type === 'dlQueryResult'));
+    expect(irisWereSet).toBe(true);
+  });
+
+  it('T027c: temporaryClassIris is empty after dlQuery resolves successfully', async () => {
+    const { temporaryClassIris } = await import('./DLQueryPanel.js');
+    mockDlQuery.mockResolvedValueOnce({ directSuperClasses: [], superClasses: [], equivalentClasses: [], directSubClasses: [], subClasses: [], instances: [] });
+
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    getMessageHandler()({ type: 'execute', classExpression: 'Dog', queryTypes: ['directSuperClasses'] });
+
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(([m]) => (m as { type: string }).type === 'dlQueryResult'));
+    expect(temporaryClassIris.size).toBe(0);
+  });
+
+  it('T027d: temporaryClassIris is empty and executing resets after dlQuery rejects', async () => {
+    const { temporaryClassIris } = await import('./DLQueryPanel.js');
+    mockDlQuery.mockRejectedValueOnce(new Error('Parse error'));
+
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    getMessageHandler()({ type: 'execute', classExpression: 'BadExpr', queryTypes: ['subClasses'] });
+
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(([m]) => (m as { type: string }).type === 'dlQueryError'));
+    expect(temporaryClassIris.size).toBe(0);
+
+    // Verify executing was reset: a subsequent Execute should call dlQuery again
+    mockDlQuery.mockResolvedValueOnce({ directSuperClasses: [], superClasses: [], equivalentClasses: [], directSubClasses: [], subClasses: [], instances: [] });
+    mockPostMessage.mockClear();
+    getMessageHandler()({ type: 'execute', classExpression: 'Dog', queryTypes: ['directSuperClasses'] });
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(([m]) => (m as { type: string }).type === 'dlQueryResult'));
+    expect(mockDlQuery).toHaveBeenCalledTimes(2);
+  });
+
   it('updateDLQueryModel posts ontologyStatus with hasOntology:true when model set', () => {
     openDLQueryPanel(fakeContext, fakeBridge, undefined, undefined, fakeReveal);
     mockPostMessage.mockClear();
@@ -222,5 +297,125 @@ describe('DLQueryPanel', () => {
     const msg = call![0] as { type: string; requestId: number; errors: unknown[] };
     expect(msg.requestId).toBe(8);
     expect(Array.isArray(msg.errors)).toBe(true);
+  });
+
+  // ── T031: TypeScript-side label resolution ───────────────────────────────────
+
+  it('T031a: resolves unquoted label name to angle-bracket IRI before calling dlQuery', async () => {
+    const modelWithClass: OntologyModel = {
+      classes: new Map([
+        ['http://example.org/Animal', {
+          iri: 'http://example.org/Animal',
+          type: 'class',
+          labels: { en: ['Animal'] },
+          annotations: {},
+          superClassIris: [],
+          equivalentClassIris: [],
+          disjointClassIris: [],
+          superClassExpressions: [],
+          equivalentClassExpressions: [],
+          gciExpressions: [],
+        }],
+      ]),
+      individuals: new Map(),
+      objectProperties: new Map(),
+      dataProperties: new Map(),
+      annotationProperties: new Map(),
+      metadata: { imports: [], annotations: {} },
+      sourceUri: '',
+      rawContent: '',
+      sourceFormat: 'functional',
+      standaloneGcis: [],
+      inferredSubClasses: new Map(),
+      isClassified: false,
+      classificationNeedsUpdate: false,
+    } as unknown as OntologyModel;
+
+    mockDlQuery.mockResolvedValueOnce({
+      directSuperClasses: [], superClasses: [], equivalentClasses: [],
+      directSubClasses: [], subClasses: [], instances: [],
+    });
+
+    openDLQueryPanel(fakeContext, fakeBridge, modelWithClass, undefined, fakeReveal);
+    getMessageHandler()({ type: 'execute', classExpression: 'Animal', queryTypes: ['directSuperClasses'] });
+
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(
+      ([m]) => (m as { type: string }).type === 'dlQueryResult',
+    ));
+
+    expect(mockDlQuery).toHaveBeenCalledWith(
+      expect.any(String), expect.anything(), null,
+      '<http://example.org/Animal>',
+      ['directSuperClasses'], 'auto',
+    );
+  });
+
+  it('T031b: resolves single-quoted label to angle-bracket IRI before calling dlQuery', async () => {
+    const modelWithClass: OntologyModel = {
+      classes: new Map([
+        ['http://snomed.info/id/123', {
+          iri: 'http://snomed.info/id/123',
+          type: 'class',
+          labels: { en: ['Body structure'] },
+          annotations: {},
+          superClassIris: [],
+          equivalentClassIris: [],
+          disjointClassIris: [],
+          superClassExpressions: [],
+          equivalentClassExpressions: [],
+          gciExpressions: [],
+        }],
+      ]),
+      individuals: new Map(),
+      objectProperties: new Map(),
+      dataProperties: new Map(),
+      annotationProperties: new Map(),
+      metadata: { imports: [], annotations: {} },
+      sourceUri: '',
+      rawContent: '',
+      sourceFormat: 'functional',
+      standaloneGcis: [],
+      inferredSubClasses: new Map(),
+      isClassified: false,
+      classificationNeedsUpdate: false,
+    } as unknown as OntologyModel;
+
+    mockDlQuery.mockResolvedValueOnce({
+      directSuperClasses: [], superClasses: [], equivalentClasses: [],
+      directSubClasses: [], subClasses: [], instances: [],
+    });
+
+    openDLQueryPanel(fakeContext, fakeBridge, modelWithClass, undefined, fakeReveal);
+    getMessageHandler()({ type: 'execute', classExpression: "'Body structure'", queryTypes: ['directSuperClasses'] });
+
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(
+      ([m]) => (m as { type: string }).type === 'dlQueryResult',
+    ));
+
+    expect(mockDlQuery).toHaveBeenCalledWith(
+      expect.any(String), expect.anything(), null,
+      '<http://snomed.info/id/123>',
+      ['directSuperClasses'], 'auto',
+    );
+  });
+
+  it('T031c: keeps unresolvable tokens unchanged when model has no matching entity', async () => {
+    mockDlQuery.mockResolvedValueOnce({
+      directSuperClasses: [], superClasses: [], equivalentClasses: [],
+      directSubClasses: [], subClasses: [], instances: [],
+    });
+
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    getMessageHandler()({ type: 'execute', classExpression: 'Unicorn', queryTypes: ['directSuperClasses'] });
+
+    await vi.waitUntil(() => mockPostMessage.mock.calls.some(
+      ([m]) => (m as { type: string }).type === 'dlQueryResult',
+    ));
+
+    expect(mockDlQuery).toHaveBeenCalledWith(
+      expect.any(String), expect.anything(), null,
+      'Unicorn',
+      ['directSuperClasses'], 'auto',
+    );
   });
 });

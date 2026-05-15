@@ -18,9 +18,9 @@
 **Purpose**: Create new files and register the new webview bundle so the build system is ready before
 any user story work begins.
 
-- [ ] T001 Add `dl-query-webview.js` esbuild browser-IIFE entry to `esbuild.mjs` (entry: `webview-src/dl-query/DLQueryApp.ts`, outfile: `dist/dl-query-webview.js`); verify `npm run build` fails with "entry point not found"
-- [ ] T002 [P] Create `src/views/DLQueryMessages.ts` with `DLQueryType` union, `EntityRef`, `ResultGroup`, `DLQueryExtToWebview` and `DLQueryWebviewToExt` discriminated unions per `contracts/webview-messages.md`
-- [ ] T003 [P] Add `DLQueryType` and `DLQueryResult` interfaces to `src/model/OntologyModel.ts` per `data-model.md`; run `npm run compile` and confirm no new errors
+- [X] T001 Add `dl-query-webview.js` esbuild browser-IIFE entry to `esbuild.mjs` (entry: `webview-src/dl-query/DLQueryApp.ts`, outfile: `dist/dl-query-webview.js`); verify `npm run build` fails with "entry point not found"
+- [X] T002 [P] Create `src/views/DLQueryMessages.ts` with `DLQueryType` union, `EntityRef`, `ResultGroup`, `DLQueryExtToWebview` and `DLQueryWebviewToExt` discriminated unions per `contracts/webview-messages.md`
+- [X] T003 [P] Add `DLQueryType` and `DLQueryResult` interfaces to `src/model/OntologyModel.ts` per `data-model.md`; run `npm run compile` and confirm no new errors
 
 ---
 
@@ -33,14 +33,14 @@ story can be implemented end-to-end.
 
 ### Java Reasoner
 
-- [ ] T004 Add `DLQueryResult` public static inner class (six `List<String>` fields) to `java-server/src/main/java/org/ihtsdo/ontoeditor/OntologyService.java` per `data-model.md`
-- [ ] T005 Implement `dlQuery(OWLOntology ontology, OWLReasoner reasoner, String classExpression, List<String> queryTypes)` in `OntologyService.java`; use `ManchesterOWLSyntaxParser` to parse the expression in ontology context; call `getSuperClasses`/`getSubClasses`/`getEquivalentClasses`/`getInstances` only for requested query types; throw `IllegalArgumentException` on parse failure
-- [ ] T006 Add `"dlQuery"` JSON-RPC dispatch case to `java-server/src/main/java/org/ihtsdo/ontoeditor/ReasonerServer.java`; deserialize `classExpression` and `queryTypes` params; serialize `DLQueryResult` as JSON response; rebuild JAR (`cd java-server && mvn clean package`) and confirm manual smoke test passes
+- [X] T004 Add `DLQueryResult` public static inner class (six `List<String>` fields) to `java-server/src/main/java/org/ihtsdo/ontoeditor/OntologyService.java` per `data-model.md`
+- [X] T005 Implement `dlQuery(OWLOntology ontology, OWLReasoner reasoner, String classExpression, List<String> queryTypes)` in `OntologyService.java`; use `ManchesterOWLSyntaxParser` to parse the expression in ontology context; call `getSuperClasses`/`getSubClasses`/`getEquivalentClasses`/`getInstances` only for requested query types; throw `IllegalArgumentException` on parse failure
+- [X] T006 Add `"dlQuery"` JSON-RPC dispatch case to `java-server/src/main/java/org/ihtsdo/ontoeditor/ReasonerServer.java`; deserialize `classExpression` and `queryTypes` params; serialize `DLQueryResult` as JSON response; rebuild JAR (`cd java-server && mvn clean package`) and confirm manual smoke test passes
 
 ### TypeScript Bridge
 
-- [ ] T007 Write failing test in `src/reasoner/ReasonerBridge.test.ts` for `dlQuery()`: mock Java process stdin/stdout, assert correct JSON-RPC request is written and response is correctly deserialized into `DLQueryResult`; confirm test fails before T008
-- [ ] T008 Implement `dlQuery(format, content, filePath, classExpression, queryTypes, engine)` in `src/reasoner/ReasonerBridge.ts` following the `classify()` request/response pattern; run T007 test and confirm it passes
+- [X] T007 Write failing test in `src/reasoner/ReasonerBridge.test.ts` for `dlQuery()`: mock Java process stdin/stdout, assert correct JSON-RPC request is written and response is correctly deserialized into `DLQueryResult`; confirm test fails before T008
+- [X] T008 Implement `dlQuery(format, content, filePath, classExpression, queryTypes, engine)` in `src/reasoner/ReasonerBridge.ts` following the `classify()` request/response pattern; run T007 test and confirm it passes
 
 **Checkpoint**: Foundation ready — Java accepts `dlQuery` requests, TypeScript bridge is typed and tested.
 
@@ -58,15 +58,15 @@ default).
 
 > **Write these tests FIRST — confirm they FAIL before writing any implementation**
 
-- [ ] T009 [P] [US1] Write failing tests in `src/views/DLQueryPanel.test.ts`: (a) `openDLQueryPanel()` creates a webview panel with `viewType: 'ontograph.dlQuery'`; (b) calling it a second time calls `panel.reveal()` not `createWebviewPanel()`; (c) `execute` message triggers `ReasonerBridge.dlQuery()` and posts `dlQueryResult` back; (d) `ready` message triggers `ontologyStatus` response; confirm all four fail
-- [ ] T010 [P] [US1] Write failing unit test in `webview-src/dl-query/DLQueryApp.test.ts` (or `src/views/` equivalent): DLQueryApp renders six checkboxes with correct default-checked state (Direct superclasses ✓, Superclasses ✗, Equivalent classes ✗, Direct subclasses ✓, Subclasses ✓, Instances ✗); confirm test fails
+- [X] T009 [P] [US1] Write failing tests in `src/views/DLQueryPanel.test.ts`: (a) `openDLQueryPanel()` creates a webview panel with `viewType: 'ontograph.dlQuery'`; (b) calling it a second time calls `panel.reveal()` not `createWebviewPanel()`; (c) `execute` message triggers `ReasonerBridge.dlQuery()` and posts `dlQueryResult` back; (d) `ready` message triggers `ontologyStatus` response; confirm all four fail
+- [X] T010 [P] [US1] Write failing unit test in `webview-src/dl-query/DLQueryApp.test.ts` (or `src/views/` equivalent): DLQueryApp renders six checkboxes with correct default-checked state (Direct superclasses ✓, Superclasses ✗, Equivalent classes ✗, Direct subclasses ✓, Subclasses ✓, Instances ✗); confirm test fails
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Create `src/views/DLQueryPanel.ts`: singleton `panel` variable; `openDLQueryPanel(context, bridge, activeModel, revealFn)` function; `buildHtml(webview, extensionUri)` with nonce/CSP pointing to `dist/dl-query-webview.js`; `handleMessage()` dispatcher for `ready`, `execute`, `navigate`; `retainContextWhenHidden: true`; wire T009 tests to green
-- [ ] T012 [US1] Create `src/commands/openDLQuery.ts`: thin command handler calling `openDLQueryPanel()` with the shared `activeModel` and `revealInTreeView` from `src/extension.ts`
-- [ ] T013 [US1] Register `ontograph.openDLQuery` command in `src/extension.ts` (follow `openSparqlEditor` pattern); add `contributes.commands` entry in `package.json` with title `"Open DL Query"` and category `"OntoGraph"`
-- [ ] T014 [US1] Create `webview-src/dl-query/DLQueryApp.ts`: acquire VS Code API; send `ready` on load; implement Protégé two-column layout (query textarea + Execute button top-left; results list bottom-left; Query for checkboxes + Result filters right); default-checked state per FR-005; execute button posts `execute` message with expression and checked queryTypes; result rendering: six labelled group sections, each a `<ul>` of entity items; display `dlQueryLoading` spinner; wire T010 test to green
+- [X] T011 [US1] Create `src/views/DLQueryPanel.ts`: singleton `panel` variable; `openDLQueryPanel(context, bridge, activeModel, revealFn)` function; `buildHtml(webview, extensionUri)` with nonce/CSP pointing to `dist/dl-query-webview.js`; `handleMessage()` dispatcher for `ready`, `execute`, `navigate`; `retainContextWhenHidden: true`; wire T009 tests to green
+- [X] T012 [US1] Create `src/commands/openDLQuery.ts`: thin command handler calling `openDLQueryPanel()` with the shared `activeModel` and `revealInTreeView` from `src/extension.ts`
+- [X] T013 [US1] Register `ontograph.openDLQuery` command in `src/extension.ts` (follow `openSparqlEditor` pattern); add `contributes.commands` entry in `package.json` with title `"Open DL Query"` and category `"OntoGraph"`
+- [X] T014 [US1] Create `webview-src/dl-query/DLQueryApp.ts`: acquire VS Code API; send `ready` on load; implement Protégé two-column layout (query textarea + Execute button top-left; results list bottom-left; Query for checkboxes + Result filters right); default-checked state per FR-005; execute button posts `execute` message with expression and checked queryTypes; result rendering: six labelled group sections, each a `<ul>` of entity items; display `dlQueryLoading` spinner; wire T010 test to green
 
 **Checkpoint**: User Story 1 is independently functional — panel opens, executes queries, displays grouped results.
 
@@ -83,12 +83,12 @@ default).
 
 > **Write these tests FIRST — confirm they FAIL before writing any implementation**
 
-- [ ] T015 [US4] Write failing tests in `src/views/DLQueryPanel.test.ts`: (a) `navigate` message with `entityType: 'class'` calls `revealFn(iri, 'class')`; (b) `navigate` with `entityType: 'individual'` calls `revealFn(iri, 'individual')`; confirm both fail
+- [X] T015 [US4] Write failing tests in `src/views/DLQueryPanel.test.ts`: (a) `navigate` message with `entityType: 'class'` calls `revealFn(iri, 'class')`; (b) `navigate` with `entityType: 'individual'` calls `revealFn(iri, 'individual')`; confirm both fail
 
 ### Implementation for User Story 4
 
-- [ ] T016 [US4] Add `navigate` case to `handleMessage()` in `src/views/DLQueryPanel.ts`: call `revealFn(msg.iri, msg.entityType)`; wire T015 tests to green
-- [ ] T017 [US4] Add click handler to each entity `<li>` in `webview-src/dl-query/DLQueryApp.ts`: on click, post `{ type: 'navigate', iri, entityType }` message; `entityType` is `'individual'` for entities from the `instances` group, `'class'` for all other groups
+- [X] T016 [US4] Add `navigate` case to `handleMessage()` in `src/views/DLQueryPanel.ts`: call `revealFn(msg.iri, msg.entityType)`; wire T015 tests to green
+- [X] T017 [US4] Add click handler to each entity `<li>` in `webview-src/dl-query/DLQueryApp.ts`: on click, post `{ type: 'navigate', iri, entityType }` message; `entityType` is `'individual'` for entities from the `instances` group, `'class'` for all other groups
 
 **Checkpoint**: User Stories 1 and 4 are both functional — Execute returns results and any result entity is clickable to navigate the sidebar.
 
@@ -105,11 +105,11 @@ list filters in real time without re-querying the reasoner.
 
 > **Write these tests FIRST — confirm they FAIL before writing any implementation**
 
-- [ ] T018 [US2] Write failing tests for name filter logic in `webview-src/dl-query/DLQueryApp.ts`: (a) typing a substring shows only matching entities (case-insensitive); (b) clearing the field restores all results; (c) a substring matching nothing shows empty-state message; confirm all three fail
+- [X] T018 [US2] Write failing tests for name filter logic in `webview-src/dl-query/DLQueryApp.ts`: (a) typing a substring shows only matching entities (case-insensitive); (b) clearing the field restores all results; (c) a substring matching nothing shows empty-state message; confirm all three fail
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] Implement "Name contains" client-side filter in `webview-src/dl-query/DLQueryApp.ts`: bind `input` event on the Name contains field; apply case-insensitive substring filter to `rawResults` labels and IRIs; re-render the results list; show "No results" empty-state when all groups are empty after filtering; wire T018 tests to green
+- [X] T019 [US2] Implement "Name contains" client-side filter in `webview-src/dl-query/DLQueryApp.ts`: bind `input` event on the Name contains field; apply case-insensitive substring filter to `rawResults` labels and IRIs; re-render the results list; show "No results" empty-state when all groups are empty after filtering; wire T018 tests to green
 
 **Checkpoint**: User Stories 1, 2, and 4 are all functional.
 
@@ -127,11 +127,11 @@ re-querying the reasoner.
 
 > **Write these tests FIRST — confirm they FAIL before writing any implementation**
 
-- [ ] T020 [US3] Write failing tests for owl:Thing / owl:Nothing toggle in `webview-src/dl-query/DLQueryApp.ts`: (a) unchecking "Display owl:Thing" removes `owl:Thing` IRI from all superclass group renders; (b) unchecking "Display owl:Nothing" removes `owl:Nothing` IRI from all subclass group renders; (c) rechecking restores them; confirm all three fail
+- [X] T020 [US3] Write failing tests for owl:Thing / owl:Nothing toggle in `webview-src/dl-query/DLQueryApp.ts`: (a) unchecking "Display owl:Thing" removes `owl:Thing` IRI from all superclass group renders; (b) unchecking "Display owl:Nothing" removes `owl:Nothing` IRI from all subclass group renders; (c) rechecking restores them; confirm all three fail
 
 ### Implementation for User Story 3
 
-- [ ] T021 [US3] Implement owl:Thing / owl:Nothing client-side filtering in `webview-src/dl-query/DLQueryApp.ts`: bind `change` events on the two filter checkboxes; apply filter to `rawResults` before rendering (remove `http://www.w3.org/2002/07/owl#Thing` from `directSuperClasses`/`superClasses`/`equivalentClasses` groups when unchecked; remove `http://www.w3.org/2002/07/owl#Nothing` from `directSubClasses`/`subClasses` groups when unchecked); compose with Name contains filter; wire T020 tests to green
+- [X] T021 [US3] Implement owl:Thing / owl:Nothing client-side filtering in `webview-src/dl-query/DLQueryApp.ts`: bind `change` events on the two filter checkboxes; apply filter to `rawResults` before rendering (remove `http://www.w3.org/2002/07/owl#Thing` from `directSuperClasses`/`superClasses`/`equivalentClasses` groups when unchecked; remove `http://www.w3.org/2002/07/owl#Nothing` from `directSubClasses`/`subClasses` groups when unchecked); compose with Name contains filter; wire T020 tests to green
 
 **Checkpoint**: All four user stories are independently functional.
 
@@ -141,11 +141,53 @@ re-querying the reasoner.
 
 **Purpose**: Error handling, empty states, ontology lifecycle, benchmark.
 
-- [ ] T022 [P] Add `ontologyStatus` message handler to `webview-src/dl-query/DLQueryApp.ts`: disable Execute button when `hasOntology: false`; enable when `hasOntology: true`; add corresponding message send in `src/views/DLQueryPanel.ts` on `ready` and on `activeModel` change (follow EntityEditorPanel pattern)
-- [ ] T023 [P] Add loading and error states to `webview-src/dl-query/DLQueryApp.ts`: show spinner/loading message on `dlQueryLoading`; show error message in results area on `dlQueryError`; clear error on next `dlQueryLoading`
-- [ ] T024 Add anatomy.owl benchmark test to `src/reasoner/ReasonerBridge.test.ts`: skip with `describe.skip` if `test-ontologies/anatomy.owl` absent; execute `dlQuery` for subclasses of a top-level class; assert wall-clock time < 3000 ms
-- [ ] T025 Run `npm test` and confirm all tests pass with coverage ≥ 80% for new TypeScript files; run `npm run compile` and `npm run compile:webview` and confirm zero type errors; run `npm run build` and confirm `dist/dl-query-webview.js` is produced
+- [X] T022 [P] Add `ontologyStatus` message handler to `webview-src/dl-query/DLQueryApp.ts`: disable Execute button when `hasOntology: false`; enable when `hasOntology: true`; add corresponding message send in `src/views/DLQueryPanel.ts` on `ready` and on `activeModel` change (follow EntityEditorPanel pattern)
+- [X] T023 [P] Add loading and error states to `webview-src/dl-query/DLQueryApp.ts`: show spinner/loading message on `dlQueryLoading`; show error message in results area on `dlQueryError`; clear error on next `dlQueryLoading`
+- [X] T024 Add anatomy.owl benchmark test to `src/parser/Phase3Reasoner.test.ts` (spawnSync pattern; SNOMED numeric IRIs require full `<IRI>` form in Manchester); conditional `test.skipIf(!existsSync(ANATOMY_PATH))`; assert < 30s (anatomy >>50k classes, outside SC-001 3s guarantee)
+- [X] T025 Run `npm test` and confirm all tests pass with coverage ≥ 80% for new TypeScript files; run `npm run compile` and `npm run compile:webview` and confirm zero type errors; run `npm run build` and confirm `dist/dl-query-webview.js` is produced
 - [ ] T026 Complete manual verification per `specs/005-dl-query-webview/quickstart.md` steps 1–9; confirm no "Add to ontology" button, default checkboxes, click-to-navigate, and error display all work as specified
+
+---
+
+## Phase 8: TypeScript Lifecycle Compliance (spec clarification 2026-05-15)
+
+**Purpose**: Bring `DLQueryPanel.ts` into spec compliance per FR-002/FR-016: TypeScript must own the TempClass lifecycle window, guarantee cleanup on error, and prevent concurrent Execute clicks. Tests are **mandatory** (Constitution Principle I).
+
+**Context**: The Java `dlQuery()` method remains correct and unchanged. All changes are TypeScript-only. Wire format is unchanged.
+
+### Tests for Lifecycle Compliance
+
+> **Write these tests FIRST — confirm they FAIL before writing any implementation**
+
+- [X] T027 Write four failing tests in `src/views/DLQueryPanel.test.ts`: (a) a second `execute` message arriving while the first is in flight calls `bridge.dlQuery()` exactly once (concurrent guard); (b) the `temporaryClassIris` set exported from `src/views/DLQueryPanel.ts` contains `'urn:ontograph:dlquery#TempQuery'` during the `bridge.dlQuery()` call; (c) `temporaryClassIris` is empty after `bridge.dlQuery()` resolves successfully; (d) `temporaryClassIris` is empty after `bridge.dlQuery()` rejects with an error (cleanup-on-error path) — confirm all four fail before T028
+
+### Implementation for Lifecycle Compliance
+
+- [X] T028 Implement TypeScript TempClass lifecycle management in `src/views/DLQueryPanel.ts`: add module-level `let executing = false` flag and `export const temporaryClassIris = new Set<string>()`; add constant `const TEMP_CLASS_IRI = 'urn:ontograph:dlquery#TempQuery'`; convert `runQuery()` to `async function runQuery(...)` using `try/finally` — add `TEMP_CLASS_IRI` to `temporaryClassIris` and set `executing = true` before `bridge.dlQuery()` call, remove from set and reset `executing` in the `finally` block; add guard at the top of the `execute` case in `handleMessage()` to `return` early if `executing` is true — wire T027 tests to green
+
+### Verification
+
+- [X] T029 Run `npm test` and confirm all tests pass with coverage ≥ 80%; run `npm run compile` and `npm run compile:webview` and confirm zero type errors; run `npm run build` and confirm `dist/dl-query-webview.js` is produced
+- [ ] T030 Complete T026 manual verification and add two additional checks: (a) rapid double-click on Execute fires only one query (concurrent guard visible in Java console); (b) in `anatomy.owl`, enter `'Body structure' and some 'Entire liver'` in the DL Query panel and confirm results appear (rdfs:label resolution end-to-end); update `specs/005-dl-query-webview/quickstart.md` to include these two steps
+
+---
+
+## Phase 9: TypeScript-Side Label Resolution
+
+**Purpose**: Resolve quoted and unquoted label names in Manchester class expressions to full IRIs
+before passing to the Java reasoner, so the Java Manchester parser never needs label lookup.
+
+### Tests
+
+- [X] T031 Write tests T031a–T031c in `src/views/DLQueryPanel.test.ts`: (a) unquoted label resolves to angle-bracket IRI passed to `bridge.dlQuery()`; (b) single-quoted label `'Body structure'` resolves to angle-bracket IRI; (c) unresolvable token is passed through unchanged — confirm tests pass
+
+### Implementation
+
+- [X] T031 (impl) In `src/views/DLQueryPanel.ts`: import `normalizeExpression` from `AxiomDisplay.ts`; create OntologyIndex from model if `currentIndex` is null; call `normalizeExpression(classExpression, model, index)` then `wrapIrisInAngleBrackets()` to wrap bare IRIs in `<>` before calling `bridge.dlQuery()` — wire T031 tests to green
+
+### Verification
+
+- [X] T031 (verify) Run `npm test` (153/153 pass) and `npm run compile` / `npm run compile:webview` (0 type errors)
 
 ---
 
@@ -160,6 +202,7 @@ re-querying the reasoner.
 - **Phase 5 (US2)**: Depends on Phase 3 (needs results to filter)
 - **Phase 6 (US3)**: Depends on Phase 3 (needs results to filter by entity type)
 - **Phase 7 (Polish)**: Depends on Phases 3–6
+- **Phase 8 (Lifecycle Compliance)**: Depends on Phase 7 — TypeScript-only; no wire-format or Java changes
 
 ### User Story Dependencies
 
@@ -232,6 +275,6 @@ Task: "Add types to OntologyModel.ts"               → T003
 - [P] tasks = different files or clearly non-overlapping concerns, safe to parallelize
 - Test tasks map to the same story as their implementation counterparts
 - The OntoGraph Constitution (Principle I) requires test tasks to be written and FAILING before any implementation task in the same story begins
-- Java changes require JAR rebuild: `cd java-server && mvn clean package && cp target/*.jar resources/java/onto-reasoner-server.jar`
+- Java changes require JAR rebuild: `cd java-server && mvn clean package`
 - The new webview follows the EntityEditorPanel.ts singleton pattern exactly — refer to it as a reference throughout
 - `revealInTreeView(iri, entityType)` already exists in `src/extension.ts` — pass it as `revealFn` to `openDLQueryPanel()`; do not duplicate it

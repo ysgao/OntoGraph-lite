@@ -3,6 +3,7 @@ import type { OntologyModel } from '../model/OntologyModel.js';
 import { getLabel } from '../model/OntologyModel.js';
 import { OntologyIndex } from '../model/OntologyIndex.js';
 import { ManchesterParser } from '../parser/ManchesterParser.js';
+import { normalizeExpression } from '../model/AxiomDisplay.js';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge.js';
 import type {
   DLQueryExtToWebview,
@@ -13,10 +14,16 @@ import type {
 import { DL_QUERY_TYPE_LABELS } from './DLQueryMessages.js';
 import type { DLQueryResult } from '../model/OntologyModel.js';
 
+const TEMP_CLASS_IRI = 'urn:ontograph:dlquery#TempQuery';
+
 let panel: vscode.WebviewPanel | undefined;
 let currentModel: OntologyModel | undefined;
 let currentIndex: OntologyIndex | undefined;
 let currentRevealFn: ((iri: string, entityType: 'class' | 'individual') => void) | undefined;
+
+let executing = false;
+/** IRIs of temporary classes added to the runtime model during DL query execution. */
+export const temporaryClassIris = new Set<string>();
 
 export function openDLQueryPanel(
   context: vscode.ExtensionContext,
@@ -83,8 +90,9 @@ function handleMessage(
       break;
 
     case 'execute':
+      if (executing) { break; }
       void p.webview.postMessage({ type: 'dlQueryLoading' } satisfies DLQueryExtToWebview);
-      runQuery(msg.classExpression, msg.queryTypes, bridge, p);
+      void runQuery(msg.classExpression, msg.queryTypes, bridge, p);
       break;
 
     case 'navigate':
@@ -137,31 +145,42 @@ function validateExpression(
   }
 }
 
-function runQuery(
+async function runQuery(
   classExpression: string,
   queryTypes: string[],
   bridge: ReasonerBridge,
   p: vscode.WebviewPanel,
-): void {
+): Promise<void> {
   const model = currentModel;
+  const index = currentIndex ?? (model ? new OntologyIndex(model) : null);
   const format = model?.sourceFormat ?? 'functional';
   const content = model?.rawContent ?? '';
 
-  bridge.dlQuery(format, content, null, classExpression, queryTypes, 'auto')
-    .then((result: DLQueryResult) => {
-      const groups = buildResultGroups(result, queryTypes, model);
-      void p.webview.postMessage({
-        type: 'dlQueryResult',
-        groups,
-      } satisfies DLQueryExtToWebview);
-    })
-    .catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      void p.webview.postMessage({
-        type: 'dlQueryError',
-        message,
-      } satisfies DLQueryExtToWebview);
-    });
+  // Resolve label names and quoted labels to angle-bracket IRI form so that
+  // Java's Manchester parser can handle them without an entity checker.
+  const resolvedExpression = (model && index)
+    ? wrapIrisInAngleBrackets(normalizeExpression(classExpression, model, index))
+    : classExpression;
+
+  executing = true;
+  temporaryClassIris.add(TEMP_CLASS_IRI);
+  try {
+    const result = await bridge.dlQuery(format, content, null, resolvedExpression, queryTypes, 'auto');
+    const groups = buildResultGroups(result, queryTypes, model);
+    void p.webview.postMessage({
+      type: 'dlQueryResult',
+      groups,
+    } satisfies DLQueryExtToWebview);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    void p.webview.postMessage({
+      type: 'dlQueryError',
+      message,
+    } satisfies DLQueryExtToWebview);
+  } finally {
+    temporaryClassIris.delete(TEMP_CLASS_IRI);
+    executing = false;
+  }
 }
 
 function buildResultGroups(
@@ -203,6 +222,11 @@ function localName(iri: string): string {
   if (hash >= 0) { return iri.slice(hash + 1); }
   const slash = iri.lastIndexOf('/');
   return slash >= 0 ? iri.slice(slash + 1) : iri;
+}
+
+/** Wrap bare full IRIs (output of normalizeExpression) in angle brackets for the Java Manchester parser. */
+function wrapIrisInAngleBrackets(expr: string): string {
+  return expr.replace(/https?:\/\/[^\s(),{}<>]+/g, u => `<${u}>`);
 }
 
 function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
