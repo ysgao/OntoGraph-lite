@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as vscode from 'vscode';
 import { syncAxiomsToDocument } from '../AxiomSync';
 import type { OWLClass } from '../../model/OntologyModel';
+import { temporaryClassIris } from '../../views/DLQueryState';
 
 const { mockReplace, mockInsert, mockDelete, mockApplyEdit } = vi.hoisted(() => ({
   mockReplace: vi.fn(),
@@ -559,5 +560,39 @@ describe('syncAxiomsTurtle — rdfs:comment abbreviated (T008)', () => {
     const replacedText: string = mockReplace.mock.calls[0][2];
     expect(replacedText).toContain('rdfs:comment');
     expect(replacedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
+  });
+});
+
+// ── T032: DL Query sync inhibition guard ──────────────────────────────────────
+
+const GUARD_CONTENT_AX = [
+  `Ontology(<http://example.org/ont>`,
+  `Declaration(Class(<${A}>))`,
+  `AnnotationAssertion(rdfs:label <${A}> "A")`,
+  `)`,
+].join('\n');
+
+describe('syncAxiomsToDocument — DL query sync inhibition guard', () => {
+  afterEach(() => { temporaryClassIris.clear(); });
+
+  it('T032a: returns null without calling applyEdit when entity IRI is in temporaryClassIris', async () => {
+    const doc = makeFunctionalDoc(GUARD_CONTENT_AX);
+    const entity = makeClass([B]);
+
+    temporaryClassIris.add(A);
+    const result = await syncAxiomsToDocument(doc, entity, 'functional');
+
+    expect(result).toBeNull();
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('T032b: proceeds normally when entity IRI is NOT in temporaryClassIris', async () => {
+    const doc = makeFunctionalDoc(GUARD_CONTENT_AX);
+    const entity = makeClass([B]);
+
+    const result = await syncAxiomsToDocument(doc, entity, 'functional');
+
+    expect(mockApplyEdit).toHaveBeenCalled();
+    expect(result).not.toBeNull();
   });
 });

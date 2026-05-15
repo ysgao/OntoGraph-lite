@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { OWLEntity } from '../model/OntologyModel';
 import { BUILTIN_ANNOTATION_PROP_IRIS } from '../model/OntologyModel';
+import { temporaryClassIris } from '../views/DLQueryState.js';
 
 const RDFS_PREFIX = 'http://www.w3.org/2000/01/rdf-schema#';
 const RDFS_ANN_TO_TOKEN = new Map<string, string>([
@@ -560,6 +561,7 @@ export async function syncAnnotationsToDocument(
   entity: OWLEntity,
   sourceFormat?: string,
 ): Promise<vscode.Range[] | null> {
+  if (temporaryClassIris.has(entity.iri)) { return null; }
   const fsPath = doc.uri.fsPath.toLowerCase();
   let result: SyncResult | null = null;
 

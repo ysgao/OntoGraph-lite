@@ -13,6 +13,9 @@ import type {
 } from './DLQueryMessages.js';
 import { DL_QUERY_TYPE_LABELS } from './DLQueryMessages.js';
 import type { DLQueryResult } from '../model/OntologyModel.js';
+import { temporaryClassIris } from './DLQueryState.js';
+
+export { temporaryClassIris };
 
 const TEMP_CLASS_IRI = 'urn:ontograph:dlquery#TempQuery';
 
@@ -22,8 +25,6 @@ let currentIndex: OntologyIndex | undefined;
 let currentRevealFn: ((iri: string, entityType: 'class' | 'individual') => void) | undefined;
 
 let executing = false;
-/** IRIs of temporary classes added to the runtime model during DL query execution. */
-export const temporaryClassIris = new Set<string>();
 
 export function openDLQueryPanel(
   context: vscode.ExtensionContext,

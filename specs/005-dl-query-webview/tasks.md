@@ -145,7 +145,7 @@ re-querying the reasoner.
 - [X] T023 [P] Add loading and error states to `webview-src/dl-query/DLQueryApp.ts`: show spinner/loading message on `dlQueryLoading`; show error message in results area on `dlQueryError`; clear error on next `dlQueryLoading`
 - [X] T024 Add anatomy.owl benchmark test to `src/parser/Phase3Reasoner.test.ts` (spawnSync pattern; SNOMED numeric IRIs require full `<IRI>` form in Manchester); conditional `test.skipIf(!existsSync(ANATOMY_PATH))`; assert < 30s (anatomy >>50k classes, outside SC-001 3s guarantee)
 - [X] T025 Run `npm test` and confirm all tests pass with coverage ≥ 80% for new TypeScript files; run `npm run compile` and `npm run compile:webview` and confirm zero type errors; run `npm run build` and confirm `dist/dl-query-webview.js` is produced
-- [ ] T026 Complete manual verification per `specs/005-dl-query-webview/quickstart.md` steps 1–9; confirm no "Add to ontology" button, default checkboxes, click-to-navigate, and error display all work as specified
+- [X] T026 Complete manual verification per `specs/005-dl-query-webview/quickstart.md` steps 1–9; confirm no "Add to ontology" button, default checkboxes, click-to-navigate, and error display all work as specified
 
 ---
 
@@ -168,7 +168,7 @@ re-querying the reasoner.
 ### Verification
 
 - [X] T029 Run `npm test` and confirm all tests pass with coverage ≥ 80%; run `npm run compile` and `npm run compile:webview` and confirm zero type errors; run `npm run build` and confirm `dist/dl-query-webview.js` is produced
-- [ ] T030 Complete T026 manual verification and add two additional checks: (a) rapid double-click on Execute fires only one query (concurrent guard visible in Java console); (b) in `anatomy.owl`, enter `'Body structure' and some 'Entire liver'` in the DL Query panel and confirm results appear (rdfs:label resolution end-to-end); update `specs/005-dl-query-webview/quickstart.md` to include these two steps
+- [X] T030 Complete T026 manual verification and add two additional checks: (a) rapid double-click on Execute fires only one query (concurrent guard visible in Java console); (b) in `anatomy.owl`, enter `'Body structure' and some 'Entire liver'` in the DL Query panel and confirm results appear (rdfs:label resolution end-to-end); update `specs/005-dl-query-webview/quickstart.md` to include these two steps
 
 ---
 
@@ -188,6 +188,24 @@ before passing to the Java reasoner, so the Java Manchester parser never needs l
 ### Verification
 
 - [X] T031 (verify) Run `npm test` (153/153 pass) and `npm run compile` / `npm run compile:webview` (0 type errors)
+
+---
+
+## Phase 10: Sync Inhibition Guard in AnnotationSync and AxiomSync
+
+**Purpose**: Add the `temporaryClassIris` guard to `syncAnnotationsToDocument()` and `syncAxiomsToDocument()` so that sync-to-disk is blocked for any entity whose IRI is in the in-flight DL query set, as required by FR-016.
+
+### Tests
+
+- [X] T032 Write failing tests T032a/T032b in `src/sync/__tests__/AnnotationSync.test.ts` and `src/sync/__tests__/AxiomSync.test.ts`: (a) when entity IRI is in `temporaryClassIris`, the sync function returns `null` without calling `applyEdit`; (b) when IRI is not in the set, sync proceeds normally — confirm T032a fails before implementation
+
+### Implementation
+
+- [X] T032 (impl) Create `src/views/DLQueryState.ts` (exports `temporaryClassIris` set); update `src/views/DLQueryPanel.ts` to import and re-export from `DLQueryState.ts`; add `if (temporaryClassIris.has(entity.iri)) { return null; }` guard at top of `syncAnnotationsToDocument()` in `AnnotationSync.ts` and `syncAxiomsToDocument()` in `AxiomSync.ts`
+
+### Verification
+
+- [X] T032 (verify) Run `npm test` (157/157 pass) and `npm run compile` / `npm run compile:webview` (0 type errors)
 
 ---
 

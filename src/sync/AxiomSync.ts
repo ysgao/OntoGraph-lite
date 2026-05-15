@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { generateEntityCluster } from '../serializer/FunctionalSerializer';
 import { manchesterToFunctional } from '../utils/ExpressionUtils';
+import { temporaryClassIris } from '../views/DLQueryState.js';
 import type {
   OWLEntity,
   OWLClass,
@@ -928,6 +929,7 @@ export async function syncAxiomsToDocument(
   entity: OWLEntity,
   sourceFormat?: string,
 ): Promise<vscode.Range[] | null> {
+  if (temporaryClassIris.has(entity.iri)) { return null; }
   const fsPath = doc.uri.fsPath.toLowerCase();
   const fmt = sourceFormat ?? extensionFormat(fsPath);
   let result: SyncResult | null = null;

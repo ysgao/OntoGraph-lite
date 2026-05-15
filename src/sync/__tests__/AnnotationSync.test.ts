@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as vscode from 'vscode';
 import { syncAnnotationsToDocument } from '../AnnotationSync';
 import type { OWLClass } from '../../model/OntologyModel';
+import { temporaryClassIris } from '../../views/DLQueryState';
 
 // vi.hoisted ensures these are available to the vi.mock factory (which is hoisted
 // before module-level variable declarations are evaluated).
@@ -741,5 +742,55 @@ describe('syncFunctional — multi-line annotation values', () => {
     const deletedRange = mockDelete.mock.calls[0][1];
     expect(deletedRange.start.line).toBe(2);
     expect(deletedRange.end.line).toBe(4); // rangeIncludingLineBreak.end for line 3 → line 4, char 0
+  });
+});
+
+// ── T032: DL Query sync inhibition guard ──────────────────────────────────────
+
+const GUARD_IRI = 'http://example.org#A';
+const GUARD_CONTENT = `Ontology(<http://example.org/ont>
+  Declaration(Class(<${GUARD_IRI}>))
+
+  # Class: <${GUARD_IRI}> (Original)
+  AnnotationAssertion(rdfs:label <${GUARD_IRI}> "Original")
+)`;
+
+function makeGuardEntity(label: string): OWLClass {
+  return {
+    iri: GUARD_IRI,
+    type: 'class',
+    labels: { '': [label] },
+    annotations: {},
+    superClassIris: [],
+    equivalentClassIris: [],
+    disjointClassIris: [],
+    superClassExpressions: [],
+    equivalentClassExpressions: [],
+    gciExpressions: [],
+  };
+}
+
+describe('syncAnnotationsToDocument — DL query sync inhibition guard', () => {
+  afterEach(() => { temporaryClassIris.clear(); });
+
+  it('T032a: returns null without calling applyEdit when entity IRI is in temporaryClassIris', async () => {
+    const doc = makeFunctionalDoc(GUARD_CONTENT);
+    const entity = makeGuardEntity('Updated');
+
+    temporaryClassIris.add(GUARD_IRI);
+    const result = await syncAnnotationsToDocument(doc, entity, 'functional');
+
+    expect(result).toBeNull();
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('T032b: proceeds normally when entity IRI is NOT in temporaryClassIris', async () => {
+    const doc = makeFunctionalDoc(GUARD_CONTENT);
+    const entity = makeGuardEntity('Updated');
+
+    const result = await syncAnnotationsToDocument(doc, entity, 'functional');
+
+    expect(mockApplyEdit).toHaveBeenCalled();
+    expect(result).not.toBeNull();
   });
 });

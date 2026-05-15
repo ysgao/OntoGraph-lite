@@ -7,7 +7,7 @@
 
 The DL Query webview is substantially complete (T001–T025 shipped). This plan documents the **revised architecture** required by the clarification session of 2026-05-15: moving TempQueryClass lifecycle ownership from the Java layer to the TypeScript runtime `OntologyModel`, and adding sync-inhibition and concurrent-Execute guards as mandated by FR-002 and FR-016.
 
-The Java `dlQuery()` method continues to own Manchester expression parsing (via `AnnotationValueShortFormProvider` + `BidirectionalShortFormProviderAdapter`) and the EquivalentClasses axiom construction. TypeScript owns: when TempClass is considered "in scope", when it is considered "cleaned up", sync inhibition during that window, and concurrent-Execute prevention.
+TypeScript owns: label name resolution (via `normalizeExpression()` + `wrapIrisInAngleBrackets()`), the TempClass lifecycle window (executing flag, `temporaryClassIris` set, try/finally cleanup), sync inhibition, and concurrent-Execute prevention. Java's `dlQuery()` owns: EquivalentClasses axiom construction and classification in a fresh isolated OWLOntologyManager; it receives a pre-resolved class expression with `<IRI>` tokens and handles them natively without `AnnotationValueShortFormProvider` (T031).
 
 No wire-format changes. No new Java behaviour. All changes are in TypeScript.
 
@@ -72,7 +72,7 @@ No changes needed to:
 
 **Architecture decision (Decision 8):** TypeScript maintains a module-level `executing` boolean flag and a `Set<string>` of temporary class IRIs. Before each `bridge.dlQuery()` call the IRI `'urn:ontograph:dlquery#TempQuery'` is added to the set and `executing` is set to `true`. A `try/finally` block guarantees removal from the set and reset of `executing` even when `bridge.dlQuery()` throws. The set can be checked by sync functions to guard against accidental disk writes (see Phase B).
 
-The Java `dlQuery()` method continues to receive `content + classExpression` (unchanged wire format). TypeScript does **not** construct the EquivalentClasses OWL axiom itself — the Manchester expression parsing with rdfs:label resolution (via `AnnotationValueShortFormProvider`) is too complex to duplicate in TypeScript without significant additional infrastructure. This split is intentional: TypeScript owns the lifecycle window; Java owns the expression semantics.
+The Java `dlQuery()` method receives `content + classExpression` where `classExpression` now contains full `<IRI>` tokens resolved by TypeScript via `normalizeExpression()` + `wrapIrisInAngleBrackets()` (T031). Java handles the EquivalentClasses axiom construction and classification in its fresh OWLOntologyManager; `<IRI>` tokens are supported natively by the Manchester parser without needing `AnnotationValueShortFormProvider`.
 
 **New logic in `handleMessage()` for `'execute'` in `DLQueryPanel.ts`:**
 
@@ -140,7 +140,7 @@ All four MUST fail before Phase A code is written.
 
 ### Phase E: Verification
 
-1. `npm test` — all 146+ tests pass, coverage ≥ 80%.
+1. `npm test` — all 153+ tests pass, coverage ≥ 80%.
 2. `npm run compile` + `npm run compile:webview` — zero type errors.
 3. `npm run build` — `dist/dl-query-webview.js` produced.
 4. Manual: T026 — complete quickstart steps 1–9; confirm that rapid double-clicking Execute sends only one request, that an invalid expression shows an error message and the panel recovers for the next Execute, and that `'Body structure' and 'All or part of' some 'Entire liver'` resolves correctly in `anatomy.owl`.
@@ -149,6 +149,6 @@ All four MUST fail before Phase A code is written.
 
 | Design Choice | Justification |
 |---|---|
-| TypeScript owns lifecycle window, Java owns expression parsing | Full Manchester expression parsing with rdfs:label resolution (AnnotationValueShortFormProvider) is not available in TypeScript without significant new infrastructure; delegating to Java keeps the implementation minimal (Constitution II). |
+| TypeScript resolves labels to `<IRI>`, Java handles axiom construction | `normalizeExpression()` + `wrapIrisInAngleBrackets()` (T031) converts label names to `<IRI>` form in TypeScript before the Java call. Java's Manchester parser handles `<IRI>` tokens natively; no `AnnotationValueShortFormProvider` needed. TypeScript owns the lifecycle window; Java owns EquivalentClasses axiom construction and classification. |
 | Module-level flag + Set rather than modifying OntologyModel | OntologyModel is a pure data structure; temporary query state does not belong in it. The panel's closure is the correct scope for ephemeral execution state (Constitution II). |
 | Sync guard is defensive (sync is manually triggered) | FR-016 requires correctness by construction, not just incidentally correct behaviour. The guard costs one `Set.has()` call per sync operation — negligible. |
