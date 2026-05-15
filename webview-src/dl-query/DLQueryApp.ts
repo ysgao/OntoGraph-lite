@@ -1,9 +1,30 @@
+import { EditorState } from '@codemirror/state';
+import {
+  EditorView,
+  keymap,
+  drawSelection,
+} from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import {
+  StreamLanguage,
+  syntaxHighlighting,
+  defaultHighlightStyle,
+} from '@codemirror/language';
+import {
+  autocompletion,
+  type CompletionContext,
+  type CompletionResult,
+} from '@codemirror/autocomplete';
+import { linter, type Diagnostic } from '@codemirror/lint';
+import type { StringStream } from '@codemirror/language';
 import type {
   DLQueryExtToWebview,
   DLQueryWebviewToExt,
   DLQueryType,
   ResultGroup,
   EntityRef,
+  CompletionItem,
+  ValidationError,
 } from '../../src/views/DLQueryMessages.js';
 import { DL_QUERY_TYPE_LABELS, DEFAULT_QUERY_TYPES } from '../../src/views/DLQueryMessages.js';
 import { filterGroups } from './DLQueryFilters.js';
@@ -30,20 +51,175 @@ let showOwlThing   = true;
 let showOwlNothing = true;
 let nameFilter     = '';
 
+let nextReqId = 0;
+const pendingCompletions = new Map<number, (items: CompletionItem[]) => void>();
+const pendingValidations = new Map<number, (errors: ValidationError[]) => void>();
+
+// ── Manchester syntax ─────────────────────────────────────────────────────────
+
+const MANCHESTER_KEYWORDS = new Set([
+  'some', 'all', 'value', 'min', 'max', 'exactly', 'only',
+  'and', 'or', 'not', 'that', 'Self',
+]);
+
+const manchesterLanguage = StreamLanguage.define({
+  token(stream: StringStream): string | null {
+    if (stream.eatSpace()) { return null; }
+    if (stream.match(/^#.*/)) { return 'comment'; }
+    if (stream.peek() === '<') {
+      stream.next();
+      while (!stream.eol() && stream.peek() !== '>') { stream.next(); }
+      if (stream.peek() === '>') { stream.next(); }
+      return 'string';
+    }
+    if (stream.peek() === '"') {
+      stream.next();
+      while (!stream.eol() && stream.peek() !== '"') {
+        if (stream.peek() === '\\') { stream.next(); }
+        stream.next();
+      }
+      if (stream.peek() === '"') { stream.next(); }
+      return 'string';
+    }
+    if (stream.peek() === "'") {
+      stream.next();
+      while (!stream.eol() && stream.peek() !== "'") {
+        if (stream.peek() === '\\') { stream.next(); }
+        stream.next();
+      }
+      if (stream.peek() === "'") { stream.next(); }
+      return 'variableName';
+    }
+    if (stream.match(/^\d+(\.\d+)?/)) { return 'number'; }
+    const word = stream.match(/^[A-Za-z_][\w-]*/);
+    const w = typeof word === 'object' ? (word as RegExpMatchArray)[0] : '';
+    if (MANCHESTER_KEYWORDS.has(w)) { return 'keyword'; }
+    if (stream.peek() === ':') {
+      stream.next();
+      stream.match(/^[\w-]*/);
+      return 'variableName';
+    }
+    return 'variableName';
+  },
+});
+
+// ── Autocompletion ────────────────────────────────────────────────────────────
+
+async function manchesterCompletionSource(context: CompletionContext): Promise<CompletionResult | null> {
+  const word = context.matchBefore(/'[^']*'?|[\w:_-]{2,}/);
+  if (!word) { return null; }
+
+  let prefix = word.text;
+  if (prefix.startsWith("'")) {
+    prefix = prefix.slice(1);
+    if (prefix.endsWith("'")) { prefix = prefix.slice(0, -1); }
+  }
+
+  const reqId = nextReqId++;
+  const items = await new Promise<CompletionItem[]>((resolve) => {
+    const timer = setTimeout(() => { pendingCompletions.delete(reqId); resolve([]); }, 400);
+    pendingCompletions.set(reqId, (result) => { clearTimeout(timer); resolve(result); });
+    vscode.postMessage({ type: 'requestCompletion', requestId: reqId, prefix });
+  });
+
+  if (items.length === 0) { return null; }
+
+  const userQuoted = word.text.startsWith("'");
+  return {
+    from: word.from,
+    validFor: /^'[^']*'?$|^[\w:_-]+$/,
+    options: items.map(item => {
+      const needsQuotes = userQuoted || /\s/.test(item.label);
+      const applyStr = needsQuotes ? `'${item.label}'` : item.label;
+      return { label: applyStr, displayLabel: item.label, info: item.iri };
+    }),
+  };
+}
+
+// ── Linting ───────────────────────────────────────────────────────────────────
+
+async function manchesterLinter(view: EditorView): Promise<Diagnostic[]> {
+  const text = view.state.doc.toString();
+  if (!text.trim()) { return []; }
+
+  const reqId = nextReqId++;
+  const errors = await new Promise<ValidationError[]>((resolve) => {
+    const timer = setTimeout(() => { pendingValidations.delete(reqId); resolve([]); }, 2000);
+    pendingValidations.set(reqId, (result) => { clearTimeout(timer); resolve(result); });
+    vscode.postMessage({ type: 'validate', requestId: reqId, text });
+  });
+
+  return errors.map(e => ({ from: e.from, to: e.to, severity: e.severity, message: e.message }));
+}
+
+// ── VS Code theme ─────────────────────────────────────────────────────────────
+
+const vsCodeTheme = EditorView.theme({
+  '&': {
+    color: 'var(--vscode-editor-foreground)',
+    backgroundColor: 'var(--vscode-input-background)',
+    fontFamily: 'var(--vscode-editor-font-family, var(--vscode-font-family))',
+    fontSize: 'var(--vscode-editor-font-size, var(--vscode-font-size))',
+  },
+  '.cm-content': {
+    caretColor: 'var(--vscode-editorCursor-foreground)',
+    padding: '4px 6px',
+    minHeight: '2em',
+  },
+  '.cm-cursor': { borderLeftColor: 'var(--vscode-editorCursor-foreground)' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+    backgroundColor: 'var(--vscode-editor-selectionBackground)',
+  },
+  '.cm-activeLine': { backgroundColor: 'transparent' },
+  '.cm-tooltip.cm-tooltip-autocomplete': {
+    background: 'var(--vscode-editorSuggestWidget-background)',
+    border: '1px solid var(--vscode-editorSuggestWidget-border)',
+    color: 'var(--vscode-editorSuggestWidget-foreground)',
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    background: 'var(--vscode-editorSuggestWidget-selectedBackground)',
+    color: 'var(--vscode-editorSuggestWidget-selectedForeground)',
+  },
+});
+
+// ── Editor creation ───────────────────────────────────────────────────────────
+
+function createExpressionEditor(parent: HTMLElement): EditorView {
+  return new EditorView({
+    state: EditorState.create({
+      doc: '',
+      extensions: [
+        manchesterLanguage,
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        history(),
+        drawSelection(),
+        EditorView.lineWrapping,
+        keymap.of([...defaultKeymap, ...historyKeymap]),
+        autocompletion({ override: [manchesterCompletionSource] }),
+        linter(manchesterLinter, { delay: 400 }),
+        vsCodeTheme,
+      ],
+    }),
+    parent,
+  });
+}
+
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
-const textarea      = document.getElementById('expression')      as HTMLTextAreaElement;
-const executeBtn    = document.getElementById('execute')         as HTMLButtonElement;
-const resultsList   = document.getElementById('results-list')    as HTMLDivElement;
-const nameFilterEl  = document.getElementById('name-filter')     as HTMLInputElement;
-const owlThingCb    = document.getElementById('show-owl-thing')  as HTMLInputElement;
-const owlNothingCb  = document.getElementById('show-owl-nothing')as HTMLInputElement;
+const editorContainer = document.getElementById('expression-editor') as HTMLDivElement;
+const executeBtn      = document.getElementById('execute')           as HTMLButtonElement;
+const resultsList     = document.getElementById('results-list')      as HTMLDivElement;
+const nameFilterEl    = document.getElementById('name-filter')       as HTMLInputElement;
+const owlThingCb      = document.getElementById('show-owl-thing')    as HTMLInputElement;
+const owlNothingCb    = document.getElementById('show-owl-nothing')  as HTMLInputElement;
 
 const checkboxes = new Map<DLQueryType, HTMLInputElement>();
 for (const qt of ALL_QUERY_TYPES) {
   const el = document.getElementById(`qt-${qt}`) as HTMLInputElement;
   if (el) { checkboxes.set(qt, el); }
 }
+
+const editor = createExpressionEditor(editorContainer);
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
@@ -113,7 +289,7 @@ function setExecuteEnabled(enabled: boolean): void {
 // ── Event handlers ─────────────────────────────────────────────────────────────
 
 executeBtn.addEventListener('click', () => {
-  const expression = textarea.value.trim();
+  const expression = editor.state.doc.toString().trim();
   if (!expression) {
     showError('Enter a class expression.');
     return;
@@ -165,6 +341,16 @@ window.addEventListener('message', (event: MessageEvent) => {
       rawGroups = [];
       showError(msg.message);
       break;
+    case 'completionResult': {
+      const cb = pendingCompletions.get(msg.requestId);
+      if (cb) { pendingCompletions.delete(msg.requestId); cb(msg.items); }
+      break;
+    }
+    case 'validationResult': {
+      const cb = pendingValidations.get(msg.requestId);
+      if (cb) { pendingValidations.delete(msg.requestId); cb(msg.errors); }
+      break;
+    }
   }
 });
 

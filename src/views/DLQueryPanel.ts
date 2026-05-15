@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type { OntologyModel } from '../model/OntologyModel.js';
 import { getLabel } from '../model/OntologyModel.js';
+import { OntologyIndex } from '../model/OntologyIndex.js';
+import { ManchesterParser } from '../parser/ManchesterParser.js';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge.js';
 import type {
   DLQueryExtToWebview,
@@ -13,15 +15,18 @@ import type { DLQueryResult } from '../model/OntologyModel.js';
 
 let panel: vscode.WebviewPanel | undefined;
 let currentModel: OntologyModel | undefined;
+let currentIndex: OntologyIndex | undefined;
 let currentRevealFn: ((iri: string, entityType: 'class' | 'individual') => void) | undefined;
 
 export function openDLQueryPanel(
   context: vscode.ExtensionContext,
   bridge: ReasonerBridge,
   model: OntologyModel | undefined,
+  index: OntologyIndex | undefined,
   revealFn: (iri: string, entityType: 'class' | 'individual') => void,
 ): void {
   currentModel = model;
+  currentIndex = index;
   currentRevealFn = revealFn;
 
   if (panel) {
@@ -54,8 +59,9 @@ export function openDLQueryPanel(
   );
 }
 
-export function updateDLQueryModel(model: OntologyModel | undefined): void {
+export function updateDLQueryModel(model: OntologyModel | undefined, index: OntologyIndex | undefined): void {
   currentModel = model;
+  currentIndex = index;
   if (!panel) { return; }
   void panel.webview.postMessage({
     type: 'ontologyStatus',
@@ -84,6 +90,50 @@ function handleMessage(
     case 'navigate':
       currentRevealFn?.(msg.iri, msg.entityType);
       break;
+
+    case 'requestCompletion': {
+      const idx = currentIndex ?? (currentModel ? new OntologyIndex(currentModel) : null);
+      if (!idx) {
+        void p.webview.postMessage({
+          type: 'completionResult',
+          requestId: msg.requestId,
+          items: [],
+        } satisfies DLQueryExtToWebview);
+        break;
+      }
+      const entities = idx.searchByLabel(msg.prefix, 50);
+      void p.webview.postMessage({
+        type: 'completionResult',
+        requestId: msg.requestId,
+        items: entities.map(e => ({ label: getLabel(e), iri: e.iri, entityType: e.type })),
+      } satisfies DLQueryExtToWebview);
+      break;
+    }
+
+    case 'validate': {
+      const errors = validateExpression(msg.text);
+      void p.webview.postMessage({
+        type: 'validationResult',
+        requestId: msg.requestId,
+        errors,
+      } satisfies DLQueryExtToWebview);
+      break;
+    }
+  }
+}
+
+function validateExpression(
+  text: string,
+): { from: number; to: number; severity: 'error' | 'warning'; message: string }[] {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.startsWith('#')) { return []; }
+  const wrapped = `Prefix: : <http://example.org/>\nClass: :_TmpClass\n  SubClassOf: ${trimmed}\n`;
+  try {
+    new ManchesterParser(wrapped, '').parse();
+    return [];
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return [{ from: 0, to: text.length, severity: 'error', message }];
   }
 }
 
@@ -202,18 +252,15 @@ function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
       border-bottom: 1px solid var(--vscode-panel-border, #444);
       flex-shrink: 0;
     }
-    #top-section label {
+    #top-section > label {
       display: block; font-weight: 600; margin-bottom: 4px;
       font-size: 0.85em; color: var(--vscode-descriptionForeground, #aaa);
     }
-    #expression {
-      width: 100%; height: 64px; resize: vertical;
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: var(--vscode-editor-font-size, 13px);
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
+    #expression-editor {
+      min-height: 48px;
       border: 1px solid var(--vscode-input-border, #555);
-      padding: 4px 6px; border-radius: 2px;
+      border-radius: 2px;
+      background: var(--vscode-input-background);
     }
     #execute {
       margin-top: 6px; padding: 4px 12px;
@@ -281,9 +328,8 @@ function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
 </head>
 <body>
   <div id="top-section">
-    <label for="expression">Query (class expression)</label>
-    <textarea id="expression" spellcheck="false" autocomplete="off"
-      placeholder="e.g. Animal and hasLegs some xsd:integer"></textarea>
+    <label for="expression-editor">Query (class expression)</label>
+    <div id="expression-editor"></div>
     <button id="execute" disabled>Execute</button>
   </div>
 

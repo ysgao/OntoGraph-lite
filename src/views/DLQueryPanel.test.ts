@@ -76,21 +76,21 @@ describe('DLQueryPanel', () => {
   });
 
   it('creates a webview panel with viewType ontograph.dlQuery', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     expect(mockCreateWebviewPanel).toHaveBeenCalledOnce();
     const [viewType] = mockCreateWebviewPanel.mock.calls[0] as unknown as [string, ...unknown[]];
     expect(viewType).toBe('ontograph.dlQuery');
   });
 
   it('reveals existing panel instead of creating a new one on second call', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     expect(mockCreateWebviewPanel).toHaveBeenCalledOnce();
     expect(mockReveal).toHaveBeenCalledOnce();
   });
 
   it('posts ontologyStatus hasOntology:true on ready when model is loaded', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     getMessageHandler()({ type: 'ready' });
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'ontologyStatus', hasOntology: true }),
@@ -98,7 +98,7 @@ describe('DLQueryPanel', () => {
   });
 
   it('posts ontologyStatus hasOntology:false on ready when model is undefined', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, undefined, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, undefined, undefined, fakeReveal);
     getMessageHandler()({ type: 'ready' });
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'ontologyStatus', hasOntology: false }),
@@ -110,7 +110,7 @@ describe('DLQueryPanel', () => {
       directSuperClasses: [], superClasses: [], equivalentClasses: [],
       directSubClasses: [], subClasses: [], instances: [],
     });
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     getMessageHandler()({ type: 'execute', classExpression: 'Dog', queryTypes: ['directSuperClasses'] });
     expect(mockPostMessage).toHaveBeenCalledWith({ type: 'dlQueryLoading' });
   });
@@ -120,7 +120,7 @@ describe('DLQueryPanel', () => {
       directSuperClasses: ['http://example.org/Animal'],
       superClasses: [], equivalentClasses: [], directSubClasses: [], subClasses: [], instances: [],
     });
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     getMessageHandler()({ type: 'execute', classExpression: 'Dog', queryTypes: ['directSuperClasses'] });
 
     await vi.waitUntil(() => mockPostMessage.mock.calls.some(
@@ -137,7 +137,7 @@ describe('DLQueryPanel', () => {
       directSuperClasses: ['http://example.org/Animal'],
       superClasses: [], equivalentClasses: [], directSubClasses: [], subClasses: [], instances: [],
     });
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     getMessageHandler()({ type: 'execute', classExpression: 'Dog', queryTypes: ['directSuperClasses'] });
 
     await vi.waitUntil(() => mockPostMessage.mock.calls.some(
@@ -153,7 +153,7 @@ describe('DLQueryPanel', () => {
 
   it('posts dlQueryError when bridge.dlQuery rejects', async () => {
     mockDlQuery.mockRejectedValueOnce(new Error('Parse error: unexpected token'));
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     getMessageHandler()({ type: 'execute', classExpression: 'BadExpr', queryTypes: ['subClasses'] });
 
     await vi.waitUntil(() => mockPostMessage.mock.calls.some(
@@ -167,32 +167,60 @@ describe('DLQueryPanel', () => {
   });
 
   it('calls revealFn with iri and entityType on navigate for a class', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     getMessageHandler()({ type: 'navigate', iri: 'http://example.org/Dog', entityType: 'class' });
     expect(fakeReveal).toHaveBeenCalledWith('http://example.org/Dog', 'class');
   });
 
   it('calls revealFn with individual entityType on navigate for an instance', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
     getMessageHandler()({ type: 'navigate', iri: 'http://example.org/fido', entityType: 'individual' });
     expect(fakeReveal).toHaveBeenCalledWith('http://example.org/fido', 'individual');
   });
 
   it('updateDLQueryModel posts ontologyStatus with hasOntology:false when model cleared', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, fakeReveal);
-    vi.clearAllMocks();
-    updateDLQueryModel(undefined);
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    mockPostMessage.mockClear();
+    updateDLQueryModel(undefined, undefined);
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'ontologyStatus', hasOntology: false }),
     );
   });
 
   it('updateDLQueryModel posts ontologyStatus with hasOntology:true when model set', () => {
-    openDLQueryPanel(fakeContext, fakeBridge, undefined, fakeReveal);
-    vi.clearAllMocks();
-    updateDLQueryModel(fakeModel);
+    openDLQueryPanel(fakeContext, fakeBridge, undefined, undefined, fakeReveal);
+    mockPostMessage.mockClear();
+    updateDLQueryModel(fakeModel, undefined);
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'ontologyStatus', hasOntology: true }),
     );
+  });
+
+  it('requestCompletion with no index returns empty completionResult', () => {
+    openDLQueryPanel(fakeContext, fakeBridge, undefined, undefined, fakeReveal);
+    getMessageHandler()({ type: 'requestCompletion', requestId: 42, prefix: 'dog' });
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'completionResult', requestId: 42, items: [] }),
+    );
+  });
+
+  it('validate returns empty validationResult for valid expression', () => {
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    getMessageHandler()({ type: 'validate', requestId: 7, text: 'owl:Thing' });
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'validationResult', requestId: 7 }),
+    );
+  });
+
+  it('validate posts validationResult with correct requestId', () => {
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    getMessageHandler()({ type: 'validate', requestId: 8, text: 'Dog and Cat' });
+    const call = mockPostMessage.mock.calls.find(
+      ([m]) => (m as { type: string }).type === 'validationResult',
+    );
+    expect(call).toBeDefined();
+    const msg = call![0] as { type: string; requestId: number; errors: unknown[] };
+    expect(msg.requestId).toBe(8);
+    expect(Array.isArray(msg.errors)).toBe(true);
   });
 });

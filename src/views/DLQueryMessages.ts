@@ -33,15 +33,32 @@ export interface ResultGroup {
   entities: EntityRef[];
 }
 
+export interface CompletionItem {
+  label: string;
+  iri: string;
+  entityType: string;
+}
+
+export interface ValidationError {
+  from: number;
+  to: number;
+  severity: 'error' | 'warning';
+  message: string;
+}
+
 // Extension → Webview
 export type DLQueryExtToWebview =
   | { type: 'dlQueryResult'; groups: ResultGroup[] }
   | { type: 'dlQueryError';  message: string }
   | { type: 'dlQueryLoading' }
-  | { type: 'ontologyStatus'; hasOntology: boolean };
+  | { type: 'ontologyStatus'; hasOntology: boolean }
+  | { type: 'completionResult'; requestId: number; items: CompletionItem[] }
+  | { type: 'validationResult'; requestId: number; errors: ValidationError[] };
 
 // Webview → Extension
 export type DLQueryWebviewToExt =
   | { type: 'execute'; classExpression: string; queryTypes: DLQueryType[] }
   | { type: 'navigate'; iri: string; entityType: 'class' | 'individual' }
+  | { type: 'requestCompletion'; requestId: number; prefix: string }
+  | { type: 'validate'; requestId: number; text: string }
   | { type: 'ready' };

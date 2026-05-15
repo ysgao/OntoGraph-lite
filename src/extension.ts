@@ -258,7 +258,7 @@ export function activate(context: vscode.ExtensionContext): void {
       openSparqlEditor(context, activeModel)),
 
     vscode.commands.registerCommand('ontograph.openDLQuery', () =>
-      openDLQuery(context, reasonerBridge, activeModel, revealInTreeView)),
+      openDLQuery(context, reasonerBridge, activeModel, activeIndex, revealInTreeView)),
 
     vscode.commands.registerCommand('ontograph.entityEditor', (item?: { iri?: string }) => {
       const iri = item?.iri;
@@ -356,7 +356,7 @@ export function activate(context: vscode.ExtensionContext): void {
       activeModel = model;
       refreshAllViews(model);
       refreshEntityEditorIfOpen(model);
-      updateDLQueryModel(model);
+      updateDLQueryModel(model, activeIndex);
 
       const { classes, objectProperties, dataProperties, individuals } = model;
       const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;
