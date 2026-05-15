@@ -1,3 +1,4 @@
+import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
 import { EditorState, StateField } from '@codemirror/state';
 import {
   Decoration,
@@ -126,7 +127,7 @@ const SKOS_PREF_LABEL = 'http://www.w3.org/2004/02/skos/core#prefLabel';
 const SKOS_ALT_LABEL  = 'http://www.w3.org/2004/02/skos/core#altLabel';
 const SKOS_DEFINITION = 'http://www.w3.org/2004/02/skos/core#definition';
 const PRIORITY_IRIS   = [RDFS_LABEL, SKOS_PREF_LABEL, SKOS_ALT_LABEL, SKOS_DEFINITION, RDFS_COMMENT];
-const DEFAULT_EN_IRIS = [RDFS_LABEL, SKOS_PREF_LABEL, SKOS_ALT_LABEL, RDFS_COMMENT];
+const DEFAULT_EN_IRIS = [RDFS_LABEL, SKOS_PREF_LABEL, SKOS_ALT_LABEL, SKOS_DEFINITION, RDFS_COMMENT];
 
 interface AnnotationEntry { propIri: string; value: string; lang?: string; }
 let annotationState: AnnotationEntry[] = [];
@@ -910,15 +911,11 @@ function renderAnnotationsSection(container: HTMLElement): void {
 
       // Col 3: editable value
       const tdValue = document.createElement('td');
-      const valueInput = document.createElement('input');
-      valueInput.type = 'text';
-      valueInput.className = 'annotation-value-input';
-      valueInput.value = entry.value;
-      valueInput.addEventListener('input', () => {
-        annotationState[i] = { ...annotationState[i], value: valueInput.value };
+      const valueWidget = createValueWidget(entry.propIri, entry.value, (v) => {
+        annotationState[i] = { ...annotationState[i], value: v };
         checkForChanges();
       });
-      tdValue.appendChild(valueInput);
+      tdValue.appendChild(valueWidget);
 
       // Col 4: delete button
       const tdDel = document.createElement('td');
@@ -956,10 +953,19 @@ function renderAnnotationsSection(container: HTMLElement): void {
       const w1 = document.createElement('div');
       w1.className = 'add-iri-input-wrapper';
 
-      const valueInput = document.createElement('input');
-      valueInput.type = 'text';
-      valueInput.className = 'iri-input';
-      valueInput.placeholder = 'Value…';
+      const initialInput = document.createElement('input');
+      initialInput.type = 'text';
+      initialInput.className = 'annotation-value-input';
+      initialInput.placeholder = 'Value…';
+      let valueWidget: HTMLInputElement | HTMLTextAreaElement = initialInput;
+
+      const attachKeydown = (el: HTMLInputElement | HTMLTextAreaElement): void => {
+        el.addEventListener('keydown', (ev) => {
+          const e = ev as KeyboardEvent;
+          if (e.key === 'Enter' && (el.tagName !== 'TEXTAREA' || e.ctrlKey)) { okBtn.click(); }
+          if (e.key === 'Escape') { cancelBtn.click(); }
+        });
+      };
 
       const langInput = document.createElement('input');
       langInput.type = 'text';
@@ -979,11 +985,17 @@ function renderAnnotationsSection(container: HTMLElement): void {
         if (DEFAULT_EN_IRIS.includes(iri) && !langInput.value.trim()) {
           langInput.value = 'en';
         }
-        requestAnimationFrame(() => valueInput.focus());
+        if (MULTILINE_IRIS.includes(iri) && valueWidget.tagName !== 'TEXTAREA') {
+          const newWidget = createValueWidget(iri, valueWidget.value, () => {});
+          attachKeydown(newWidget);
+          valueWidget.replaceWith(newWidget);
+          valueWidget = newWidget;
+        }
+        requestAnimationFrame(() => valueWidget.focus());
       }, () => { rerender(); }, 'annotationProperty');
 
       okBtn.addEventListener('click', () => {
-        const val = valueInput.value.trim();
+        const val = valueWidget.value.trim();
         // Allow raw IRI entry if autocomplete was not used
         if (!newPropIri) {
           const raw = propInput.value.trim();
@@ -996,13 +1008,10 @@ function renderAnnotationsSection(container: HTMLElement): void {
         rerender();
       });
       cancelBtn.addEventListener('click', () => { rerender(); });
-      valueInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter')  { okBtn.click(); }
-        if (e.key === 'Escape') { cancelBtn.click(); }
-      });
+      attachKeydown(initialInput);
 
       row.appendChild(w1);
-      row.appendChild(valueInput);
+      row.appendChild(valueWidget);
       row.appendChild(langInput);
       row.appendChild(okBtn);
       row.appendChild(cancelBtn);
@@ -1542,6 +1551,7 @@ function injectStyles(): void {
       font-family: inherit; font-size: inherit; width: 100%;
     }
     .annotation-value-input:focus { outline: none; border-color: var(--input-border); }
+    textarea.annotation-value-input { min-height: 4.5em; resize: vertical; }
     .lang-tag-input {
       background: var(--input-bg); color: var(--fg);
       border: 1px solid var(--input-border);

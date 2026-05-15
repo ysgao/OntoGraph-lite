@@ -19,7 +19,7 @@ function iri(s: string): string {
 }
 
 function literal(value: string, lang?: string, datatype?: string): string {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   if (lang) { return `"${escaped}"@${lang}`; }
   if (datatype) { return `"${escaped}"^^<${datatype}>`; }
   return `"${escaped}"`;

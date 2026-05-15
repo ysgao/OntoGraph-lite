@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createEmptyModel, OWLClass, OWLObjectProperty, OWLIndividual, OntologyModel } from '../model/OntologyModel';
 import { generateEntityCluster, serializeToFunctional } from './FunctionalSerializer';
+import { FunctionalParser } from '../parser/FunctionalParser';
 
 describe('FunctionalSerializer Clustering', () => {
   it('should generate a cluster for a class with annotations and axioms', () => {
@@ -123,6 +124,40 @@ describe('FunctionalSerializer Clustering', () => {
 
     const cluster = generateEntityCluster(ind, model);
     expect(cluster[1]).toContain('"Label with \\"quotes\\" and \\\\backslashes\\\\"@en');
+  });
+});
+
+describe('FunctionalSerializer newline round-trip', () => {
+  it('writes a real newline (not \\n escape) and round-trips through parse', () => {
+    const SKOS_DEFINITION = 'http://www.w3.org/2004/02/skos/core#definition';
+    const model = createEmptyModel('test.ofn');
+    model.metadata.iri = 'http://example.org/ont';
+    const cls: OWLClass = {
+      iri: 'http://example.org#A',
+      type: 'class',
+      labels: {},
+      annotations: { [SKOS_DEFINITION]: ['First line.\nSecond line.'] },
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+    model.classes.set(cls.iri, cls);
+
+    const ofn = serializeToFunctional(model);
+
+    // The OWL file must contain a real newline inside the string, not a \n escape.
+    expect(ofn).not.toContain('\\n');
+    expect(ofn).toMatch(/"First line\.\nSecond line\."/);
+
+    const parser = new FunctionalParser(ofn, 'test.ofn');
+    const parsed = parser.parse();
+    const parsedCls = parsed.classes.get('http://example.org#A');
+    expect(parsedCls).toBeDefined();
+    const recovered = parsedCls!.annotations[SKOS_DEFINITION]?.[0];
+    expect(recovered).toBe('First line.\nSecond line.');
   });
 });
 

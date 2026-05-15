@@ -677,3 +677,69 @@ describe('syncTurtle — annotation idempotency (T007)', () => {
     expect(mockApplyEdit).toHaveBeenCalledOnce();
   });
 });
+
+// ── Multi-line annotation value (real newlines, no \n escape) ─────────────────
+
+describe('syncFunctional — multi-line annotation values', () => {
+  it('is idempotent when a multi-line annotation already matches the model', async () => {
+    const multiLineValue = 'First line.\nSecond line.';
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  AnnotationAssertion(<${DEF}> <${CAT}> "First line.`,
+      `Second line.")`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({}, { [DEF]: [multiLineValue] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).not.toHaveBeenCalled();
+  });
+
+  it('inserts a multi-line annotation value with real newlines (no \\n escape)', async () => {
+    const multiLineValue = 'First line.\nSecond line.';
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      ')',
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({}, { [DEF]: [multiLineValue] }),
+      'functional',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    const insertedText: string = mockInsert.mock.calls[0][2];
+    expect(insertedText).not.toContain('\\n');
+    expect(insertedText).toContain('First line.\nSecond line.');
+  });
+
+  it('deletes a multi-line annotation that spans two physical lines', async () => {
+    // The annotation "First line.\nSecond line." occupies lines 2 and 3 (0-indexed).
+    const content = [
+      'Ontology(<http://example.org/ont>',   // 0
+      `  Declaration(Class(<${CAT}>))`,       // 1
+      `  AnnotationAssertion(<${DEF}> <${CAT}> "First line.`,  // 2
+      `Second line.")`,                        // 3
+      ')',                                     // 4
+    ].join('\n');
+
+    await syncAnnotationsToDocument(
+      makeFunctionalDoc(content),
+      makeClass({}, {}),
+      'functional',
+    );
+
+    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    // The delete call must cover lines 2 through 3 (start of line 2 to end of line 3).
+    const deletedRange = mockDelete.mock.calls[0][1];
+    expect(deletedRange.start.line).toBe(2);
+    expect(deletedRange.end.line).toBe(4); // rangeIncludingLineBreak.end for line 3 → line 4, char 0
+  });
+});

@@ -16,9 +16,17 @@ const RDFS_TOKEN_TO_IRI = new Map<string, string>(
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
 function fmtLiteral(value: string, lang?: string): string {
-  const esc = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  const esc = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return lang ? `"${esc}"@${lang}` : `"${esc}"`;
+}
+
+function hasUnclosedString(s: string): boolean {
+  let open = false;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\\') { i++; continue; }
+    if (s[i] === '"') { open = !open; }
+  }
+  return open;
 }
 
 function parsePrefixes(text: string, fmt: 'functional' | 'manchester' | 'turtle'): Map<string, string> {
@@ -163,11 +171,21 @@ function syncFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult
   const lines = text.split('\n');
   const prefixes = parsePrefixes(text, 'functional');
 
-  // Build file's current annotation set in document order (preserving positions)
-  const fileItems: Array<{ key: string; lineIdx: number }> = [];
-  for (let i = 0; i < lines.length; i++) {
-    const parsed = parseFunctionalAnnotationItem(lines[i], entity, prefixes);
-    if (parsed) fileItems.push({ key: parsed.key, lineIdx: i });
+  // Build file's current annotation set in document order (preserving positions).
+  // Annotations whose values contain real newlines span multiple physical lines;
+  // join continuation lines before parsing.
+  const fileItems: Array<{ key: string; lineIdx: number; lineCount: number }> = [];
+  let i = 0;
+  while (i < lines.length) {
+    let combined = lines[i];
+    let lineCount = 1;
+    while (hasUnclosedString(combined) && i + lineCount < lines.length) {
+      combined += '\n' + lines[i + lineCount];
+      lineCount++;
+    }
+    const parsed = parseFunctionalAnnotationItem(combined, entity, prefixes);
+    if (parsed) fileItems.push({ key: parsed.key, lineIdx: i, lineCount });
+    i += lineCount;
   }
   const fileKeySet = new Set(fileItems.map(f => f.key));
 
@@ -194,7 +212,8 @@ function syncFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult
   // If there are none, fall back to cluster header or closing paren.
   let insertAt: number;
   if (fileItems.length > 0) {
-    insertAt = fileItems[fileItems.length - 1].lineIdx + 1;
+    const last = fileItems[fileItems.length - 1];
+    insertAt = last.lineIdx + last.lineCount;
   } else {
     const entityToken = `<${entity.iri}>`;
     const typeLabel = entity.type.charAt(0).toUpperCase() + entity.type.slice(1);
@@ -215,19 +234,28 @@ function syncFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult
 
   const edit = new vscode.WorkspaceEdit();
 
-  // Delete removed lines (reverse order preserves original line indices)
+  // Delete removed annotations (reverse order preserves original line indices).
+  // Multi-line annotations span lineCount physical lines.
   for (const item of [...toRemove].sort((a, b) => b.lineIdx - a.lineIdx)) {
-    edit.delete(doc.uri, doc.lineAt(item.lineIdx).rangeIncludingLineBreak);
+    edit.delete(doc.uri, new vscode.Range(
+      item.lineIdx, 0,
+      item.lineIdx + item.lineCount, 0,
+    ));
   }
 
-  // Insert new annotations after the last existing annotation
+  // Insert new annotations after the last existing annotation.
+  // Each m.line may contain real newlines if the annotation value is multi-line.
   if (toAdd.length > 0) {
     edit.insert(doc.uri, new vscode.Position(insertAt, 0), toAdd.map(m => m.line).join('\n') + '\n');
   }
 
-  const addedRanges = toAdd.map((m, i) =>
-    new vscode.Range(insertAt + i, 0, insertAt + i, m.line.length)
-  );
+  let currentLine = insertAt;
+  const addedRanges: vscode.Range[] = [];
+  for (const m of toAdd) {
+    const mLines = m.line.split('\n');
+    addedRanges.push(new vscode.Range(currentLine, 0, currentLine + mLines.length - 1, mLines[mLines.length - 1].length));
+    currentLine += mLines.length;
+  }
   return { edit, addedRanges };
 }
 
@@ -280,26 +308,41 @@ function syncManchester(doc: vscode.TextDocument, entity: OWLEntity): SyncResult
   const frame = findManchesterEntityFrame(lines, entity.iri, prefixes);
   if (!frame) { return null; }
 
-  // Find existing Annotations: section within frame
+  // Find existing Annotations: section within frame.
+  // annotEnd is determined by the SECTION_KW_RE check on lines that are NOT inside
+  // a multi-line string, so we scan carefully.
   let annotStart = -1;
   let annotEnd = frame.end;
   for (let i = frame.start + 1; i < frame.end; i++) {
     if (/^\s+Annotations\s*:/.test(lines[i])) {
       annotStart = i;
       annotEnd = i + 1;
-      while (annotEnd < frame.end && !SECTION_KW_RE.test(lines[annotEnd])) { annotEnd++; }
+      while (annotEnd < frame.end) {
+        // Do not let a section keyword inside a multi-line string end the block.
+        if (!hasUnclosedString(lines.slice(annotStart + 1, annotEnd).join('\n')) &&
+            SECTION_KW_RE.test(lines[annotEnd])) { break; }
+        annotEnd++;
+      }
       break;
     }
   }
 
-  // Parse existing annotation items in file order; strip trailing commas for clean rebuild.
+  // Parse existing annotation items; join continuation lines for multi-line values.
   const fileItems: Array<{ key: string; lineText: string }> = [];
   if (annotStart >= 0) {
-    for (let i = annotStart + 1; i < annotEnd; i++) {
-      const parsed = parseManchesterAnnotationLine(lines[i], prefixes);
-      if (parsed) {
-        fileItems.push({ key: parsed.key, lineText: lines[i].replace(/,\s*$/, '') });
+    let i = annotStart + 1;
+    while (i < annotEnd) {
+      let combined = lines[i].replace(/,\s*$/, '');
+      let lineCount = 1;
+      while (hasUnclosedString(combined) && i + lineCount < annotEnd) {
+        combined += '\n' + lines[i + lineCount].replace(/,\s*$/, '');
+        lineCount++;
       }
+      const parsed = parseManchesterAnnotationLine(combined, prefixes);
+      if (parsed) {
+        fileItems.push({ key: parsed.key, lineText: combined });
+      }
+      i += lineCount;
     }
   }
   const fileKeySet = new Set(fileItems.map(f => f.key));
