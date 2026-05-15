@@ -65,7 +65,7 @@ Within each class cluster: annotations first (labels, then other), then `Equival
 - For `.ofn`/`.omn`: annotation and axiom sync are separate operations.
 - For `.ttl`: `AxiomSync` handles both structural and annotation segments in a **single atomic edit** to avoid VS Code document-version conflicts from two concurrent `applyEdit` calls.
 
-**IRI abbreviation rule:** Only `rdfs:label` is written as `rdfs:label`. All other IRIs — including entity IRIs, annotation property IRIs, and class expression IRIs — use the full `<IRI>` bracket form. This matches Protégé output.
+**IRI abbreviation rule:** The four RDFS built-in annotation property IRIs are written as abbreviated tokens: `rdfs:label`, `rdfs:comment`, `rdfs:seeAlso`, `rdfs:isDefinedBy`. All other IRIs — including entity IRIs, other annotation property IRIs, and class expression IRIs — use the full `<IRI>` bracket form. This matches Protégé output.
 
 **6. Commands Layer** (`src/commands/`)
 One file per VS Code command: `classifyOntology`, `checkConsistency`, `exportOntology`, `addEntity`, `openVisualization`, `openSparqlEditor`. Commands read the shared `activeModel`/`activeIndex` from `extension.ts`.
@@ -163,9 +163,7 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-core.ofn` — large (~1.3 MB) BFO ontology for performance testing
 
 ## Recent Changes
-- 001-fix-sync-data-loss: Added TypeScript 5+, Node.js (extension host) + VS Code Extension API (`vscode.WorkspaceEdit`, `vscode.TextDocument`), Vites
-- 001-fix-sync-data-loss: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+- 002-abbreviate-rdfs-iris: Extended IRI abbreviation rule to all 4 RDFS annotation properties (rdfs:label, rdfs:comment, rdfs:seeAlso, rdfs:isDefinedBy) in sync layer and serializer
+- 001-fix-sync-data-loss: Diff-based sync for all formats — idempotency and minimal diff
 
 ## Active Technologies
-- TypeScript 5+, Node.js (extension host) + VS Code Extension API (`vscode.WorkspaceEdit`, `vscode.TextDocument`), Vites (001-fix-sync-data-loss)
-- OWL files on disk (`.ofn`, `.omn`, `.ttl`) — read via `vscode.TextDocument`, written via `vscode.workspace.applyEdit` (001-fix-sync-data-loss)
