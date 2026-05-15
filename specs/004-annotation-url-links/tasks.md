@@ -94,7 +94,7 @@ No new infrastructure required. `jsdom` is already installed. No new runtime dep
 
 - [x] T014 Run `npm run build` and confirm the bundle builds without errors (all 6 bundles, especially `entity-editor-webview.js`)
 
-- [ ] T015 Manual verification in VS Code per all 7 scenarios in `specs/004-annotation-url-links/quickstart.md`
+- [x] T015 c3acd67 Manual verification in VS Code per all 7 scenarios in `specs/004-annotation-url-links/quickstart.md`
 
 ---
 
