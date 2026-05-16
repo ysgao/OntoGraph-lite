@@ -480,9 +480,12 @@ function makeChip(label: string, iri: string, onRemove: () => void): HTMLElement
 function renderIriListSection(container: HTMLElement, title: string, key: string): void {
   const sec = makeSectionEl(title);
   const body = sec.querySelector('.section-body') as HTMLElement;
+  const actions = sec.querySelector('.section-actions') as HTMLElement;
 
   function rerender(): void {
     body.innerHTML = '';
+    actions.innerHTML = '';
+
     const chips = document.createElement('div');
     chips.className = 'chip-list';
 
@@ -495,18 +498,17 @@ function renderIriListSection(container: HTMLElement, title: string, key: string
       }));
     }
 
-    // Add button
-    const addContainer = document.createElement('div');
-    addContainer.className = 'add-iri-container';
+    // Add button in header
     const addBtn = document.createElement('button');
-    addBtn.className = 'add-btn';
-    addBtn.textContent = '+ Add';
+    addBtn.className = 'header-action-btn';
+    addBtn.innerHTML = '<span>+</span>';
+    addBtn.title = 'Add';
     addBtn.addEventListener('click', () => {
       addBtn.style.display = 'none';
       const inputWrapper = document.createElement('div');
       inputWrapper.className = 'add-iri-input-wrapper';
-      addContainer.appendChild(inputWrapper);
-      const inp = createIriInput(inputWrapper, 'Search for entity…', (iri, label) => {
+      chips.appendChild(inputWrapper);
+      const inp = createIriInput(inputWrapper, 'Search...', (iri, label) => {
         if (iri && !(iriListState[key] ?? []).includes(iri)) {
           localIriLabels[iri] = label;
           iriListState[key] = [...(iriListState[key] ?? []), iri];
@@ -516,9 +518,8 @@ function renderIriListSection(container: HTMLElement, title: string, key: string
       requestAnimationFrame(() => inp.focus());
     });
 
-    addContainer.appendChild(addBtn);
+    actions.appendChild(addBtn);
     body.appendChild(chips);
-    body.appendChild(addContainer);
     checkForChanges();
   }
 
@@ -561,10 +562,11 @@ function renderPropertyChainSection(container: HTMLElement): void {
       }
 
       const addMemberContainer = document.createElement('div');
-      addMemberContainer.className = 'add-iri-container';
+      addMemberContainer.className = 'add-item-footer';
       const addMemberBtn = document.createElement('button');
-      addMemberBtn.className = 'add-btn';
-      addMemberBtn.textContent = '+';
+      addMemberBtn.className = 'add-btn ghost-btn';
+      addMemberBtn.innerHTML = '<span>+</span>';
+      addMemberBtn.title = 'Add member to chain';
       addMemberBtn.addEventListener('click', () => {
         addMemberBtn.style.display = 'none';
         const inputWrapper = document.createElement('div');
@@ -581,7 +583,7 @@ function renderPropertyChainSection(container: HTMLElement): void {
       const removeBtn = document.createElement('button');
       removeBtn.className = 'remove-btn';
       removeBtn.title = 'Remove chain';
-      removeBtn.textContent = '×';
+      removeBtn.innerHTML = '×';
       removeBtn.addEventListener('click', () => { propertyChainState.splice(i, 1); rerender(); });
 
       row.appendChild(membersEl);
@@ -591,10 +593,10 @@ function renderPropertyChainSection(container: HTMLElement): void {
     }
 
     const addChainContainer = document.createElement('div');
-    addChainContainer.className = 'add-iri-container';
+    addChainContainer.className = 'add-item-footer';
     const addChainBtn = document.createElement('button');
-    addChainBtn.className = 'add-btn';
-    addChainBtn.textContent = '+ Add Chain';
+    addChainBtn.className = 'add-btn ghost-btn';
+    addChainBtn.innerHTML = '<span>+</span> Add Chain';
     addChainBtn.addEventListener('click', () => { propertyChainState.push([]); rerender(); });
     addChainContainer.appendChild(addChainBtn);
     body.appendChild(addChainContainer);
@@ -665,20 +667,6 @@ function createExpressionEntry(
   });
 }
 
-function addExpressionButton(body: HTMLElement, key: string): void {
-  const footer = document.createElement('div');
-  footer.className = 'expression-section-footer';
-  const btn = document.createElement('button');
-  btn.className = 'expression-add-btn';
-  btn.textContent = '+ Add expression';
-  btn.addEventListener('click', () => {
-    createExpressionEntry(body, key, '', []);
-    editorMap[key][editorMap[key].length - 1].focus();
-  });
-  footer.appendChild(btn);
-  body.appendChild(footer);
-}
-
 function renderExpressionSection(
   container: HTMLElement,
   title: string,
@@ -691,12 +679,26 @@ function renderExpressionSection(
 
   const sec = makeSectionEl(title);
   const body = sec.querySelector('.section-body') as HTMLElement;
-  container.appendChild(sec);
+  const actions = sec.querySelector('.section-actions') as HTMLElement;
 
   for (let i = 0; i < expressions.length; i++) {
     createExpressionEntry(body, key, expressions[i], perExprRefs[i] ?? []);
   }
-  addExpressionButton(body, key);
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'header-action-btn';
+  addBtn.innerHTML = '<span>+</span>';
+  addBtn.title = 'Add expression';
+  addBtn.addEventListener('click', () => {
+    createExpressionEntry(body, key, '', []);
+    const editors = editorMap[key];
+    if (editors && editors.length > 0) {
+      editors[editors.length - 1].focus();
+    }
+  });
+  actions.appendChild(addBtn);
+
+  container.appendChild(sec);
 }
 
 // ── Checkbox section ──────────────────────────────────────────────────────────
@@ -805,14 +807,13 @@ function renderObjAssertionSection(container: HTMLElement): void {
 
     // Add row
     const addDiv = document.createElement('div');
-    addDiv.className = 'add-assertion-row';
+    addDiv.className = 'add-item-footer';
     const addBtn = document.createElement('button');
-    addBtn.className = 'add-btn';
-    addBtn.textContent = '+ Add assertion';
+    addBtn.className = 'add-btn ghost-btn';
+    addBtn.innerHTML = '<span>+</span> Add assertion';
     addBtn.addEventListener('click', () => {
       addBtn.style.display = 'none';
       let newPropIri = '';
-      let newPropLabel = '';
 
       const row = document.createElement('div');
       row.className = 'new-assertion-inputs';
@@ -826,7 +827,6 @@ function renderObjAssertionSection(container: HTMLElement): void {
 
       const inp1 = createIriInput(w1, 'Property…', (iri, lbl) => {
         newPropIri = iri;
-        newPropLabel = lbl;
         localIriLabels[iri] = lbl;
 
         // Display selected property as a chip
@@ -845,7 +845,6 @@ function renderObjAssertionSection(container: HTMLElement): void {
         if (newPropIri) {
           localIriLabels[iri] = lbl;
           objAssertionState.push({ propertyIri: newPropIri, targetIri: iri });
-          void newPropLabel;
         }
         rerender();
       }, () => { rerender(); });
@@ -897,7 +896,7 @@ function renderDataAssertionSection(container: HTMLElement): void {
       valEl.textContent = a.value + (a.datatype ? ` ^^${a.datatype}` : '');
       const removeBtn = document.createElement('button');
       removeBtn.className = 'chip-remove inline-remove';
-      removeBtn.textContent = '×';
+      removeBtn.innerHTML = '×';
       removeBtn.addEventListener('click', () => {
         dataAssertionState.splice(i, 1);
         rerender();
@@ -913,10 +912,10 @@ function renderDataAssertionSection(container: HTMLElement): void {
     body.appendChild(table);
 
     const addDiv = document.createElement('div');
-    addDiv.className = 'add-assertion-row';
+    addDiv.className = 'add-item-footer';
     const addBtn = document.createElement('button');
-    addBtn.className = 'add-btn';
-    addBtn.textContent = '+ Add assertion';
+    addBtn.className = 'add-btn ghost-btn';
+    addBtn.innerHTML = '<span>+</span> Add assertion';
     addBtn.addEventListener('click', () => {
       addBtn.style.display = 'none';
       let newPropIri = '';
@@ -1007,7 +1006,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
       tdProp.title = entry.propIri;
       tdProp.textContent = localNameFromIri(entry.propIri);
 
-      // Col 2: lang tag (for specific properties or entries that already carry one)
+      // Col 2: lang tag
       const tdLang = document.createElement('td');
       tdLang.className = 'lang-tag-cell';
       if (DEFAULT_EN_IRIS.includes(entry.propIri) || entry.lang !== undefined) {
@@ -1015,7 +1014,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
         langInput.type = 'text';
         langInput.className = 'lang-tag-input';
         langInput.value = entry.lang ?? '';
-        langInput.placeholder = 'lang';
+        langInput.placeholder = 'EN';
         langInput.title = 'Language tag';
         langInput.addEventListener('input', () => {
           annotationState[i] = { ...annotationState[i], lang: langInput.value.trim() || undefined };
@@ -1067,7 +1066,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
       const tdDel = document.createElement('td');
       const delBtn = document.createElement('button');
       delBtn.className = 'chip-remove inline-remove';
-      delBtn.textContent = '×';
+      delBtn.innerHTML = '×';
       delBtn.title = 'Delete';
       delBtn.addEventListener('click', () => {
         annotationState.splice(i, 1);
@@ -1085,10 +1084,10 @@ function renderAnnotationsSection(container: HTMLElement): void {
 
     // Add annotation row
     const addDiv = document.createElement('div');
-    addDiv.className = 'add-assertion-row';
+    addDiv.className = 'add-item-footer';
     const addBtn = document.createElement('button');
-    addBtn.className = 'add-btn';
-    addBtn.textContent = '+ Add annotation';
+    addBtn.className = 'add-btn ghost-btn';
+    addBtn.innerHTML = '<span>+</span> Add annotation';
     addBtn.addEventListener('click', () => {
       addBtn.style.display = 'none';
       let newPropIri = '';
@@ -1116,7 +1115,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
       const langInput = document.createElement('input');
       langInput.type = 'text';
       langInput.className = 'lang-tag-input';
-      langInput.placeholder = 'lang';
+      langInput.placeholder = 'EN';
       langInput.title = 'Language tag (optional)';
 
       const okBtn = document.createElement('button');
@@ -1192,7 +1191,17 @@ function makeSectionEl(title: string): HTMLElement {
   const sec = document.createElement('div');
   sec.className = 'section';
   const h = document.createElement('h2');
-  h.textContent = title;
+  h.className = 'section-header';
+  
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'section-title';
+  titleSpan.textContent = title;
+  h.appendChild(titleSpan);
+
+  const actions = document.createElement('div');
+  actions.className = 'section-actions';
+  h.appendChild(actions);
+
   const body = document.createElement('div');
   body.className = 'section-body';
   sec.appendChild(h);
@@ -1539,209 +1548,275 @@ function injectStyles(): void {
       --bg:      var(--vscode-editor-background, #1e1e1e);
       --fg:      var(--vscode-editor-foreground, #d4d4d4);
       --link:    var(--vscode-textLink-foreground, #4fc1ff);
-      --border:  var(--vscode-panel-border, #444);
-      --code-bg: var(--vscode-textCodeBlock-background, #2d2d2d);
+      --border:  var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+      --code-bg: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
       --h2-fg:   var(--vscode-sideBarSectionHeader-foreground, #bbb);
-      --badge-bg:var(--vscode-badge-background, #4d4d4d);
+      --badge-bg:var(--vscode-badge-background, rgba(128, 128, 128, 0.15));
       --badge-fg:var(--vscode-badge-foreground, #fff);
       --btn-bg:  var(--vscode-button-background, #0e639c);
       --btn-fg:  var(--vscode-button-foreground, #fff);
       --input-bg:var(--vscode-input-background, #3c3c3c);
       --input-border:var(--vscode-input-border, #555);
+      --surface: var(--vscode-editor-background);
+      --row-hover: rgba(128, 128, 128, 0.08);
+      --accent:  var(--vscode-button-background);
+      
+      --spacing-xs: 4px;
+      --spacing-sm: 8px;
+      --spacing-md: 16px;
+      --spacing-lg: 24px;
+      
+      --radius-sm: 3px;
+      --radius-md: 6px;
+      --radius-pill: 20px;
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    
     body {
       display: flex; flex-direction: column; height: 100vh;
       background: var(--bg); color: var(--fg);
-      font-family: var(--vscode-font-family, sans-serif);
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
       font-size: var(--vscode-font-size, 13px);
+      line-height: 1.4;
       overflow: hidden;
     }
 
     #toolbar {
-      display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+      display: flex; align-items: center; gap: 12px; padding: 8px 16px;
       background: var(--vscode-titleBar-activeBackground, var(--bg));
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
+      z-index: 10;
     }
-    #entity-label { font-weight: 600; }
-    #entity-iri { opacity: 0.55; font-size: 11px; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
-    #status { font-size: 11px; opacity: 0.7; }
+    #entity-label { font-weight: 600; font-size: 1.1em; }
+    #entity-iri { opacity: 0.45; font-size: 0.85em; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 350px; font-family: var(--vscode-editor-font-family, monospace); }
+    #status { font-size: 11px; opacity: 0.7; font-style: italic; }
 
     #content {
       flex: 1; overflow-y: auto;
-      padding: 12px 16px;
-      max-width: 900px;
+      padding: 24px 32px;
+      max-width: 1000px;
+      margin: 0 auto;
+      width: 100%;
     }
 
     .type-badge {
-      display: inline-block; padding: 2px 8px; border-radius: 3px; flex-shrink: 0;
-      font-size: 0.78em; font-weight: 600; letter-spacing: 0.04em;
+      display: inline-flex; align-items: center; padding: 2px 10px; border-radius: var(--radius-pill); flex-shrink: 0;
+      font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
       background: var(--badge-bg); color: var(--badge-fg);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
-    .type-badge.class               { background: #1a5ea8; color: #d0e8ff; }
-    .type-badge.objectProperty      { background: #7a4800; color: #ffd9a0; }
-    .type-badge.dataProperty        { background: #1a6e3a; color: #a8ffc4; }
-    .type-badge.annotationProperty  { background: #5a2a88; color: #e0c4ff; }
-    .type-badge.individual          { background: #7a7a00; color: #ffffa0; }
+    .type-badge.class               { background: rgba(26, 94, 168, 0.2); color: #4fc1ff; border: 1px solid rgba(26, 94, 168, 0.3); }
+    .type-badge.objectProperty      { background: rgba(122, 72, 0, 0.2);  color: #ffd9a0; border: 1px solid rgba(122, 72, 0, 0.3); }
+    .type-badge.dataProperty        { background: rgba(26, 110, 58, 0.2); color: #a8ffc4; border: 1px solid rgba(26, 110, 58, 0.3); }
+    .type-badge.annotationProperty  { background: rgba(90, 42, 136, 0.2); color: #e0c4ff; border: 1px solid rgba(90, 42, 136, 0.3); }
+    .type-badge.individual          { background: rgba(122, 122, 0, 0.2); color: #ffffa0; border: 1px solid rgba(122, 122, 0, 0.3); }
 
     button {
-      padding: 2px 8px; cursor: pointer; border: 1px solid var(--border);
+      padding: 4px 10px; cursor: pointer; border: 1px solid var(--border);
       background: var(--badge-bg); color: var(--fg);
-      border-radius: 3px; font-size: 0.78em; font-family: inherit;
+      border-radius: var(--radius-sm); font-size: 0.85em; font-family: inherit;
+      transition: all 0.15s ease;
+      display: inline-flex; align-items: center; gap: 4px;
     }
-    button:hover { opacity: 0.8; }
+    button:hover { background: rgba(128, 128, 128, 0.25); border-color: rgba(128, 128, 128, 0.4); }
+    button:active { transform: translateY(1px); }
+    
+    .ghost-btn { background: transparent; border: 1px dashed var(--border); opacity: 0.7; }
+    .ghost-btn:hover { opacity: 1; border-style: solid; }
+
     #btn-save {
-      background: var(--btn-bg); color: var(--btn-fg); border-color: transparent;
-      padding: 4px 12px; font-size: inherit;
+      background: var(--btn-bg); color: var(--btn-fg); border: none;
+      padding: 6px 16px; font-size: 13px; font-weight: 600;
+      border-radius: var(--radius-md);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
+    #btn-save:hover { opacity: 0.95; box-shadow: 0 3px 6px rgba(0,0,0,0.25); }
     #btn-save:disabled {
-      opacity: 0.4;
+      opacity: 0.3;
       cursor: default;
-      filter: grayscale(0.8);
+      box-shadow: none;
+      filter: grayscale(0.5);
     }
 
-    .section { margin-bottom: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
-    h2 {
-      font-size: 0.82em; text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--h2-fg); margin-bottom: 8px;
+    .section { margin-bottom: 32px; }
+    .section-header {
+      font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--h2-fg); margin-bottom: 12px; font-weight: 700;
+      display: flex; align-items: center; gap: 8px;
     }
-    .section-body { padding-left: 2px; }
+    .section-actions { display: flex; align-items: center; gap: 4px; }
+    .section-body { padding-left: 0; }
 
-    table { border-collapse: collapse; width: 100%; }
-    td { padding: 3px 6px; vertical-align: middle; }
-    tr:hover td { background: rgba(255,255,255,0.04); }
+    .header-action-btn {
+      padding: 0; width: 20px; height: 20px;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; border: 1px solid transparent; border-radius: 4px;
+      color: var(--fg); opacity: 0.6; cursor: pointer; transition: all 0.1s;
+      font-size: 16px; font-weight: 400;
+    }
+    .header-action-btn:hover { opacity: 1; background: rgba(128,128,128,0.1); border-color: var(--border); }
+
+    table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: 4px; }
+    td { padding: 8px 12px; vertical-align: top; border-bottom: 1px solid var(--border); transition: background 0.1s; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--row-hover); }
+
     .lang-tag { 
-      font-size: 0.75em; 
+      font-size: 0.7em; 
       color: var(--fg);
-      opacity: 0.65;
+      opacity: 0.6;
       background: rgba(128, 128, 128, 0.1); 
-      padding: 1px 3px; 
+      padding: 1px 4px; 
       border-radius: 2px; 
-      display: inline-block;
+      font-weight: 600;
+      text-transform: uppercase;
     }
-    .lang-tag-cell { white-space: nowrap; }
-    .prop-iri-cell { font-size: 0.82em; opacity: 0.75; white-space: nowrap; }
+    .lang-tag-cell { white-space: nowrap; width: 60px; padding-top: 10px; }
+    .prop-iri-cell { font-size: 0.85em; opacity: 0.6; width: 150px; font-weight: 500; padding-top: 10px; }
 
-    .chip-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; min-height: 4px; }
+    .chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; min-height: 4px; }
     .chip {
-      display: inline-flex; align-items: center; gap: 3px;
-      background: var(--badge-bg); border-radius: 3px;
-      padding: 1px 4px 1px 6px; font-size: 0.82em;
+      display: inline-flex; align-items: center; gap: 4px;
+      background: transparent; border-radius: var(--radius-pill);
+      padding: 2px 4px 2px 10px; font-size: 0.85em;
+      border: 1px solid var(--border);
+      transition: all 0.1s;
     }
+    .chip:hover { border-color: var(--link); }
     .chip-label {
-      color: var(--link); text-decoration: none; cursor: pointer;
+      color: var(--link); text-decoration: none; cursor: pointer; font-weight: 500;
     }
     .chip-label:hover { text-decoration: underline; }
     .chip-remove {
-      border: none; background: transparent; color: var(--vscode-errorForeground, #f48771); opacity: 0.65;
-      cursor: pointer; padding: 0 2px; font-size: 1.1em; line-height: 1;
+      border: none; background: transparent; color: var(--vscode-errorForeground, #f48771); opacity: 0.5;
+      cursor: pointer; padding: 0 4px; font-size: 1.2em; line-height: 1; border-radius: 50%;
     }
-    .chip-remove:hover { opacity: 1; background: transparent; border: none; }
+    .chip-remove:hover { opacity: 1; background: rgba(244, 135, 113, 0.15); }
 
-    .add-iri-container { display: flex; align-items: center; gap: 4px; }
-    .add-btn { font-size: 0.78em; padding: 2px 8px; }
-    .cancel-btn { opacity: 0.7; }
-    .add-iri-input-wrapper { position: relative; display: inline-flex; flex-direction: column; }
+    .add-item-footer { margin-top: 4px; }
+    .add-iri-input-wrapper { position: relative; display: inline-flex; flex-direction: column; margin-top: 4px; }
     .iri-input {
       background: var(--input-bg); color: var(--fg); border: 1px solid var(--input-border);
-      padding: 2px 6px; border-radius: 3px; font-family: inherit; font-size: inherit;
-      width: 220px;
+      padding: 4px 10px; border-radius: var(--radius-md); font-family: inherit; font-size: 13px;
+      width: 280px; transition: all 0.1s;
     }
-    .iri-input:focus { outline: 1px solid var(--link); }
+    .iri-input:focus { outline: none; border-color: var(--link); box-shadow: 0 0 0 2px rgba(79, 193, 255, 0.2); }
+    
     .iri-dropdown {
-      position: absolute; top: 100%; left: 0; z-index: 100;
+      position: absolute; top: calc(100% + 4px); left: 0; z-index: 100;
       background: var(--vscode-dropdown-background, #2d2d2d);
-      border: 1px solid var(--border); border-radius: 3px;
-      min-width: 220px; max-height: 200px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+      min-width: 300px; max-height: 250px; overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
     .iri-dropdown-item {
-      display: flex; justify-content: space-between;
-      padding: 4px 8px; cursor: pointer; font-size: 0.9em;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 12px; cursor: pointer; font-size: 0.9em;
+      border-bottom: 1px solid rgba(128,128,128,0.1);
     }
+    .iri-dropdown-item:last-child { border-bottom: none; }
     .iri-dropdown-item:hover, .iri-dropdown-item.selected {
       background: var(--vscode-list-activeSelectionBackground, #094771);
+      color: var(--vscode-list-activeSelectionForeground, #fff);
     }
-    .iri-dropdown-type { opacity: 0.5; font-size: 0.85em; margin-left: 8px; }
+    .iri-dropdown-type { opacity: 0.5; font-size: 0.75em; margin-left: 8px; font-weight: 600; text-transform: uppercase; }
 
-    .single-iri-wrapper { display: flex; align-items: center; gap: 4px; }
+    .checkbox-row { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 0; }
+    .checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; }
+    .checkbox-label input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
 
-    .checkbox-row { display: flex; flex-wrap: wrap; gap: 12px; }
-    .checkbox-label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-    .checkbox-label input { cursor: pointer; }
+    .expression-entry { margin-bottom: 16px; position: relative; }
+    .expression-editor { 
+      min-height: 80px; max-height: 300px; overflow: auto; 
+      border: 1px solid var(--border); border-radius: var(--radius-md); 
+      background: rgba(128,128,128,0.03);
+      transition: border-color 0.1s;
+    }
+    .expression-editor:focus-within { border-color: var(--link); }
+    .expression-section-footer { padding-top: 8px; }
+    .expression-add-btn { 
+      background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); 
+      border: none; border-radius: var(--radius-sm); padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; 
+    }
+    .expression-add-btn:hover { opacity: 0.9; }
+    .expression-delete-btn { 
+      position: absolute; top: -10px; right: -10px; z-index: 5;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 50%;
+      color: var(--vscode-errorForeground, #f48771); opacity: 0.8; 
+      font-size: 16px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.1s;
+    }
+    .expression-delete-btn:hover { opacity: 1; transform: scale(1.1); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
 
-    .expression-entry { margin-bottom: 8px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35)); }
-    .expression-entry:last-of-type { border-bottom: none; }
-    .expression-editor { min-height: 80px; max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: 3px; }
-    .expression-section-footer { padding-top: 4px; }
-    .expression-add-btn { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 2px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
-    .expression-add-btn:hover { opacity: 0.85; }
-    .expression-delete-btn { float: right; background: none; border: none; color: var(--vscode-errorForeground, #f48771); opacity: 0.65; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
-    .expression-delete-btn:hover { opacity: 1; }
     .cm-clickable-entity {
-      color: var(--link);
-      text-decoration: underline;
-      text-decoration-thickness: 1px;
-      text-underline-offset: 2px;
-      cursor: pointer;
+      color: var(--link); text-decoration: none; border-bottom: 1px dashed var(--link);
+      cursor: pointer; transition: all 0.1s;
     }
     .cm-clickable-entity:hover {
-      background: var(--vscode-editorHoverHighlightBackground, rgba(255,255,255,0.08));
+      background: rgba(79, 193, 255, 0.1); border-bottom-style: solid;
     }
 
-    .assertion-table { border-collapse: separate; border-spacing: 0 2px; }
-    .assertion-arrow { padding: 0 8px; opacity: 0.5; }
+    .assertion-arrow { padding: 0 12px; opacity: 0.3; font-weight: bold; }
     .data-value {
-      background: var(--code-bg); padding: 1px 4px; border-radius: 2px;
-      font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em;
+      background: var(--code-bg); padding: 2px 6px; border-radius: var(--radius-sm);
+      font-family: var(--vscode-editor-font-family, monospace); font-size: 0.95em; color: #ce9178;
     }
-    .inline-remove { margin-left: 4px; vertical-align: middle; }
-    .add-assertion-row { margin-top: 4px; }
-    .chain-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; padding: 4px 6px; background: var(--badge-bg); border-radius: 3px; }
-    .chain-members { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; flex: 1; }
-    .chain-sep { opacity: 0.7; font-size: 0.85em; padding: 0 2px; }
-    .remove-btn { border: none; background: transparent; color: var(--vscode-errorForeground, #f48771); opacity: 0.65; cursor: pointer; padding: 0 4px; font-size: 1.1em; line-height: 1; }
-    .remove-btn:hover { opacity: 1; }
+    .inline-remove { margin-left: 8px; vertical-align: middle; }
+    
+    .chain-row { 
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; 
+      padding: 6px 10px; background: rgba(128,128,128,0.05); border-radius: var(--radius-md); 
+      border: 1px solid var(--border);
+    }
+    .chain-members { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 1; }
+    .chain-sep { opacity: 0.4; font-weight: bold; padding: 0 4px; }
+
     .new-assertion-inputs {
-      display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+      background: rgba(128, 128, 128, 0.05); padding: 12px; border-radius: var(--radius-md);
+      border: 1px solid var(--border);
     }
 
-    a { color: var(--link); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code { background: var(--code-bg); padding: 1px 4px; border-radius: 2px; font-family: var(--vscode-editor-font-family, monospace); }
-
-    /* Annotation editing */
     .annotation-value-input {
       background: var(--input-bg); color: var(--fg);
-      border: 1px solid transparent;
-      padding: 2px 6px; border-radius: 3px;
-      font-family: inherit; font-size: inherit; width: 100%;
+      border: 1px solid var(--input-border);
+      padding: 6px 12px; border-radius: var(--radius-md);
+      font-family: inherit; font-size: inherit; flex: 1; min-width: 200px;
+      transition: all 0.1s;
     }
-    .annotation-value-input:focus { outline: none; border-color: var(--input-border); }
-    textarea.annotation-value-input { min-height: 4.5em; resize: vertical; }
-    .annotation-value-display { cursor: text; padding: 3px 6px; min-height: 1.5em; white-space: pre-wrap; word-break: break-all; }
-    .annotation-link { color: var(--vscode-textLink-foreground); text-decoration: underline; cursor: pointer; }
-    .annotation-image-preview { display: block; max-width: 100%; max-height: 200px; margin-top: 4px; }
+    .annotation-value-input:focus { outline: none; border-color: var(--link); background: var(--surface); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    textarea.annotation-value-input { min-height: 6em; resize: vertical; width: 100%; flex: none; }
+    .annotation-value-display { 
+      cursor: text; padding: 6px 10px; min-height: 1.5em; white-space: pre-wrap; word-break: break-all;
+      border-radius: var(--radius-md); border: 1px solid transparent;
+    }
+    .annotation-value-display:hover { background: rgba(128,128,128,0.05); }
+    .annotation-link { color: var(--link); text-decoration: underline; cursor: pointer; }
+    .annotation-image-preview { display: block; max-width: 100%; max-height: 300px; margin-top: 8px; border-radius: var(--radius-md); box-shadow: 0 4px 12px rgba(0,0,0,0.25); border: 1px solid var(--border); }
+    
     .lang-tag-input {
       background: rgba(128, 128, 128, 0.1);
       color: var(--fg);
       opacity: 0.65;
       border: 1px solid transparent;
-      padding: 1px 2px;
-      border-radius: 2px;
+      padding: 2px 4px;
+      border-radius: 3px;
       font-family: inherit;
       font-size: 0.75em;
-      width: 40px;
+      width: 44px;
       text-align: center;
+      font-weight: 600;
+      text-transform: uppercase;
     }
-    .lang-tag-input:focus {
-      outline: none;
-      opacity: 1;
-      border-color: var(--link);
-      background: var(--input-bg);
+    .lang-tag-input:focus { outline: none; opacity: 1; border-color: var(--link); background: var(--input-bg); }
+    
+    @font-face {
+      font-family: 'codicon';
+      src: url(https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.32/dist/codicon.ttf) format('truetype');
     }
-    .annotation-table .prop-iri-cell { width: 130px; white-space: nowrap; }
-    .annotation-table .lang-tag-cell { width: 52px; }
+    .icon { font-family: 'codicon'; vertical-align: middle; }
   `;
   document.head.appendChild(style);
 }
