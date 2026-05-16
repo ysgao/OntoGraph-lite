@@ -15,7 +15,7 @@ export class DataPropertyItem extends vscode.TreeItem {
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None);
     this.id = `dataprop:${iri}`;
-    this.tooltip = iri;
+    this.tooltip = vscode.workspace.getConfiguration('ontograph').get<boolean>('display.showIriOnHover', false) ? iri : '';
     this.contextValue = 'owlEntity';
     this.iconPath = icon;
   }

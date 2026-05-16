@@ -20,7 +20,7 @@ export class IndividualTreeItem extends vscode.TreeItem {
     );
     this.iri = node.iri;
     this.id = `individual:${node.kind}:${node.iri}`;
-    this.tooltip = node.iri;
+    this.tooltip = vscode.workspace.getConfiguration('ontograph').get<boolean>('display.showIriOnHover', false) ? node.iri : '';
     this.contextValue = node.kind === 'individual' ? 'owlEntity' : 'owlClassGroup';
     this.iconPath = new vscode.ThemeIcon(isClass ? 'symbol-class' : 'symbol-object');
   }

@@ -16,7 +16,7 @@ export class PropertyTreeItem extends vscode.TreeItem {
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None);
     this.id = `objectprop:${iri}`;
-    this.tooltip = iri;
+    this.tooltip = vscode.workspace.getConfiguration('ontograph').get<boolean>('display.showIriOnHover', false) ? iri : '';
     this.contextValue = contextValue;
     this.iconPath = icon;
   }

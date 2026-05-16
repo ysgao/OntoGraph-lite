@@ -17,7 +17,7 @@ export class ClassTreeItem extends vscode.TreeItem {
       ? (autoExpand ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed)
       : vscode.TreeItemCollapsibleState.None);
     this.id = `class:${iri}`;
-    this.tooltip = iri;
+    this.tooltip = vscode.workspace.getConfiguration('ontograph').get<boolean>('display.showIriOnHover', false) ? iri : '';
     this.contextValue = 'owlEntity';
   }
 }

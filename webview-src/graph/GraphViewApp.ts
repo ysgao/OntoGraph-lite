@@ -36,10 +36,10 @@ const vscode = acquireVsCodeApi();
 
 let cy: cytoscape.Core | undefined;
 let currentFocusIri: string | undefined;
-let currentDepth = 2;
+let currentDepth = 1;
 let showInferred = true;
 let showDisjoint = false;
-let layoutMode: 'dagre' | 'cose' = 'dagre';
+let layoutMode: 'dagre' | 'cose' = 'cose';
 
 // ── DOM ──────────────────────────────────────────────────────────────────────
 
@@ -82,13 +82,13 @@ document.body.innerHTML = `
 <div id="toolbar">
   <span style="font-weight:600;white-space:nowrap">Graph View</span>
   <span id="focus-info">—</span>
-  <label>Depth: <input type="range" id="depth-slider" min="1" max="5" value="2">
-    <span id="depth-val">2</span>
+  <label>Depth: <input type="range" id="depth-slider" min="1" max="5" value="1">
+    <span id="depth-val">1</span>
   </label>
   <label><input type="checkbox" id="cb-inferred" checked> Inferred</label>
   <label><input type="checkbox" id="cb-disjoint"> Disjoint</label>
-  <button id="btn-dagre" class="active" title="Top-down hierarchical layout">Hierarchical</button>
-  <button id="btn-cose" title="Force-directed layout">Force</button>
+  <button id="btn-dagre" title="Top-down hierarchical layout">Hierarchical</button>
+  <button id="btn-cose" class="active" title="Force-directed layout">Force</button>
   <span id="stats"></span>
 </div>
 <div id="cy"></div>

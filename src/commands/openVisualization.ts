@@ -27,7 +27,7 @@ export function openGraphView(
 
   const cfg = vscode.workspace.getConfiguration('ontograph');
   const preferredLang = cfg.get<string>('display.preferredLabelLanguage') ?? 'en';
-  const defaultDepth  = cfg.get<number>('graph.defaultDepth') ?? 2;
+  const defaultDepth  = cfg.get<number>('graph.defaultDepth') ?? 1;
 
   if (panel) {
     panel.reveal(vscode.ViewColumn.Beside);
