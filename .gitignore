@@ -5,3 +5,5 @@ java-server/target/
 *.class
 .DS_Store
 test-ontologies/
+*.log
+.env*
