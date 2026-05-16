@@ -1765,7 +1765,7 @@ function injectStyles(): void {
     }
 
     .annotation-value-input {
-      background: var(--input-bg); color: var(--fg);
+      color: var(--fg);
       border: 1px solid var(--input-border);
       padding: 8px 14px; border-radius: var(--radius-md);
       font-family: inherit; font-size: inherit;
@@ -1773,16 +1773,16 @@ function injectStyles(): void {
       transition: all 0.1s;
       line-height: 1.4;
     }
-    .annotation-value-input:focus { outline: none; border-color: var(--link); background: var(--surface); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .annotation-value-input:focus { outline: none; border-color: var(--link); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
     textarea.annotation-value-input { min-height: 6em; resize: vertical; width: 100%; flex: none; }
     .annotation-value-display { 
       cursor: text; padding: 8px 14px; min-height: 1.5em; white-space: pre-wrap; word-break: break-all;
       border-radius: var(--radius-md); border: 1px solid var(--border);
-      background: rgba(128, 128, 128, 0.04);
+      
       transition: all 0.1s;
       line-height: 1.4;
     }
-    .annotation-value-display:hover { border-color: var(--link); background: rgba(128,128,128,0.08); }
+    .annotation-value-display:hover { border-color: var(--link); }
     .annotation-link { color: var(--link); text-decoration: underline; cursor: pointer; }
     .annotation-image-preview { display: block; max-width: 100%; max-height: 300px; margin-top: 8px; border-radius: var(--radius-md); box-shadow: 0 4px 12px rgba(0,0,0,0.25); border: 1px solid var(--border); }
     
