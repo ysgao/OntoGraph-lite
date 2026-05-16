@@ -1611,7 +1611,15 @@ function injectStyles(): void {
     table { border-collapse: collapse; width: 100%; }
     td { padding: 3px 6px; vertical-align: middle; }
     tr:hover td { background: rgba(255,255,255,0.04); }
-    .lang-tag { font-size: 0.78em; opacity: 0.7; background: var(--code-bg); padding: 1px 4px; border-radius: 2px; }
+    .lang-tag { 
+      font-size: 0.75em; 
+      color: var(--fg);
+      opacity: 0.65;
+      background: rgba(128, 128, 128, 0.1); 
+      padding: 1px 3px; 
+      border-radius: 2px; 
+      display: inline-block;
+    }
     .lang-tag-cell { white-space: nowrap; }
     .prop-iri-cell { font-size: 0.82em; opacity: 0.75; white-space: nowrap; }
 
@@ -1715,12 +1723,23 @@ function injectStyles(): void {
     .annotation-link { color: var(--vscode-textLink-foreground); text-decoration: underline; cursor: pointer; }
     .annotation-image-preview { display: block; max-width: 100%; max-height: 200px; margin-top: 4px; }
     .lang-tag-input {
-      background: var(--input-bg); color: var(--fg);
-      border: 1px solid var(--input-border);
-      padding: 2px 3px; border-radius: 3px;
-      font-family: inherit; font-size: 0.78em; width: 46px;
+      background: rgba(128, 128, 128, 0.1);
+      color: var(--fg);
+      opacity: 0.65;
+      border: 1px solid transparent;
+      padding: 1px 2px;
+      border-radius: 2px;
+      font-family: inherit;
+      font-size: 0.75em;
+      width: 40px;
+      text-align: center;
     }
-    .lang-tag-input:focus { outline: 1px solid var(--link); }
+    .lang-tag-input:focus {
+      outline: none;
+      opacity: 1;
+      border-color: var(--link);
+      background: var(--input-bg);
+    }
     .annotation-table .prop-iri-cell { width: 130px; white-space: nowrap; }
     .annotation-table .lang-tag-cell { width: 52px; }
   `;
