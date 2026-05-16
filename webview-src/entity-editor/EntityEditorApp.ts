@@ -648,12 +648,7 @@ function createExpressionEntry(
   editorEl.className = 'expression-editor';
   entry.appendChild(editorEl);
 
-  const footer = body.querySelector('.expression-section-footer');
-  if (footer) {
-    body.insertBefore(entry, footer);
-  } else {
-    body.appendChild(entry);
-  }
+  body.appendChild(entry);
 
   const editor = createEditor(editorEl, formatManchesterForDisplay(expr), shiftRefsForFormat(expr, refs));
   editorMap[key].push(editor);
@@ -1000,31 +995,33 @@ function renderAnnotationsSection(container: HTMLElement): void {
       const entry = annotationState[i];
       const tr = document.createElement('tr');
 
-      // Col 1: property local name
+      // Col 1: property name + lang tag
       const tdProp = document.createElement('td');
       tdProp.className = 'prop-iri-cell';
       tdProp.title = entry.propIri;
-      tdProp.textContent = localNameFromIri(entry.propIri);
+      
+      const propLabel = document.createElement('span');
+      propLabel.className = 'prop-label';
+      propLabel.textContent = localNameFromIri(entry.propIri);
+      tdProp.appendChild(propLabel);
 
-      // Col 2: lang tag
-      const tdLang = document.createElement('td');
-      tdLang.className = 'lang-tag-cell';
       if (DEFAULT_EN_IRIS.includes(entry.propIri) || entry.lang !== undefined) {
         const langInput = document.createElement('input');
         langInput.type = 'text';
         langInput.className = 'lang-tag-input';
         langInput.value = entry.lang ?? '';
-        langInput.placeholder = 'EN';
+        langInput.placeholder = 'en';
         langInput.title = 'Language tag';
         langInput.addEventListener('input', () => {
           annotationState[i] = { ...annotationState[i], lang: langInput.value.trim() || undefined };
           checkForChanges();
         });
-        tdLang.appendChild(langInput);
+        tdProp.appendChild(langInput);
       }
 
-      // Col 3: display/edit value
+      // Col 2: display/edit value
       const tdValue = document.createElement('td');
+      tdValue.className = 'annotation-value-cell';
       const valueWidget = createValueWidget(entry.propIri, entry.value, (v) => {
         annotationState[i] = { ...annotationState[i], value: v };
         checkForChanges();
@@ -1059,25 +1056,22 @@ function renderAnnotationsSection(container: HTMLElement): void {
         currentDisplay.style.display = '';
       });
 
-      tdValue.appendChild(currentDisplay);
-      tdValue.appendChild(valueWidget);
-
-      // Col 4: delete button
-      const tdDel = document.createElement('td');
       const delBtn = document.createElement('button');
-      delBtn.className = 'chip-remove inline-remove';
+      delBtn.className = 'expression-delete-btn annotation-delete-btn';
       delBtn.innerHTML = '×';
       delBtn.title = 'Delete';
-      delBtn.addEventListener('click', () => {
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         annotationState.splice(i, 1);
         rerender();
       });
-      tdDel.appendChild(delBtn);
+
+      tdValue.appendChild(delBtn);
+      tdValue.appendChild(currentDisplay);
+      tdValue.appendChild(valueWidget);
 
       tr.appendChild(tdProp);
-      tr.appendChild(tdLang);
       tr.appendChild(tdValue);
-      tr.appendChild(tdDel);
       table.appendChild(tr);
     }
     body.appendChild(table);
@@ -1115,7 +1109,7 @@ function renderAnnotationsSection(container: HTMLElement): void {
       const langInput = document.createElement('input');
       langInput.type = 'text';
       langInput.className = 'lang-tag-input';
-      langInput.placeholder = 'EN';
+      langInput.placeholder = 'en';
       langInput.title = 'Language tag (optional)';
 
       const okBtn = document.createElement('button');
@@ -1168,8 +1162,8 @@ function renderAnnotationsSection(container: HTMLElement): void {
       attachKeydown(initialInput);
 
       row.appendChild(w1);
-      row.appendChild(valueWidget);
       row.appendChild(langInput);
+      row.appendChild(valueWidget);
       row.appendChild(okBtn);
       row.appendChild(cancelBtn);
       addDiv.appendChild(row);
@@ -1308,22 +1302,9 @@ function buildToolbar(): void {
   badge.id = 'type-badge';
   badge.className = 'type-badge';
 
-  const labelEl = document.createElement('span');
-  labelEl.id = 'entity-label';
-
   const iriEl = document.createElement('span');
   iriEl.id = 'entity-iri';
 
-  const copyBtn = document.createElement('button');
-  copyBtn.id = 'btn-copy-iri';
-  copyBtn.textContent = '⎘ Copy IRI';
-  copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(currentIri).then(() => {
-      const old = copyBtn.textContent;
-      copyBtn.textContent = '✓ Copied';
-      setTimeout(() => { copyBtn.textContent = old; }, 1200);
-    });
-  });
 
   const spacer = document.createElement('div');
   spacer.style.cssText = 'margin-left: auto; display: flex; gap: 8px; align-items: center;';
@@ -1336,11 +1317,9 @@ function buildToolbar(): void {
   const status = document.createElement('span');
   status.id = 'status';
 
-  spacer.appendChild(copyBtn);
   spacer.appendChild(saveBtn);
   spacer.appendChild(status);
   toolbar.appendChild(badge);
-  toolbar.appendChild(labelEl);
   toolbar.appendChild(iriEl);
   toolbar.appendChild(spacer);
   document.body.appendChild(toolbar);
@@ -1357,7 +1336,6 @@ function renderEntity(msg: LoadEntityMessage): void {
   const badge = document.getElementById('type-badge')!;
   badge.textContent = typeLabel(msg.entityType);
   badge.className = `type-badge ${msg.entityType}`;
-  document.getElementById('entity-label')!.textContent = msg.label;
   document.getElementById('entity-iri')!.textContent = msg.iri;
 
   // Clear old editors and entity sections
@@ -1607,11 +1585,11 @@ function injectStyles(): void {
       background: var(--badge-bg); color: var(--badge-fg);
       box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
-    .type-badge.class               { background: rgba(26, 94, 168, 0.2); color: #4fc1ff; border: 1px solid rgba(26, 94, 168, 0.3); }
-    .type-badge.objectProperty      { background: rgba(122, 72, 0, 0.2);  color: #ffd9a0; border: 1px solid rgba(122, 72, 0, 0.3); }
-    .type-badge.dataProperty        { background: rgba(26, 110, 58, 0.2); color: #a8ffc4; border: 1px solid rgba(26, 110, 58, 0.3); }
-    .type-badge.annotationProperty  { background: rgba(90, 42, 136, 0.2); color: #e0c4ff; border: 1px solid rgba(90, 42, 136, 0.3); }
-    .type-badge.individual          { background: rgba(122, 122, 0, 0.2); color: #ffffa0; border: 1px solid rgba(122, 122, 0, 0.3); }
+    .type-badge.class               { background: rgba(26, 94, 168, 0.2); border: 1px solid rgba(26, 94, 168, 0.3); }
+    .type-badge.objectProperty      { background: rgba(122, 72, 0, 0.2);  border: 1px solid rgba(122, 72, 0, 0.3); }
+    .type-badge.dataProperty        { background: rgba(26, 110, 58, 0.2); border: 1px solid rgba(26, 110, 58, 0.3); }
+    .type-badge.annotationProperty  { background: rgba(90, 42, 136, 0.2); border: 1px solid rgba(90, 42, 136, 0.3); }
+    .type-badge.individual          { background: rgba(122, 122, 0, 0.2); border: 1px solid rgba(122, 122, 0, 0.3); }
 
     button {
       padding: 4px 10px; cursor: pointer; border: 1px solid var(--border);
@@ -1659,7 +1637,7 @@ function injectStyles(): void {
     .header-action-btn:hover { opacity: 1; background: rgba(128,128,128,0.1); border-color: var(--border); }
 
     table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: 4px; }
-    td { padding: 8px 12px; vertical-align: top; border-bottom: 1px solid var(--border); transition: background 0.1s; }
+    td { padding: 8px 12px; vertical-align: middle; border-bottom: 1px solid var(--border); transition: background 0.1s; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: var(--row-hover); }
 
@@ -1671,11 +1649,14 @@ function injectStyles(): void {
       padding: 1px 4px; 
       border-radius: 2px; 
       font-weight: 600;
-      text-transform: uppercase;
     }
-    .lang-tag-cell { white-space: nowrap; width: 60px; padding-top: 10px; }
-    .prop-iri-cell { font-size: 0.85em; opacity: 0.6; width: 150px; font-weight: 500; padding-top: 10px; }
-
+    .prop-iri-cell { 
+      font-size: 0.85em; opacity: 0.6; width: 130px; font-weight: 500;
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      padding: 12px 12px !important;
+    }
+    .prop-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .annotation-value-cell { position: relative; width: 100%; padding: 4px 0 !important; }
     .chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; min-height: 4px; }
     .chip {
       display: inline-flex; align-items: center; gap: 4px;
@@ -1729,13 +1710,13 @@ function injectStyles(): void {
 
     .expression-entry { margin-bottom: 16px; position: relative; }
     .expression-editor { 
-      min-height: 80px; max-height: 300px; overflow: auto; 
+      min-height: 30px; max-height: 400px; overflow: auto; 
       border: 1px solid var(--border); border-radius: var(--radius-md); 
-      background: rgba(128,128,128,0.03);
-      transition: border-color 0.1s;
+      background: rgba(128, 128, 128, 0.04);
+      transition: all 0.1s;
     }
-    .expression-editor:focus-within { border-color: var(--link); }
-    .expression-section-footer { padding-top: 8px; }
+    .expression-editor:hover { border-color: var(--link); background: rgba(128, 128, 128, 0.08); }
+    .expression-editor:focus-within { border-color: var(--link); background: var(--bg); }
     .expression-add-btn { 
       background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); 
       border: none; border-radius: var(--radius-sm); padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; 
@@ -1749,6 +1730,10 @@ function injectStyles(): void {
       cursor: pointer; transition: all 0.1s;
     }
     .expression-delete-btn:hover { opacity: 1; transform: scale(1.1); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+
+    .annotation-delete-btn { position: absolute; top: 50%; right: -12px; transform: translateY(-50%); opacity: 0; z-index: 10; }
+    tr:hover .annotation-delete-btn { opacity: 0.8; }
+    tr:hover .annotation-delete-btn:hover { opacity: 1; transform: translateY(-50%) scale(1.1); }
 
     .cm-clickable-entity {
       color: var(--link); text-decoration: none; border-bottom: 1px dashed var(--link);
@@ -1782,17 +1767,22 @@ function injectStyles(): void {
     .annotation-value-input {
       background: var(--input-bg); color: var(--fg);
       border: 1px solid var(--input-border);
-      padding: 6px 12px; border-radius: var(--radius-md);
-      font-family: inherit; font-size: inherit; flex: 1; min-width: 200px;
+      padding: 8px 14px; border-radius: var(--radius-md);
+      font-family: inherit; font-size: inherit;
+      width: 100%; box-sizing: border-box;
       transition: all 0.1s;
+      line-height: 1.4;
     }
     .annotation-value-input:focus { outline: none; border-color: var(--link); background: var(--surface); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
     textarea.annotation-value-input { min-height: 6em; resize: vertical; width: 100%; flex: none; }
     .annotation-value-display { 
-      cursor: text; padding: 6px 10px; min-height: 1.5em; white-space: pre-wrap; word-break: break-all;
-      border-radius: var(--radius-md); border: 1px solid transparent;
+      cursor: text; padding: 8px 14px; min-height: 1.5em; white-space: pre-wrap; word-break: break-all;
+      border-radius: var(--radius-md); border: 1px solid var(--border);
+      background: rgba(128, 128, 128, 0.04);
+      transition: all 0.1s;
+      line-height: 1.4;
     }
-    .annotation-value-display:hover { background: rgba(128,128,128,0.05); }
+    .annotation-value-display:hover { border-color: var(--link); background: rgba(128,128,128,0.08); }
     .annotation-link { color: var(--link); text-decoration: underline; cursor: pointer; }
     .annotation-image-preview { display: block; max-width: 100%; max-height: 300px; margin-top: 8px; border-radius: var(--radius-md); box-shadow: 0 4px 12px rgba(0,0,0,0.25); border: 1px solid var(--border); }
     
@@ -1808,7 +1798,6 @@ function injectStyles(): void {
       width: 44px;
       text-align: center;
       font-weight: 600;
-      text-transform: uppercase;
     }
     .lang-tag-input:focus { outline: none; opacity: 1; border-color: var(--link); background: var(--input-bg); }
     
