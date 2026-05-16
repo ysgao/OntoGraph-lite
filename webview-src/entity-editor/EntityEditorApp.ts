@@ -1,6 +1,6 @@
 import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
 import { createAnnotationDisplayElement } from './annotationValueDisplay';
-import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks } from '../manchesterFormat';
+import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks, stripAndContinuations } from '../manchesterFormat';
 import { EditorState, StateField } from '@codemirror/state';
 import {
   Decoration,
@@ -78,7 +78,7 @@ interface LoadEntityMessage {
   isIrreflexive?: boolean;
   isAsymmetric?: boolean;
   iriLabels: Record<string, string>;
-  expressionEntityRefs?: Record<string, ExpressionEntityRef[]>;
+  expressionEntityRefs?: Record<string, ExpressionEntityRef[][]>;
 }
 
 interface CompletionResultMessage {
@@ -113,8 +113,13 @@ let dataAssertionState: { propertyIri: string; value: string; datatype?: string 
 // Property chain state: list of chains, each chain is an ordered list of IRIs
 let propertyChainState: string[][] = [];
 
-// CodeMirror editors: sectionKey → EditorView
-const editorMap: Record<string, EditorView> = {};
+// CodeMirror editors: sectionKey → EditorView[]
+const editorMap: Record<string, EditorView[]> = {};
+
+function destroySection(key: string): void {
+  (editorMap[key] ?? []).forEach(ed => ed.destroy());
+  delete editorMap[key];
+}
 
 // Completion/validation request tracking
 let nextReqId = 0;
@@ -318,9 +323,7 @@ function createEditor(parent: HTMLElement, initialDoc: string, entityRefs: Expre
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const raw = update.state.doc.toString();
-            const reformatted = collectLogicalLines(raw)
-              .map(e => formatManchesterForDisplay(e))
-              .join('\n');
+            const reformatted = formatManchesterForDisplay(stripAndContinuations(raw));
             if (reformatted !== raw && raw.trimEnd() !== reformatted) {
               update.view.dispatch({
                 changes: { from: 0, to: raw.length, insert: reformatted },
@@ -610,42 +613,90 @@ function renderPropertyChainSection(container: HTMLElement): void {
  * 'and' break.  Remap every ref so it points at the correct position in the
  * formatted initialDoc.
  */
-function shiftRefsForFormattedExpressions(
-  expressions: string[],
+function shiftRefsForFormat(
+  expr: string,
   refs: ExpressionEntityRef[],
 ): ExpressionEntityRef[] {
-  let offset = 0;
-  const allBreaks: number[] = [];
-  for (const expr of expressions) {
-    for (const b of findFormatBreaks(expr)) {
-      allBreaks.push(offset + b);
-    }
-    offset += expr.length + 1;  // +1 for '\n' separator between expressions
-  }
-  if (allBreaks.length === 0) { return refs; }
+  const breaks = findFormatBreaks(expr);
+  if (breaks.length === 0) { return refs; }
   return refs.map(ref => {
-    const shift = allBreaks.filter(b => b < ref.from).length * 4;
+    const shift = breaks.filter(b => b < ref.from).length * 4;
     return { ...ref, from: ref.from + shift, to: ref.to + shift };
   });
+}
+
+function createExpressionEntry(
+  body: HTMLElement,
+  key: string,
+  expr: string,
+  refs: ExpressionEntityRef[],
+): void {
+  if (!editorMap[key]) { editorMap[key] = []; }
+
+  const entry = document.createElement('div');
+  entry.className = 'expression-entry';
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'expression-delete-btn';
+  deleteBtn.title = 'Remove expression';
+  deleteBtn.textContent = '×';
+  entry.appendChild(deleteBtn);
+
+  const editorEl = document.createElement('div');
+  editorEl.className = 'expression-editor';
+  entry.appendChild(editorEl);
+
+  const footer = body.querySelector('.expression-section-footer');
+  if (footer) {
+    body.insertBefore(entry, footer);
+  } else {
+    body.appendChild(entry);
+  }
+
+  const editor = createEditor(editorEl, formatManchesterForDisplay(expr), shiftRefsForFormat(expr, refs));
+  editorMap[key].push(editor);
+
+  deleteBtn.addEventListener('click', () => {
+    editor.destroy();
+    const idx = editorMap[key].indexOf(editor);
+    if (idx !== -1) { editorMap[key].splice(idx, 1); }
+    entry.remove();
+    checkForChanges();
+  });
+}
+
+function addExpressionButton(body: HTMLElement, key: string): void {
+  const footer = document.createElement('div');
+  footer.className = 'expression-section-footer';
+  const btn = document.createElement('button');
+  btn.className = 'expression-add-btn';
+  btn.textContent = '+ Add expression';
+  btn.addEventListener('click', () => {
+    createExpressionEntry(body, key, '', []);
+    editorMap[key][editorMap[key].length - 1].focus();
+  });
+  footer.appendChild(btn);
+  body.appendChild(footer);
 }
 
 function renderExpressionSection(
   container: HTMLElement,
   title: string,
   key: string,
-  initialDoc: string,
-  entityRefs: ExpressionEntityRef[] = [],
+  expressions: string[],
+  perExprRefs: ExpressionEntityRef[][] = [],
 ): void {
-  if (editorMap[key]) { editorMap[key].destroy(); delete editorMap[key]; }
+  destroySection(key);
+  editorMap[key] = [];
 
   const sec = makeSectionEl(title);
   const body = sec.querySelector('.section-body') as HTMLElement;
-  const editorEl = document.createElement('div');
-  editorEl.className = 'expression-editor';
-  body.appendChild(editorEl);
   container.appendChild(sec);
 
-  editorMap[key] = createEditor(editorEl, initialDoc, entityRefs);
+  for (let i = 0; i < expressions.length; i++) {
+    createExpressionEntry(body, key, expressions[i], perExprRefs[i] ?? []);
+  }
+  addExpressionButton(body, key);
 }
 
 // ── Checkbox section ──────────────────────────────────────────────────────────
@@ -1133,9 +1184,9 @@ function typeLabel(t: EntityType): string {
 }
 
 function collectEditorLines(key: string): string[] {
-  const editor = editorMap[key];
-  if (!editor) { return []; }
-  return collectLogicalLines(editor.state.doc.toString());
+  return (editorMap[key] ?? [])
+    .flatMap(ed => collectLogicalLines(ed.state.doc.toString()))
+    .filter(s => s.length > 0);
 }
 
 // ── Annotation state helpers ──────────────────────────────────────────────────
@@ -1267,10 +1318,7 @@ function renderEntity(msg: LoadEntityMessage): void {
   document.getElementById('entity-iri')!.textContent = msg.iri;
 
   // Clear old editors and entity sections
-  for (const key of Object.keys(editorMap)) {
-    editorMap[key].destroy();
-    delete editorMap[key];
-  }
+  Object.keys(editorMap).forEach(k => destroySection(k));
   const content = document.getElementById('content')!;
   content.innerHTML = '';
 
@@ -1286,24 +1334,15 @@ function renderEntity(msg: LoadEntityMessage): void {
       iriListState['disjointClassIris'] = msg.disjointClassIris ?? [];
       renderIriListSection(content, 'SubClassOf', 'superClassIris');
       renderExpressionSection(content, 'SubClassOf (expressions)', 'superClassExpressions',
-        (msg.superClassExpressions ?? []).map(e => formatManchesterForDisplay(e)).join('\n'),
-        shiftRefsForFormattedExpressions(
-          msg.superClassExpressions ?? [],
-          msg.expressionEntityRefs?.['superClassExpressions'] ?? [],
-        ));
+        msg.superClassExpressions ?? [],
+        msg.expressionEntityRefs?.['superClassExpressions'] ?? []);
       renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris');
       renderExpressionSection(content, 'EquivalentTo (expressions)', 'equivalentClassExpressions',
-        (msg.equivalentClassExpressions ?? []).map(e => formatManchesterForDisplay(e)).join('\n'),
-        shiftRefsForFormattedExpressions(
-          msg.equivalentClassExpressions ?? [],
-          msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? [],
-        ));
+        msg.equivalentClassExpressions ?? [],
+        msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? []);
       renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
-        (msg.gciExpressions ?? []).map(e => formatManchesterForDisplay(e)).join('\n'),
-        shiftRefsForFormattedExpressions(
-          msg.gciExpressions ?? [],
-          msg.expressionEntityRefs?.['gciExpressions'] ?? [],
-        ));
+        msg.gciExpressions ?? [],
+        msg.expressionEntityRefs?.['gciExpressions'] ?? []);
       renderIriListSection(content, 'DisjointWith', 'disjointClassIris');
       break;
 
@@ -1589,7 +1628,14 @@ function injectStyles(): void {
     .checkbox-label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
     .checkbox-label input { cursor: pointer; }
 
+    .expression-entry { margin-bottom: 8px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35)); }
+    .expression-entry:last-of-type { border-bottom: none; }
     .expression-editor { min-height: 80px; max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: 3px; }
+    .expression-section-footer { padding-top: 4px; }
+    .expression-add-btn { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 2px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
+    .expression-add-btn:hover { opacity: 0.85; }
+    .expression-delete-btn { float: right; background: none; border: none; color: var(--vscode-errorForeground, #f48771); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
+    .expression-delete-btn:hover { opacity: 0.7; }
     .cm-clickable-entity {
       color: var(--link);
       text-decoration: underline;

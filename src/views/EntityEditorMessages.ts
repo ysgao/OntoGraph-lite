@@ -43,14 +43,14 @@ export interface LoadEntityMessage {
   /** IRI → human-readable label for all IRIs in the list fields */
   iriLabels: Record<string, string>;
 
-  /** CodeMirror ranges for clickable entity tokens in expression sections */
+  /** CodeMirror ranges for clickable entity tokens in expression sections, per expression */
   expressionEntityRefs?: Record<string, {
     from: number;
     to: number;
     iri: string;
     entityType: EntityType;
     label: string;
-  }[]>;
+  }[][]>;
 }
 
 export interface CompletionResultMessage {

@@ -457,7 +457,7 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function renderExpressionsWithRefs(
+export function renderExpressionsWithRefs(
   sectionKey: string,
   expressions: string[],
   refsBySection: NonNullable<LoadEntityMessage['expressionEntityRefs']>,
@@ -466,19 +466,15 @@ function renderExpressionsWithRefs(
   lang: string,
 ): string[] {
   const renderedExpressions: string[] = [];
-  const refs: NonNullable<LoadEntityMessage['expressionEntityRefs']>[string] = [];
-  let offset = 0;
+  const perExprRefs: NonNullable<LoadEntityMessage['expressionEntityRefs']>[string] = [];
 
   for (const expr of expressions) {
     const rendered = renderExpressionWithEntityRefs(expr, model, style, lang, true);
     renderedExpressions.push(rendered.text);
-    for (const ref of rendered.refs) {
-      refs.push({ ...ref, from: ref.from + offset, to: ref.to + offset });
-    }
-    offset += rendered.text.length + 1;
+    perExprRefs.push(rendered.refs);
   }
 
-  refsBySection[sectionKey] = refs;
+  refsBySection[sectionKey] = perExprRefs;
   return renderedExpressions;
 }
 

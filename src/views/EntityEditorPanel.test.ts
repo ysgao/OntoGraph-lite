@@ -36,7 +36,27 @@ vi.mock('../extension.js', () => ({
   parsedDocVersions: new Map(),
 }));
 
-import { validateManchesterText } from './EntityEditorPanel.js';
+import { validateManchesterText, renderExpressionsWithRefs } from './EntityEditorPanel.js';
+import { createEmptyModel } from '../model/OntologyModel.js';
+
+describe('renderExpressionsWithRefs', () => {
+  it('produces an array-of-arrays indexed by expression position', () => {
+    const model = createEmptyModel('test://test');
+    const refs: Record<string, unknown> = {};
+    renderExpressionsWithRefs(
+      'superClassExpressions',
+      ['Dog and Cat', 'hasAge min 18'],
+      refs as Parameters<typeof renderExpressionsWithRefs>[2],
+      model,
+      'label',
+      'en',
+    );
+    // After T003 fix: refs['superClassExpressions'] = [[], []] (two sub-arrays)
+    // Currently (flat): refs['superClassExpressions'] = [] (no index 0)
+    expect(refs['superClassExpressions']).toHaveLength(2);
+    expect(Array.isArray((refs['superClassExpressions'] as unknown[][])[0])).toBe(true);
+  });
+});
 
 describe('validateManchesterText', () => {
   it('returns no errors for a valid single-line expression', () => {
