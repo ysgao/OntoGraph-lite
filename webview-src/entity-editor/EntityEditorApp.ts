@@ -480,8 +480,9 @@ function makeChip(label: string, iri: string, onRemove: () => void): HTMLElement
 
 // ── IRI list section ──────────────────────────────────────────────────────────
 
-function renderIriListSection(container: HTMLElement, title: string, key: string): void {
+function renderIriListSection(container: HTMLElement, title: string, key: string, compact = false): void {
   const sec = makeSectionEl(title);
+  if (compact) { sec.classList.add('section-sm'); }
   const body = sec.querySelector('.section-body') as HTMLElement;
   const actions = sec.querySelector('.section-actions') as HTMLElement;
 
@@ -671,11 +672,13 @@ function renderExpressionSection(
   key: string,
   expressions: string[],
   perExprRefs: ExpressionEntityRef[][] = [],
+  compact = false,
 ): void {
   destroySection(key);
   editorMap[key] = [];
 
   const sec = makeSectionEl(title);
+  if (compact) { sec.classList.add('section-sm'); }
   const body = sec.querySelector('.section-body') as HTMLElement;
   const actions = sec.querySelector('.section-actions') as HTMLElement;
 
@@ -1356,17 +1359,17 @@ function renderEntity(msg: LoadEntityMessage): void {
       iriListState['superClassIris'] = msg.superClassIris ?? [];
       iriListState['equivalentClassIris'] = msg.equivalentClassIris ?? [];
       iriListState['disjointClassIris'] = msg.disjointClassIris ?? [];
-      renderIriListSection(content, 'SubClassOf', 'superClassIris');
+      renderIriListSection(content, 'SubClassOf', 'superClassIris', true);
       renderExpressionSection(content, 'SubClassOf (expressions)', 'superClassExpressions',
         msg.superClassExpressions ?? [],
-        msg.expressionEntityRefs?.['superClassExpressions'] ?? []);
-      renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris');
+        msg.expressionEntityRefs?.['superClassExpressions'] ?? [], true);
+      renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris', true);
       renderExpressionSection(content, 'EquivalentTo (expressions)', 'equivalentClassExpressions',
         msg.equivalentClassExpressions ?? [],
-        msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? []);
+        msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? [], true);
       renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
         msg.gciExpressions ?? [],
-        msg.expressionEntityRefs?.['gciExpressions'] ?? []);
+        msg.expressionEntityRefs?.['gciExpressions'] ?? [], true);
       renderIriListSection(content, 'DisjointWith', 'disjointClassIris');
       break;
 
@@ -1622,6 +1625,7 @@ function injectStyles(): void {
     }
 
     .section { margin-bottom: 32px; }
+    .section-sm { margin-bottom: 16px; }
     .section-header {
       font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em;
       color: var(--h2-fg); margin-bottom: 12px; font-weight: 700;
