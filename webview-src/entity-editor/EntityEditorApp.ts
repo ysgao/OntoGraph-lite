@@ -1592,8 +1592,8 @@ function injectStyles(): void {
     }
     .chip-label:hover { text-decoration: underline; }
     .chip-remove {
-      border: none; background: transparent; color: var(--fg); opacity: 0.6;
-      cursor: pointer; padding: 0 2px; font-size: 1em; line-height: 1;
+      border: none; background: transparent; color: var(--vscode-errorForeground, #f48771); opacity: 0.65;
+      cursor: pointer; padding: 0 2px; font-size: 1.1em; line-height: 1;
     }
     .chip-remove:hover { opacity: 1; background: transparent; border: none; }
 
@@ -1634,8 +1634,8 @@ function injectStyles(): void {
     .expression-section-footer { padding-top: 4px; }
     .expression-add-btn { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 2px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
     .expression-add-btn:hover { opacity: 0.85; }
-    .expression-delete-btn { float: right; background: none; border: none; color: var(--vscode-errorForeground, #f48771); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
-    .expression-delete-btn:hover { opacity: 0.7; }
+    .expression-delete-btn { float: right; background: none; border: none; color: var(--vscode-errorForeground, #f48771); opacity: 0.65; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
+    .expression-delete-btn:hover { opacity: 1; }
     .cm-clickable-entity {
       color: var(--link);
       text-decoration: underline;
@@ -1658,7 +1658,7 @@ function injectStyles(): void {
     .chain-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; padding: 4px 6px; background: var(--badge-bg); border-radius: 3px; }
     .chain-members { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; flex: 1; }
     .chain-sep { opacity: 0.7; font-size: 0.85em; padding: 0 2px; }
-    .remove-btn { border: none; background: transparent; color: var(--fg); opacity: 0.6; cursor: pointer; padding: 0 4px; font-size: 1em; line-height: 1; }
+    .remove-btn { border: none; background: transparent; color: var(--vscode-errorForeground, #f48771); opacity: 0.65; cursor: pointer; padding: 0 4px; font-size: 1.1em; line-height: 1; }
     .remove-btn:hover { opacity: 1; }
     .new-assertion-inputs {
       display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;
