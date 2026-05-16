@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatManchesterForDisplay, collectLogicalLines, stripAndContinuations, findFormatBreaks } from './manchesterFormat';
+import { formatManchesterForDisplay, collectLogicalLines, stripAndContinuations, findFormatBreaks } from './ManchesterFormatting';
 
 describe('formatManchesterForDisplay', () => {
   it('returns empty string unchanged', () => {

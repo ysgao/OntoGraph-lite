@@ -63,7 +63,7 @@ export function manchesterToFunctional(expr: string): string {
     if (t.v === 'not') {
       consume();
       if (peek()?.t === 'LP') { consume(); const inner = parseOr(); if (peek()?.t === 'RP') consume(); return `ObjectComplementOf(${inner})`; }
-      return `ObjectComplementOf( ${parseAtom()} )`;
+      return `ObjectComplementOf(${parseAtom()})`;
     }
 
     if (t.t === 'LP') {

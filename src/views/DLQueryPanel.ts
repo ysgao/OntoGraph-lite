@@ -3,6 +3,7 @@ import type { OntologyModel } from '../model/OntologyModel.js';
 import { getLabel } from '../model/OntologyModel.js';
 import { OntologyIndex } from '../model/OntologyIndex.js';
 import { ManchesterParser } from '../parser/ManchesterParser.js';
+import { stripAndContinuations } from '../utils/ManchesterFormatting';
 import { normalizeExpression } from '../model/AxiomDisplay.js';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge.js';
 import type {
@@ -134,9 +135,9 @@ function handleMessage(
 function validateExpression(
   text: string,
 ): { from: number; to: number; severity: 'error' | 'warning'; message: string }[] {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.startsWith('#')) { return []; }
-  const wrapped = `Prefix: : <http://example.org/>\nClass: :_TmpClass\n  SubClassOf: ${trimmed}\n`;
+  const logical = stripAndContinuations(text);
+  if (!logical || logical.startsWith('#')) { return []; }
+  const wrapped = `Prefix: : <http://example.org/>\nClass: :_TmpClass\n  SubClassOf: ${logical}\n`;
   try {
     new ManchesterParser(wrapped, '').parse();
     return [];

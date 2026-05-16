@@ -12,6 +12,6 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["webview-src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "out", "src"]
+  "include": ["webview-src/**/*.ts", "src/utils/ManchesterFormatting.ts"],
+  "exclude": ["node_modules", "dist", "out"]
 }

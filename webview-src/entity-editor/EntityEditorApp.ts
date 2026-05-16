@@ -1,6 +1,6 @@
 import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
 import { createAnnotationDisplayElement } from './annotationValueDisplay';
-import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks, stripAndContinuations } from '../manchesterFormat';
+import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks, stripAndContinuations } from '../../src/utils/ManchesterFormatting';
 import { EditorState, StateField } from '@codemirror/state';
 import {
   Decoration,

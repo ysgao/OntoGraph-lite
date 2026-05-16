@@ -28,7 +28,7 @@ import type {
 } from '../../src/views/DLQueryMessages.js';
 import { DL_QUERY_TYPE_LABELS, DEFAULT_QUERY_TYPES } from '../../src/views/DLQueryMessages.js';
 import { filterGroups } from './DLQueryFilters.js';
-import { formatManchesterForDisplay, stripAndContinuations } from '../manchesterFormat';
+import { formatManchesterForDisplay, stripAndContinuations } from '../../src/utils/ManchesterFormatting';
 
 declare function acquireVsCodeApi(): {
   postMessage(msg: DLQueryWebviewToExt): void;

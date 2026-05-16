@@ -11,6 +11,7 @@ import type {
 import { getLabel } from '../model/OntologyModel';
 import { OntologyIndex } from '../model/OntologyIndex';
 import { ManchesterParser } from '../parser/ManchesterParser';
+import { collectLogicalLines } from '../utils/ManchesterFormatting';
 import { normalizeExpression, renderExpressionWithEntityRefs, type AxiomDisplayStyle } from '../model/AxiomDisplay';
 import { syncAnnotationsToDocument } from '../sync/AnnotationSync';
 import { syncAxiomsToDocument } from '../sync/AxiomSync';
@@ -611,23 +612,51 @@ export function validateManchesterText(
   text: string,
 ): { from: number; to: number; severity: 'error' | 'warning'; message: string }[] {
   const errors: { from: number; to: number; severity: 'error' | 'warning'; message: string }[] = [];
-  const lines = text.split('\n');
-  let offset = 0;
+  
+  const rawLines = text.split('\n');
+  let currentLogical = '';
+  let logicalStartOffset = -1;
+  let currentOffset = 0;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const lineLen = line.length + 1;
-
-    if (trimmed.length > 0 && !trimmed.startsWith('#')) {
-      const wrappedDoc = `Prefix: : <http://example.org/>\nClass: :_TmpClass\n  SubClassOf: ${trimmed}\n`;
-      try {
-        new ManchesterParser(wrappedDoc, '').parse();
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        errors.push({ from: offset, to: offset + line.length, severity: 'error', message });
-      }
+  const validate = (logical: string, start: number, end: number) => {
+    if (!logical || logical.startsWith('#')) return;
+    const wrappedDoc = `Prefix: : <http://example.org/>\nClass: :_TmpClass\n  SubClassOf: ${logical}\n`;
+    try {
+      new ManchesterParser(wrappedDoc, '').parse();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // Map error to the entire logical expression range in the multi-line text
+      errors.push({ from: start, to: end, severity: 'error', message });
     }
-    offset += lineLen;
+  };
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i];
+    const trimmed = raw.trim();
+    const lineLen = raw.length + 1; // +1 for \n
+
+    if (trimmed.length === 0 || trimmed.startsWith('#')) {
+      if (currentLogical) {
+        validate(currentLogical, logicalStartOffset, currentOffset - 1);
+        currentLogical = '';
+        logicalStartOffset = -1;
+      }
+    } else if (/^and\s/i.test(trimmed) && currentLogical) {
+      // Continuation line
+      currentLogical += ' ' + trimmed;
+    } else {
+      // New logical line. Flush previous.
+      if (currentLogical) {
+        validate(currentLogical, logicalStartOffset, currentOffset - 1);
+      }
+      currentLogical = trimmed;
+      logicalStartOffset = currentOffset;
+    }
+    currentOffset += lineLen;
+  }
+
+  if (currentLogical) {
+    validate(currentLogical, logicalStartOffset, currentOffset - 1);
   }
 
   return errors;
