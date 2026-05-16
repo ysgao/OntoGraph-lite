@@ -1728,13 +1728,14 @@ function injectStyles(): void {
       border: none; border-radius: var(--radius-sm); padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; 
     }
     .expression-add-btn:hover { opacity: 0.9; }
-    .expression-delete-btn { 
+    .expression-delete-btn {
       position: absolute; top: -10px; right: -10px; z-index: 5;
       background: var(--bg); border: 1px solid var(--border); border-radius: 50%;
-      color: var(--vscode-errorForeground, #f48771); opacity: 0.8; 
+      color: var(--vscode-errorForeground, #f48771); opacity: 0;
       font-size: 16px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
       cursor: pointer; transition: all 0.1s;
     }
+    .expression-entry:focus-within .expression-delete-btn { opacity: 0.8; }
     .expression-delete-btn:hover { opacity: 1; transform: scale(1.1); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
 
     .annotation-delete-btn { position: absolute; top: 50%; right: -12px; transform: translateY(-50%); opacity: 0; z-index: 10; }
