@@ -251,6 +251,9 @@ const vsCodeTheme = EditorView.theme({
     fontFamily: 'var(--vscode-editor-font-family, var(--vscode-font-family))',
     fontSize: 'var(--vscode-editor-font-size, var(--vscode-font-size))',
   },
+  '&.cm-focused': {
+    backgroundColor: 'field',
+  },
   '.cm-content': { caretColor: 'var(--vscode-editorCursor-foreground)' },
   '.cm-cursor': { borderLeftColor: 'var(--vscode-editorCursor-foreground)' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
@@ -1716,7 +1719,7 @@ function injectStyles(): void {
       transition: all 0.1s;
     }
     .expression-editor:hover { border-color: var(--link); background: rgba(128, 128, 128, 0.08); }
-    .expression-editor:focus-within { border-color: var(--link); background: var(--bg); }
+    .expression-editor:focus-within { border-color: var(--link); background: field; }
     .expression-add-btn { 
       background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); 
       border: none; border-radius: var(--radius-sm); padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; 
