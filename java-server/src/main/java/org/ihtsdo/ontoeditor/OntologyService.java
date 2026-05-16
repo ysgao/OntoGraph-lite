@@ -223,6 +223,7 @@ public class OntologyService {
      * @param engine        "auto", "elk", or "hermit".
      * @param contentLength Used for auto engine selection (proxy for ontology size).
      */
+    @SuppressWarnings("null")
     public DLQueryResult dlQuery(OWLOntology ontology, String classExpression,
                                   List<String> queryTypes, String engine, int contentLength)
             throws Exception {
@@ -292,6 +293,7 @@ public class OntologyService {
 
     // ---- private helpers -------------------------------------------------------
 
+    @SuppressWarnings("null")
     private static OWLClassExpression parseManchesterExpression(String expression, OWLOntology ontology) {
         OWLOntologyManager manager = ontology.getOWLOntologyManager();
         OWLDataFactory df = manager.getOWLDataFactory();
