@@ -1098,11 +1098,9 @@ function renderAnnotationsSection(container: HTMLElement): void {
       const w1 = document.createElement('div');
       w1.className = 'add-iri-input-wrapper';
 
-      const initialInput = document.createElement('input');
-      initialInput.type = 'text';
-      initialInput.className = 'annotation-value-input';
+      const initialInput = createValueWidget('', '', () => {});
       initialInput.placeholder = 'Value…';
-      let valueWidget: HTMLInputElement | HTMLTextAreaElement = initialInput;
+      let valueWidget: HTMLTextAreaElement = initialInput;
 
       const attachKeydown = (el: HTMLInputElement | HTMLTextAreaElement): void => {
         el.addEventListener('keydown', (ev) => {
@@ -1142,12 +1140,12 @@ function renderAnnotationsSection(container: HTMLElement): void {
         if (DEFAULT_EN_IRIS.includes(iri) && !langInput.value.trim()) {
           langInput.value = 'en';
         }
-        if (MULTILINE_IRIS.includes(iri) && valueWidget.tagName !== 'TEXTAREA') {
-          const newWidget = createValueWidget(iri, valueWidget.value, () => {});
-          attachKeydown(newWidget);
-          valueWidget.replaceWith(newWidget);
-          valueWidget = newWidget;
-        }
+        // Recreate the widget so it gets the newline mode appropriate for the
+        // selected property (multiline for rdfs:comment / skos:definition, single-line otherwise).
+        const newWidget = createValueWidget(iri, valueWidget.value, () => {});
+        attachKeydown(newWidget);
+        valueWidget.replaceWith(newWidget);
+        valueWidget = newWidget;
         requestAnimationFrame(() => valueWidget.focus());
       }, () => { rerender(); }, 'annotationProperty');
 
@@ -1781,7 +1779,7 @@ function injectStyles(): void {
       line-height: 1.4;
     }
     .annotation-value-input:focus { outline: none; border-color: var(--link); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-    textarea.annotation-value-input { min-height: 6em; resize: vertical; width: 100%; flex: none; }
+    textarea.annotation-value-input { min-height: 2.8em; resize: none; overflow: hidden; width: 100%; flex: none; }
     .annotation-value-display { 
       cursor: text; padding: 8px 14px; min-height: 1.5em; white-space: pre-wrap; word-break: break-all;
       border-radius: var(--radius-md); border: 1px solid var(--border);
