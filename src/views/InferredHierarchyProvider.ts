@@ -108,7 +108,7 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
       } else {
         const hasChildren = (this.sortedSubClasses.get(element.iri)?.length ?? 0) > 0;
         if (hasChildren) {
-          icon = '>';
+          icon = '›';
         }
       }
     }
