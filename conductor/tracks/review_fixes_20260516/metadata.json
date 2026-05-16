@@ -1,0 +1,8 @@
+{
+  "track_id": "review_fixes_20260516",
+  "type": "bug_fix",
+  "status": "new",
+  "created_at": "2026-05-16T14:15:00Z",
+  "updated_at": "2026-05-16T14:15:00Z",
+  "description": "Fix validation logic in Entity Editor and DL Query panels to support multi-line Manchester expressions, and fix minor spacing in Functional utility."
+}
