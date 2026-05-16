@@ -28,6 +28,7 @@ import type {
 } from '../../src/views/DLQueryMessages.js';
 import { DL_QUERY_TYPE_LABELS, DEFAULT_QUERY_TYPES } from '../../src/views/DLQueryMessages.js';
 import { filterGroups } from './DLQueryFilters.js';
+import { formatManchesterForDisplay, stripAndContinuations } from '../manchesterFormat';
 
 declare function acquireVsCodeApi(): {
   postMessage(msg: DLQueryWebviewToExt): void;
@@ -113,6 +114,11 @@ async function manchesterCompletionSource(context: CompletionContext): Promise<C
   if (prefix.startsWith("'")) {
     prefix = prefix.slice(1);
     if (prefix.endsWith("'")) { prefix = prefix.slice(0, -1); }
+    // Closing quote of previous label was mistaken for opening quote; prefix has a leading space
+    if (!/^[A-Za-z0-9]/.test(prefix)) { return null; }
+  } else {
+    // Unquoted Manchester keywords are not entity names
+    if (MANCHESTER_KEYWORDS.has(prefix)) { return null; }
   }
 
   const reqId = nextReqId++;
@@ -198,6 +204,18 @@ function createExpressionEditor(parent: HTMLElement): EditorView {
         autocompletion({ override: [manchesterCompletionSource] }),
         linter(manchesterLinter, { delay: 400 }),
         vsCodeTheme,
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            const raw = update.state.doc.toString();
+            const logical = stripAndContinuations(raw);
+            const reformatted = formatManchesterForDisplay(logical);
+            if (reformatted !== raw && raw.trimEnd() !== reformatted) {
+              update.view.dispatch({
+                changes: { from: 0, to: raw.length, insert: reformatted },
+              });
+            }
+          }
+        }),
       ],
     }),
     parent,
@@ -289,7 +307,7 @@ function setExecuteEnabled(enabled: boolean): void {
 // ── Event handlers ─────────────────────────────────────────────────────────────
 
 executeBtn.addEventListener('click', () => {
-  const expression = editor.state.doc.toString().trim();
+  const expression = stripAndContinuations(editor.state.doc.toString()).trim();
   if (!expression) {
     showError('Enter a class expression.');
     return;

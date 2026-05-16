@@ -1,5 +1,6 @@
 import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
 import { createAnnotationDisplayElement } from './annotationValueDisplay';
+import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks } from '../manchesterFormat';
 import { EditorState, StateField } from '@codemirror/state';
 import {
   Decoration,
@@ -191,6 +192,11 @@ async function manchesterCompletionSource(context: CompletionContext): Promise<C
     if (prefix.endsWith("'")) {
       prefix = prefix.slice(0, -1);
     }
+    // Closing quote of previous label was mistaken for opening quote; prefix has a leading space
+    if (!/^[A-Za-z0-9]/.test(prefix)) { return null; }
+  } else {
+    // Unquoted Manchester keywords are not entity names
+    if (/^(and|or|not|some|only|all|value|min|max|exactly|that|Self)$/.test(prefix)) { return null; }
   }
 
   const reqId = nextReqId++;
@@ -311,7 +317,17 @@ function createEditor(parent: HTMLElement, initialDoc: string, entityRefs: Expre
         vsCodeTheme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
-            checkForChanges();
+            const raw = update.state.doc.toString();
+            const reformatted = collectLogicalLines(raw)
+              .map(e => formatManchesterForDisplay(e))
+              .join('\n');
+            if (reformatted !== raw && raw.trimEnd() !== reformatted) {
+              update.view.dispatch({
+                changes: { from: 0, to: raw.length, insert: reformatted },
+              });
+            } else {
+              checkForChanges();
+            }
           }
         }),
       ],
@@ -587,6 +603,31 @@ function renderPropertyChainSection(container: HTMLElement): void {
 }
 
 // ── Expression section ────────────────────────────────────────────────────────
+
+/**
+ * The server computes entity-ref offsets against the original single-line
+ * expressions.  After T005 formatting each expression expands by 4 chars per
+ * 'and' break.  Remap every ref so it points at the correct position in the
+ * formatted initialDoc.
+ */
+function shiftRefsForFormattedExpressions(
+  expressions: string[],
+  refs: ExpressionEntityRef[],
+): ExpressionEntityRef[] {
+  let offset = 0;
+  const allBreaks: number[] = [];
+  for (const expr of expressions) {
+    for (const b of findFormatBreaks(expr)) {
+      allBreaks.push(offset + b);
+    }
+    offset += expr.length + 1;  // +1 for '\n' separator between expressions
+  }
+  if (allBreaks.length === 0) { return refs; }
+  return refs.map(ref => {
+    const shift = allBreaks.filter(b => b < ref.from).length * 4;
+    return { ...ref, from: ref.from + shift, to: ref.to + shift };
+  });
+}
 
 function renderExpressionSection(
   container: HTMLElement,
@@ -1094,10 +1135,7 @@ function typeLabel(t: EntityType): string {
 function collectEditorLines(key: string): string[] {
   const editor = editorMap[key];
   if (!editor) { return []; }
-  return editor.state.doc.toString()
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length > 0 && !l.startsWith('#'));
+  return collectLogicalLines(editor.state.doc.toString());
 }
 
 // ── Annotation state helpers ──────────────────────────────────────────────────
@@ -1248,15 +1286,24 @@ function renderEntity(msg: LoadEntityMessage): void {
       iriListState['disjointClassIris'] = msg.disjointClassIris ?? [];
       renderIriListSection(content, 'SubClassOf', 'superClassIris');
       renderExpressionSection(content, 'SubClassOf (expressions)', 'superClassExpressions',
-        (msg.superClassExpressions ?? []).join('\n'),
-        msg.expressionEntityRefs?.['superClassExpressions'] ?? []);
+        (msg.superClassExpressions ?? []).map(e => formatManchesterForDisplay(e)).join('\n'),
+        shiftRefsForFormattedExpressions(
+          msg.superClassExpressions ?? [],
+          msg.expressionEntityRefs?.['superClassExpressions'] ?? [],
+        ));
       renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris');
       renderExpressionSection(content, 'EquivalentTo (expressions)', 'equivalentClassExpressions',
-        (msg.equivalentClassExpressions ?? []).join('\n'),
-        msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? []);
+        (msg.equivalentClassExpressions ?? []).map(e => formatManchesterForDisplay(e)).join('\n'),
+        shiftRefsForFormattedExpressions(
+          msg.equivalentClassExpressions ?? [],
+          msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? [],
+        ));
       renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
-        (msg.gciExpressions ?? []).join('\n'),
-        msg.expressionEntityRefs?.['gciExpressions'] ?? []);
+        (msg.gciExpressions ?? []).map(e => formatManchesterForDisplay(e)).join('\n'),
+        shiftRefsForFormattedExpressions(
+          msg.gciExpressions ?? [],
+          msg.expressionEntityRefs?.['gciExpressions'] ?? [],
+        ));
       renderIriListSection(content, 'DisjointWith', 'disjointClassIris');
       break;
 

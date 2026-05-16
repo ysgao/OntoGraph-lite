@@ -611,7 +611,7 @@ function localName(iri: string): string {
   return pos >= 0 ? iri.slice(pos + 1) : iri;
 }
 
-function validateManchesterText(
+export function validateManchesterText(
   text: string,
 ): { from: number; to: number; severity: 'error' | 'warning'; message: string }[] {
   const errors: { from: number; to: number; severity: 'error' | 'warning'; message: string }[] = [];

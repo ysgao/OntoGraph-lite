@@ -299,6 +299,18 @@ describe('DLQueryPanel', () => {
     expect(Array.isArray(msg.errors)).toBe(true);
   });
 
+  it('validate returns no errors for formatted multi-line expression with continuation "and" line', () => {
+    openDLQueryPanel(fakeContext, fakeBridge, fakeModel, undefined, fakeReveal);
+    getMessageHandler()({ type: 'validate', requestId: 99, text: 'Dog\n    and Cat' });
+    const call = mockPostMessage.mock.calls.find(
+      ([m]) => (m as { type: string }).type === 'validationResult' &&
+               (m as { requestId: number }).requestId === 99,
+    );
+    expect(call).toBeDefined();
+    const msg = call![0] as { type: string; requestId: number; errors: unknown[] };
+    expect(msg.errors).toEqual([]);
+  });
+
   // ── T031: TypeScript-side label resolution ───────────────────────────────────
 
   it('T031a: resolves unquoted label name to angle-bracket IRI before calling dlQuery', async () => {
