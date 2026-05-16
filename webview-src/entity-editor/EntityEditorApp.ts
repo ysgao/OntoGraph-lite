@@ -828,6 +828,17 @@ function renderObjAssertionSection(container: HTMLElement): void {
         newPropIri = iri;
         newPropLabel = lbl;
         localIriLabels[iri] = lbl;
+
+        // Display selected property as a chip
+        inp1.style.display = 'none';
+        const chip = makeChip(lbl, iri, () => {
+          newPropIri = '';
+          chip.remove();
+          inp1.style.display = '';
+          requestAnimationFrame(() => inp1.focus());
+        });
+        w1.insertBefore(chip, inp1);
+
         requestAnimationFrame(() => inp2.focus());
       });
       const inp2 = createIriInput(w2, 'Target…', (iri, lbl) => {
@@ -931,6 +942,17 @@ function renderDataAssertionSection(container: HTMLElement): void {
       const inp1 = createIriInput(w1, 'Property…', (iri, lbl) => {
         newPropIri = iri;
         localIriLabels[iri] = lbl;
+
+        // Display selected property as a chip
+        inp1.style.display = 'none';
+        const chip = makeChip(lbl, iri, () => {
+          newPropIri = '';
+          chip.remove();
+          inp1.style.display = '';
+          requestAnimationFrame(() => inp1.focus());
+        });
+        w1.insertBefore(chip, inp1);
+
         requestAnimationFrame(() => valueInput.focus());
       });
 
@@ -1104,8 +1126,20 @@ function renderAnnotationsSection(container: HTMLElement): void {
       cancelBtn.className = 'add-btn cancel-btn';
       cancelBtn.textContent = 'Cancel';
 
-      const propInput = createIriInput(w1, 'Annotation property…', (iri, _lbl) => {
+      const propInput = createIriInput(w1, 'Annotation property…', (iri, lbl) => {
         newPropIri = iri;
+        localIriLabels[iri] = lbl;
+
+        // Display selected property as a chip
+        propInput.style.display = 'none';
+        const chip = makeChip(lbl, iri, () => {
+          newPropIri = '';
+          chip.remove();
+          propInput.style.display = '';
+          requestAnimationFrame(() => propInput.focus());
+        });
+        w1.insertBefore(chip, propInput);
+
         if (DEFAULT_EN_IRIS.includes(iri) && !langInput.value.trim()) {
           langInput.value = 'en';
         }
