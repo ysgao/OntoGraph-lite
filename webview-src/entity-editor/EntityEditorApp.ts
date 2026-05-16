@@ -1640,8 +1640,7 @@ function injectStyles(): void {
     .header-action-btn:hover { opacity: 1; background: rgba(128,128,128,0.1); border-color: var(--border); }
 
     table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: 4px; }
-    td { padding: 8px 12px; vertical-align: middle; border-bottom: 1px solid var(--border); transition: background 0.1s; }
-    tr:last-child td { border-bottom: none; }
+    td { padding: 8px 12px; vertical-align: middle; transition: background 0.1s; }
     tr:hover td { background: var(--row-hover); }
 
     .lang-tag { 
