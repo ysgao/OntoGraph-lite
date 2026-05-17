@@ -51,6 +51,12 @@ export interface LoadEntityMessage {
     entityType: EntityType;
     label: string;
   }[][]>;
+
+  /** Draft invalid expressions from a previous save, keyed by section. */
+  draftExpressions?: Array<{
+    sectionKey: 'superClassExpressions' | 'equivalentClassExpressions' | 'gciExpressions';
+    text: string;
+  }>;
 }
 
 export interface CompletionResultMessage {
@@ -78,6 +84,12 @@ export interface SaveEntityMessage {
   type: 'save';
   iri: string;
   entityType: EntityType;
+  /** Zero-based indices within each expression array that have CodeMirror error diagnostics. */
+  invalidExpressionIndices?: {
+    superClassExpressions?: number[];
+    equivalentClassExpressions?: number[];
+    gciExpressions?: number[];
+  };
   superClassIris?: string[];
   superClassExpressions?: string[];
   equivalentClassIris?: string[];
@@ -105,7 +117,12 @@ export interface SaveEntityMessage {
   annotations?: Record<string, string[]>;
 }
 
-export type EntityEditorExtToWebview = LoadEntityMessage | CompletionResultMessage | ValidationResultMessage;
+export interface SaveDraftErrorMessage {
+  type: 'saveDraftError';
+  invalidExpressions: Array<{ sectionKey: string; index: number; text: string }>;
+}
+
+export type EntityEditorExtToWebview = LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | SaveDraftErrorMessage;
 export type EntityEditorWebviewToExt =
   | EntityEditorReadyMessage
   | RequestCompletionMessage

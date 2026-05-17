@@ -163,10 +163,7 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-core.ofn` — large (~1.3 MB) BFO ontology for performance testing
 
 ## Recent Changes
-- 007-multi-axiom-editor: Added TypeScript 5+ (strict mode), targeting Node.js (extension host) and browser IIFE bundles (webviews) + CodeMirror 6 (`@codemirror/state`, `@codemirror/view`) — already present; `manchesterFormat.ts` — already presen
-- 006-axiom-display-formatting: Added TypeScript 5+ (strict mode), targeting Node.js (extension host) and browser IIFE bundles (webviews) + CodeMirror 6 (`@codemirror/state`, `@codemirror/view`, `@codemirror/commands`) — already presen
-- 006-axiom-display-formatting: Added TypeScript 5+ (strict mode), targeting browser IIFE bundles + CodeMirror 6 (already present — `@codemirror/state`, `@codemirror/view`, `@codemirror/commands`); no new runtime dependencies
+- 008-invalid-axiom-draft-save: Draft axiom save — invalid expressions held in `Map<string, DraftExpression[]>` (transient; no new storage); blocking dialog guards model-reload operations
+- 008-invalid-axiom-draft-save: Added TypeScript 5+ (strict mode) + VS Code Extension API, CodeMirror 6 (`@codemirror/lint` `^6.9.6` — already installed), Vitest 1.6.0
 
 ## Active Technologies
-- TypeScript 5+ (strict mode), targeting Node.js (extension host) and browser IIFE bundles (webviews) + CodeMirror 6 (`@codemirror/state`, `@codemirror/view`) — already present; `manchesterFormat.ts` — already presen (007-multi-axiom-editor)
-- N/A — no new persistence; OWL document unchanged (007-multi-axiom-editor)

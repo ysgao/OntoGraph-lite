@@ -21,7 +21,7 @@ import {
   type CompletionContext,
   type CompletionResult,
 } from '@codemirror/autocomplete';
-import { linter, type Diagnostic } from '@codemirror/lint';
+import { linter, forEachDiagnostic, type Diagnostic } from '@codemirror/lint';
 import type { StringStream } from '@codemirror/language';
 
 // ── VS Code API ───────────────────────────────────────────────────────────────
@@ -79,6 +79,10 @@ interface LoadEntityMessage {
   isAsymmetric?: boolean;
   iriLabels: Record<string, string>;
   expressionEntityRefs?: Record<string, ExpressionEntityRef[][]>;
+  draftExpressions?: Array<{
+    sectionKey: 'superClassExpressions' | 'equivalentClassExpressions' | 'gciExpressions';
+    text: string;
+  }>;
 }
 
 interface CompletionResultMessage {
@@ -1353,23 +1357,27 @@ function renderEntity(msg: LoadEntityMessage): void {
 
   // Entity-type-specific sections
   switch (msg.entityType) {
-    case 'class':
+    case 'class': {
       iriListState['superClassIris'] = msg.superClassIris ?? [];
       iriListState['equivalentClassIris'] = msg.equivalentClassIris ?? [];
       iriListState['disjointClassIris'] = msg.disjointClassIris ?? [];
+      // Append draft expressions at the end of each section so they appear in editors
+      const draftsFor = (key: string): string[] =>
+        (msg.draftExpressions ?? []).filter(d => d.sectionKey === key).map(d => d.text);
       renderIriListSection(content, 'SubClassOf', 'superClassIris', true);
       renderExpressionSection(content, 'SubClassOf (expressions)', 'superClassExpressions',
-        msg.superClassExpressions ?? [],
+        [...(msg.superClassExpressions ?? []), ...draftsFor('superClassExpressions')],
         msg.expressionEntityRefs?.['superClassExpressions'] ?? [], true);
       renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris', true);
       renderExpressionSection(content, 'EquivalentTo (expressions)', 'equivalentClassExpressions',
-        msg.equivalentClassExpressions ?? [],
+        [...(msg.equivalentClassExpressions ?? []), ...draftsFor('equivalentClassExpressions')],
         msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? [], true);
       renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
-        msg.gciExpressions ?? [],
+        [...(msg.gciExpressions ?? []), ...draftsFor('gciExpressions')],
         msg.expressionEntityRefs?.['gciExpressions'] ?? [], true);
       renderIriListSection(content, 'DisjointWith', 'disjointClassIris');
       break;
+    }
 
     case 'objectProperty':
       iriListState['domainIris'] = msg.domainIris ?? [];
@@ -1505,9 +1513,83 @@ function checkForChanges(): void {
   }
 }
 
+type ExpressionSectionKey = 'superClassExpressions' | 'equivalentClassExpressions' | 'gciExpressions';
+
+const SECTION_LABELS: Record<ExpressionSectionKey, string> = {
+  superClassExpressions: 'SubClassOf expressions',
+  equivalentClassExpressions: 'EquivalentTo expressions',
+  gciExpressions: 'GCI expressions',
+};
+
+const EXPRESSION_SECTIONS: ExpressionSectionKey[] = [
+  'superClassExpressions',
+  'equivalentClassExpressions',
+  'gciExpressions',
+];
+
+function showDraftErrorBanner(invalidExpressions: Array<{ sectionKey: string; index: number; text: string }>): void {
+  const content = document.getElementById('content');
+  if (!content) { return; }
+
+  removeDraftErrorBanner();
+
+  const counts: Partial<Record<string, number>> = {};
+  for (const e of invalidExpressions) {
+    counts[e.sectionKey] = (counts[e.sectionKey] ?? 0) + 1;
+  }
+
+  const lines = Object.entries(counts).map(([key, n]) => {
+    const label = SECTION_LABELS[key as ExpressionSectionKey] ?? key;
+    return `${label}: ${n} invalid draft${n === 1 ? '' : 's'} not saved`;
+  });
+
+  const banner = document.createElement('div');
+  banner.id = 'draft-error-banner';
+  banner.textContent = lines.join(' · ');
+  content.insertAdjacentElement('beforebegin', banner);
+}
+
+function removeDraftErrorBanner(): void {
+  document.getElementById('draft-error-banner')?.remove();
+}
+
+function applyDraftInvalidClass(sectionKey: string, index: number): void {
+  const editors = editorMap[sectionKey];
+  if (!editors) { return; }
+  const view = editors[index];
+  if (!view) { return; }
+  view.dom.closest('.expression-entry')?.classList.add('draft-invalid');
+}
+
+function clearAllDraftInvalidClasses(): void {
+  document.querySelectorAll('.expression-entry.draft-invalid').forEach(el => {
+    el.classList.remove('draft-invalid');
+  });
+}
+
+function collectInvalidExpressionIndices(): Partial<Record<ExpressionSectionKey, number[]>> {
+  const result: Partial<Record<ExpressionSectionKey, number[]>> = {};
+  for (const key of EXPRESSION_SECTIONS) {
+    const editors = editorMap[key] ?? [];
+    const invalid: number[] = [];
+    editors.forEach((view, i) => {
+      let hasError = false;
+      forEachDiagnostic(view.state, (d: Diagnostic) => { if (d.severity === 'error') { hasError = true; } });
+      if (hasError) { invalid.push(i); }
+    });
+    if (invalid.length > 0) { result[key] = invalid; }
+  }
+  return result;
+}
+
 function handleSave(): void {
   const payload = getCurrentState();
   if (!payload.iri) { return; }
+
+  const invalidIndices = collectInvalidExpressionIndices();
+  if (Object.keys(invalidIndices).length > 0) {
+    payload.invalidExpressionIndices = invalidIndices;
+  }
 
   vscode.postMessage(payload);
 
@@ -1735,6 +1817,20 @@ function injectStyles(): void {
     }
     .expression-entry:focus-within .expression-delete-btn { opacity: 0.8; }
     .expression-delete-btn:hover { opacity: 1; transform: scale(1.1); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+    .draft-invalid .expression-editor {
+      outline: 2px solid #f44336;
+      border-color: #f44336;
+      border-radius: 3px;
+    }
+    #draft-error-banner {
+      background: rgba(244, 67, 54, 0.12);
+      border: 1px solid rgba(244, 67, 54, 0.4);
+      border-radius: 4px;
+      color: var(--vscode-errorForeground, #f48771);
+      font-size: 0.85em;
+      padding: 8px 12px;
+      margin-bottom: 16px;
+    }
 
     .annotation-delete-btn { position: absolute; top: 50%; right: -12px; transform: translateY(-50%); opacity: 0; z-index: 10; }
     tr:hover .annotation-delete-btn { opacity: 0.8; }
@@ -1837,7 +1933,7 @@ document.body.appendChild(contentEl);
 // ── Message handler ───────────────────────────────────────────────────────────
 
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage;
+  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
 
   if (msg.type === 'completionResult') {
     pendingCompletions.get(msg.requestId)?.(msg.items);
@@ -1851,8 +1947,33 @@ window.addEventListener('message', (event: MessageEvent) => {
     return;
   }
 
+  if (msg.type === 'saveDraftError') {
+    showDraftErrorBanner(msg.invalidExpressions);
+    for (const e of msg.invalidExpressions) {
+      applyDraftInvalidClass(e.sectionKey, e.index);
+    }
+    return;
+  }
+
   if (msg.type === 'loadEntity') {
     renderEntity(msg);
+    if (msg.draftExpressions && msg.draftExpressions.length > 0) {
+      // Drafts were appended after valid expressions — compute their editor indices.
+      const draftOffsets: Partial<Record<string, number>> = {};
+      const bannerItems = msg.draftExpressions.map(d => {
+        const validLen = ((msg[d.sectionKey as keyof LoadEntityMessage] as string[] | undefined) ?? []).length;
+        const draftPos = draftOffsets[d.sectionKey] ?? 0;
+        draftOffsets[d.sectionKey] = draftPos + 1;
+        return { sectionKey: d.sectionKey, index: validLen + draftPos, text: d.text };
+      });
+      showDraftErrorBanner(bannerItems);
+      for (const item of bannerItems) {
+        applyDraftInvalidClass(item.sectionKey, item.index);
+      }
+    } else {
+      removeDraftErrorBanner();
+      clearAllDraftInvalidClasses();
+    }
     lastSavedStateString = JSON.stringify(getCurrentState());
     checkForChanges();
   }

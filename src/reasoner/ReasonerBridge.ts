@@ -164,6 +164,15 @@ export class ReasonerBridge implements vscode.Disposable {
     return this.request('convertFormat', { content, fromFormat, toFormat }) as Promise<string>;
   }
 
+  isReady(): boolean {
+    return this.ready;
+  }
+
+  async validateExpression(expression: string): Promise<{ valid: boolean; error?: string }> {
+    if (!this.proc) { await this.start(); }
+    return this.request('validateExpression', { expression }) as Promise<{ valid: boolean; error?: string }>;
+  }
+
   async dlQuery(
     format: string,
     content: string | null,

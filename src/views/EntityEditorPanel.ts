@@ -10,8 +10,8 @@ import type {
 } from '../model/OntologyModel';
 import { getLabel } from '../model/OntologyModel';
 import { OntologyIndex } from '../model/OntologyIndex';
-import { ManchesterParser } from '../parser/ManchesterParser';
 import { collectLogicalLines } from '../utils/ManchesterFormatting';
+import type { ReasonerBridge } from '../reasoner/ReasonerBridge';
 import { normalizeExpression, renderExpressionWithEntityRefs, type AxiomDisplayStyle } from '../model/AxiomDisplay';
 import { syncAnnotationsToDocument } from '../sync/AnnotationSync';
 import { syncAxiomsToDocument } from '../sync/AxiomSync';
@@ -21,10 +21,17 @@ import type {
   LoadEntityMessage,
   CompletionResultMessage,
   ValidationResultMessage,
+  SaveDraftErrorMessage,
 } from './EntityEditorMessages';
 import { parsedDocVersions } from '../extension';
 
 // ── Singleton panel ───────────────────────────────────────────────────────────
+
+let reasonerBridge: ReasonerBridge | undefined;
+
+export function setReasonerBridge(bridge: ReasonerBridge | undefined): void {
+  reasonerBridge = bridge;
+}
 
 let panel: vscode.WebviewPanel | undefined;
 let lastIri = '';
@@ -42,6 +49,16 @@ const savedEntityState = new Map<string, {
   labels: OWLEntity['labels'];
   annotations: OWLEntity['annotations'];
 }>();
+
+interface DraftExpression {
+  text: string;
+  sectionKey: 'superClassExpressions' | 'equivalentClassExpressions' | 'gciExpressions';
+}
+
+// Transient draft axiom expressions that failed syntax validation at save time.
+// Never written to the OWL document. Keyed by entity IRI.
+// Cleared when the user chooses "Discard and proceed" before a model reload.
+const draftAxioms = new Map<string, DraftExpression[]>();
 
 // True while syncAnnotationsToDocument's applyEdit is still in flight.
 // Used by refreshEntityEditorIfOpen to decide whether to trust savedEntityState.
@@ -78,14 +95,64 @@ function fireRefresh(): void {
   for (const cb of refreshCallbacks) { cb(); }
 }
 
+export function hasDraftAxioms(): boolean { return draftAxioms.size > 0; }
+
+function discardAllDrafts(): void { draftAxioms.clear(); }
+
+async function promptForDraftDiscard(
+  context: vscode.ExtensionContext,
+  model: OntologyModel,
+): Promise<'proceed' | 'cancel'> {
+  const entityIris = [...draftAxioms.keys()];
+  const entityLabels = entityIris.map(iri => {
+    const e = findEntity(model, iri);
+    return e ? getLabel(e) : iri;
+  });
+
+  const message =
+    `OntoGraph: The following entities have unsaved invalid draft axioms that will be lost: ${entityLabels.join(', ')}. ` +
+    'Fix them before proceeding, or discard them.';
+
+  const choice = await vscode.window.showWarningMessage(
+    message,
+    { modal: true },
+    'Discard and proceed',
+    ...entityLabels,
+  );
+
+  if (choice === 'Discard and proceed') {
+    discardAllDrafts();
+    return 'proceed';
+  }
+
+  const labelIndex = entityLabels.indexOf(choice ?? '');
+  if (labelIndex !== -1 && panel) {
+    showEntityInfo(context, model, entityIris[labelIndex]);
+  }
+
+  return 'cancel';
+}
+
 /**
  * Called by the extension whenever a new model is available (after re-parsing).
  * Pushes fresh entity data to the open panel so direct file edits are reflected.
  * If an applyEdit from the entity editor is still in flight, savedEntityState is
  * kept so its data wins over the potentially stale intermediate model.
+ *
+ * If draft invalid axioms are present and context is provided, shows a blocking
+ * dialog before reloading. Returns without refreshing if the user cancels.
  */
-export function refreshEntityEditorIfOpen(model: OntologyModel): void {
+export async function refreshEntityEditorIfOpen(
+  model: OntologyModel,
+  context?: vscode.ExtensionContext,
+): Promise<void> {
   if (!panel || !lastIri) { return; }
+
+  if (hasDraftAxioms() && context) {
+    const decision = await promptForDraftDiscard(context, model);
+    if (decision === 'cancel') { return; }
+  }
+
   currentPanelModel = model;
   if (!_annotationSyncActive) {
     // External model refresh (e.g. user edited the file directly) — drop any
@@ -173,10 +240,13 @@ function handleMessage(
     }
 
     case 'validate': {
-      const errors = validateManchesterText(msg.text);
+      const { requestId, text } = msg;
+      const vModel = currentPanelModel ?? model;
+      const vIndex = getIndex(vModel);
+      const errors = validateManchesterText(text, vModel, vIndex);
       const response: ValidationResultMessage = {
         type: 'validationResult',
-        requestId: msg.requestId,
+        requestId,
         errors,
       };
       void p.webview.postMessage(response as EntityEditorExtToWebview);
@@ -192,14 +262,37 @@ function handleMessage(
       const classificationAffectingChange = hasClassificationAffectingChange(entity, msg);
       const index = getIndex(model);
 
+      // Collect draft expressions that failed validation (either flagged by the
+      // webview linter OR rejected by server-side parse at save time).  Server-side
+      // validation is the authoritative gate; the webview hint is a belt-and-suspenders
+      // fallback for the timing window before the async linter completes.
+      const newDrafts: DraftExpression[] = [];
+      const invalidIdx = msg.invalidExpressionIndices;
+
+      function filterSection(
+        expressions: string[] | undefined,
+        sectionKey: DraftExpression['sectionKey'],
+      ): string[] {
+        const all = expressions ?? [];
+        const webviewBad = new Set(invalidIdx?.[sectionKey] ?? []);
+        return all.filter((text, i) => {
+          const isInvalid = webviewBad.has(i);
+          if (isInvalid) { newDrafts.push({ text, sectionKey }); }
+          return !isInvalid;
+        });
+      }
+
       switch (msg.entityType) {
         case 'class': {
           const cls = entity as OWLClass;
           cls.superClassIris = msg.superClassIris ?? [];
-          cls.superClassExpressions = (msg.superClassExpressions ?? []).map(e => normalizeExpression(e, model, index));
+          const validSuper = filterSection(msg.superClassExpressions, 'superClassExpressions');
+          cls.superClassExpressions = validSuper.map(e => normalizeExpression(e, model, index));
           cls.equivalentClassIris = msg.equivalentClassIris ?? [];
-          cls.equivalentClassExpressions = (msg.equivalentClassExpressions ?? []).map(e => normalizeExpression(e, model, index));
-          cls.gciExpressions = (msg.gciExpressions ?? []).map(e => normalizeExpression(e, model, index));
+          const validEquiv = filterSection(msg.equivalentClassExpressions, 'equivalentClassExpressions');
+          cls.equivalentClassExpressions = validEquiv.map(e => normalizeExpression(e, model, index));
+          const validGci = filterSection(msg.gciExpressions, 'gciExpressions');
+          cls.gciExpressions = validGci.map(e => normalizeExpression(e, model, index));
           cls.disjointClassIris = msg.disjointClassIris ?? [];
           break;
         }
@@ -247,6 +340,23 @@ function handleMessage(
 
       if (msg.labels !== undefined)      { entity.labels = msg.labels; }
       if (msg.annotations !== undefined) { entity.annotations = msg.annotations; }
+
+      // Update draft map: store new invalid drafts, or clear if all valid.
+      if (newDrafts.length > 0) {
+        draftAxioms.set(msg.iri, newDrafts);
+        const errMsg: SaveDraftErrorMessage = {
+          type: 'saveDraftError',
+          invalidExpressions: newDrafts.map((d, originalIndex) => {
+            // Reconstruct the original index within the full (pre-filter) expression array.
+            const allForSection = msg[d.sectionKey] ?? [];
+            const idx = (allForSection as string[]).indexOf(d.text);
+            return { sectionKey: d.sectionKey, index: idx === -1 ? originalIndex : idx, text: d.text };
+          }),
+        };
+        void p.webview.postMessage(errMsg as EntityEditorExtToWebview);
+      } else {
+        draftAxioms.delete(msg.iri);
+      }
 
       // Invalidate the index so label changes are reflected in autocomplete
       _cachedIndex = undefined;
@@ -453,6 +563,11 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
     msg.dataPropertyAssertions = ind.dataPropertyAssertions;
   }
 
+  const drafts = draftAxioms.get(iri);
+  if (drafts && drafts.length > 0) {
+    msg.draftExpressions = drafts.map(d => ({ sectionKey: d.sectionKey, text: d.text }));
+  }
+
   void p.webview.postMessage(msg as EntityEditorExtToWebview);
 }
 
@@ -608,55 +723,120 @@ function localName(iri: string): string {
   return pos >= 0 ? iri.slice(pos + 1) : iri;
 }
 
+type ValidationError = { from: number; to: number; severity: 'error' | 'warning'; message: string };
+
+// Wraps bare HTTP(S) IRIs with angle brackets so the Manchester parser sees
+// the <IRI> token form it expects.  Mirrors the helper in DLQueryPanel.ts.
+function wrapIrisInAngleBrackets(expr: string): string {
+  return expr.replace(/https?:\/\/[^\s(),{}<>]+/g, u => `<${u}>`);
+}
+
+// Normalises display-format text to a single-line <IRI>-form Manchester
+// expression.  Steps:
+//   1. collectLogicalLines  — join visual line-continuations ("    and …")
+//   2. normalizeExpression  — resolve label tokens to bare IRIs (requires model)
+//   3. wrapIrisInAngleBrackets — wrap bare IRIs in < >
+// Returns the normalised lines (usually one per editor).
+function toNormalisedLines(text: string, model: OntologyModel, index: OntologyIndex): string[] {
+  return collectLogicalLines(text)
+    .map(line => wrapIrisInAngleBrackets(normalizeExpression(line, model, index)));
+}
+
+const DANGLING_KW = new Set([
+  'some', 'only', 'and', 'or', 'not', 'min', 'max', 'exactly', 'value',
+]);
+
+// Manchester logical/restriction keywords (lowercase) used in entity-ref scan.
+const MANCHESTER_KW_LC = new Set([
+  'some', 'only', 'value', 'min', 'max', 'exactly', 'and', 'or', 'not', 'that', 'self',
+]);
+
+// Returns true when a Manchester expression is structurally incomplete —
+// ends with a keyword that requires an argument, or has unbalanced parens.
+function isIncomplete(expr: string): boolean {
+  const parts = expr.trimEnd().split(/\s+/);
+  const last = parts[parts.length - 1]?.toLowerCase() ?? '';
+  if (DANGLING_KW.has(last)) { return true; }
+  let depth = 0;
+  for (const c of expr) {
+    if (c === '(') { depth++; }
+    else if (c === ')') { depth--; if (depth < 0) { return true; } }
+  }
+  return depth !== 0;
+}
+
+// After toNormalisedLines, resolved entity references become <IRI> tokens.
+// Any remaining bare word (not a keyword or number) or single-quoted string
+// is an entity reference that could not be resolved to a model entity.
+function hasUnresolvedEntityRef(normalizedLine: string): boolean {
+  let i = 0;
+  const n = normalizedLine.length;
+  while (i < n) {
+    const c = normalizedLine[i];
+    if (' \t\n\r(),{}'.includes(c)) { i++; continue; }
+
+    // Angle-bracket IRI — resolved entity reference
+    if (c === '<') {
+      const end = normalizedLine.indexOf('>', i + 1);
+      i = end > i ? end + 1 : i + 1;
+      continue;
+    }
+
+    // Single-quoted string — label that failed to resolve to any entity IRI
+    if (c === "'") { return true; }
+
+    // Double-quoted string literal — not an entity ref
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n && normalizedLine[j] !== '"') {
+        if (normalizedLine[j] === '\\') { j++; }
+        j++;
+      }
+      i = j + 1;
+      continue;
+    }
+
+    // Read bare token
+    const start = i;
+    while (i < n && !' \t\n\r(),{}"\'<>'.includes(normalizedLine[i])) { i++; }
+    const token = normalizedLine.slice(start, i);
+    if (!token) { i++; continue; }
+
+    // Pure number — shortIri display mode uses numeric SNOMED codes; skip
+    if (/^\d+(\.\d+)?$/.test(token)) { continue; }
+
+    // Manchester keyword
+    if (MANCHESTER_KW_LC.has(token.toLowerCase())) { continue; }
+
+    // Bare IRI without angle brackets (should not occur after wrapIrisInAngleBrackets)
+    if (token.startsWith('http://') || token.startsWith('https://')) { continue; }
+
+    // Anything else is an unresolved entity reference
+    return true;
+  }
+  return false;
+}
+
 export function validateManchesterText(
   text: string,
+  model?: OntologyModel,
+  index?: OntologyIndex,
 ): { from: number; to: number; severity: 'error' | 'warning'; message: string }[] {
   const errors: { from: number; to: number; severity: 'error' | 'warning'; message: string }[] = [];
-  
-  const rawLines = text.split('\n');
-  let currentLogical = '';
-  let logicalStartOffset = -1;
-  let currentOffset = 0;
 
-  const validate = (logical: string, start: number, end: number) => {
-    if (!logical || logical.startsWith('#')) return;
-    const wrappedDoc = `Prefix: : <http://example.org/>\nClass: :_TmpClass\n  SubClassOf: ${logical}\n`;
-    try {
-      new ManchesterParser(wrappedDoc, '').parse();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      // Map error to the entire logical expression range in the multi-line text
-      errors.push({ from: start, to: end, severity: 'error', message });
+  // When model and index are available, normalise to <IRI> form so that:
+  // (a) label tokens (e.g. 'Body structure') are not mistaken for dangling keywords
+  // (b) unresolved entity references (unknown labels/names) can be detected
+  const lines = (model && index)
+    ? toNormalisedLines(text, model, index)
+    : collectLogicalLines(text);
+
+  for (const line of lines) {
+    if (isIncomplete(line)) {
+      errors.push({ from: 0, to: text.length, severity: 'error', message: 'Incomplete expression' });
+    } else if (model && index && hasUnresolvedEntityRef(line)) {
+      errors.push({ from: 0, to: text.length, severity: 'error', message: 'Unknown entity reference' });
     }
-  };
-
-  for (let i = 0; i < rawLines.length; i++) {
-    const raw = rawLines[i];
-    const trimmed = raw.trim();
-    const lineLen = raw.length + 1; // +1 for \n
-
-    if (trimmed.length === 0 || trimmed.startsWith('#')) {
-      if (currentLogical) {
-        validate(currentLogical, logicalStartOffset, currentOffset - 1);
-        currentLogical = '';
-        logicalStartOffset = -1;
-      }
-    } else if (/^and\s/i.test(trimmed) && currentLogical) {
-      // Continuation line
-      currentLogical += ' ' + trimmed;
-    } else {
-      // New logical line. Flush previous.
-      if (currentLogical) {
-        validate(currentLogical, logicalStartOffset, currentOffset - 1);
-      }
-      currentLogical = trimmed;
-      logicalStartOffset = currentOffset;
-    }
-    currentOffset += lineLen;
-  }
-
-  if (currentLogical) {
-    validate(currentLogical, logicalStartOffset, currentOffset - 1);
   }
 
   return errors;

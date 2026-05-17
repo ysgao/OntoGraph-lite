@@ -38,6 +38,8 @@ vi.mock('../extension.js', () => ({
 
 import { validateManchesterText, renderExpressionsWithRefs } from './EntityEditorPanel.js';
 import { createEmptyModel } from '../model/OntologyModel.js';
+import type { OWLClass, OWLObjectProperty } from '../model/OntologyModel.js';
+import { OntologyIndex } from '../model/OntologyIndex.js';
 
 describe('renderExpressionsWithRefs', () => {
   it('produces an array-of-arrays indexed by expression position', () => {
@@ -101,5 +103,69 @@ describe('validateManchesterText', () => {
   it('skips comment lines without error', () => {
     const result = validateManchesterText('# this is a comment\nowl:Thing');
     expect(result).toEqual([]);
+  });
+});
+
+describe('validateManchesterText – entity existence checking (with model + index)', () => {
+  function buildModel() {
+    const model = createEmptyModel('http://example.org/test');
+    const bodyStructure: OWLClass = {
+      iri: 'http://example.org/test#BodyStructure',
+      type: 'class',
+      labels: { en: ['Body structure'] },
+      annotations: {},
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+    const partOf: OWLObjectProperty = {
+      iri: 'http://example.org/test#partOf',
+      type: 'objectProperty',
+      labels: { en: ['All or part of'] },
+      annotations: {},
+      superPropertyIris: [],
+      domainIris: [],
+      rangeIris: [],
+    };
+    model.classes.set(bodyStructure.iri, bodyStructure);
+    model.objectProperties.set(partOf.iri, partOf);
+    const index = new OntologyIndex(model);
+    return { model, index };
+  }
+
+  it('returns no errors for a valid label-mode expression with known entities', () => {
+    const { model, index } = buildModel();
+    const result = validateManchesterText("'All or part of' some 'Body structure'", model, index);
+    expect(result).toEqual([]);
+  });
+
+  it('returns an error when a bare word does not match any entity', () => {
+    const { model, index } = buildModel();
+    const result = validateManchesterText("'Body structure' and 'All or part of' some dkdfj", model, index);
+    expect(result).toHaveLength(1);
+    expect(result[0].message).toMatch(/unknown entity/i);
+  });
+
+  it('returns an error when a single-quoted label is not in the model', () => {
+    const { model, index } = buildModel();
+    const result = validateManchesterText("'All or part of' some 'NonExistentEntity'", model, index);
+    expect(result).toHaveLength(1);
+    expect(result[0].message).toMatch(/unknown entity/i);
+  });
+
+  it('returns no errors for owl:Thing (builtin prefix)', () => {
+    const { model, index } = buildModel();
+    const result = validateManchesterText('owl:Thing', model, index);
+    expect(result).toEqual([]);
+  });
+
+  it('returns an incomplete error (not unknown-entity) when expression ends with a keyword', () => {
+    const { model, index } = buildModel();
+    const result = validateManchesterText("'All or part of' some", model, index);
+    expect(result).toHaveLength(1);
+    expect(result[0].message).toMatch(/incomplete/i);
   });
 });

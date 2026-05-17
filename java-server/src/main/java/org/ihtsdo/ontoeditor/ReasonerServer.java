@@ -68,6 +68,8 @@ public class ReasonerServer {
                     return success(idNode, convertFormat(params, service));
                 case "dlQuery":
                     return success(idNode, dlQuery(params, service));
+                case "validateExpression":
+                    return success(idNode, validateExpression(params, service));
                 default:
                     return error(idNode, "Unknown method: " + method);
             }
@@ -180,6 +182,17 @@ public class ReasonerServer {
         node.set("directSubClasses",   MAPPER.valueToTree(result.directSubClasses));
         node.set("subClasses",         MAPPER.valueToTree(result.subClasses));
         node.set("instances",          MAPPER.valueToTree(result.instances));
+        return node;
+    }
+
+    private static ObjectNode validateExpression(JsonNode params, OntologyService service) {
+        String expression = params.path("expression").asText();
+        OntologyService.ValidationResult result = service.validateClassExpression(expression);
+        ObjectNode node = MAPPER.createObjectNode();
+        node.put("valid", result.valid);
+        if (!result.valid) {
+            node.put("error", result.error);
+        }
         return node;
     }
 

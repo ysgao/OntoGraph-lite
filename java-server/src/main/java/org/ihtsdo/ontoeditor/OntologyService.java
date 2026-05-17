@@ -16,6 +16,7 @@ import org.semanticweb.owlapi.util.BidirectionalShortFormProviderAdapter;
 import org.semanticweb.owlapi.util.SimpleShortFormProvider;
 import org.semanticweb.owlapi.util.mansyntax.ManchesterOWLSyntaxParser;
 
+import javax.annotation.Nonnull;
 import java.io.File;
 import java.util.*;
 
@@ -69,6 +70,16 @@ public class OntologyService {
             this.directSubClasses = directSubClasses;
             this.subClasses = subClasses;
             this.instances = instances;
+        }
+    }
+
+    public static class ValidationResult {
+        public final boolean valid;
+        public final String error;
+
+        ValidationResult(boolean valid, String error) {
+            this.valid = valid;
+            this.error = error;
         }
     }
 
@@ -288,6 +299,56 @@ public class OntologyService {
                                      directSubClasses, subClasses, instances);
         } finally {
             reasoner.dispose();
+        }
+    }
+
+    /**
+     * Validate a single Manchester Syntax class expression for syntactic correctness.
+     * Uses a permissive entity checker that accepts any name, so no ontology context
+     * is required. This enables fast, lightweight validation without loading a file.
+     *
+     * @param expression  A single-line or multi-line class expression (newlines are treated
+     *                    as whitespace by the OWLAPI Manchester parser).
+     * @return ValidationResult with valid=true on success, or valid=false plus an error
+     *         message on syntax failure.
+     */
+    public ValidationResult validateClassExpression(@Nonnull String expression) {
+        OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
+        OWLDataFactory df = manager.getOWLDataFactory();
+
+        // Permissive checker: returns a synthetic OWL entity for any name.
+        // This allows pure structural/syntax validation without requiring declared entities.
+        OWLEntityChecker permissiveChecker = new OWLEntityChecker() {
+            @Override public OWLClass getOWLClass(@Nonnull String n) {
+                return df.getOWLClass(Objects.requireNonNull(IRI.create("urn:validate:" + n)));
+            }
+            @Override public OWLObjectProperty getOWLObjectProperty(@Nonnull String n) {
+                return df.getOWLObjectProperty(Objects.requireNonNull(IRI.create("urn:validate:" + n)));
+            }
+            @Override public OWLDataProperty getOWLDataProperty(@Nonnull String n) {
+                return df.getOWLDataProperty(Objects.requireNonNull(IRI.create("urn:validate:" + n)));
+            }
+            @Override public OWLAnnotationProperty getOWLAnnotationProperty(@Nonnull String n) {
+                return df.getOWLAnnotationProperty(Objects.requireNonNull(IRI.create("urn:validate:" + n)));
+            }
+            @Override public OWLDatatype getOWLDatatype(@Nonnull String n) {
+                return df.getOWLDatatype(Objects.requireNonNull(IRI.create("urn:validate:" + n)));
+            }
+            @Override public OWLNamedIndividual getOWLIndividual(@Nonnull String n) {
+                return df.getOWLNamedIndividual(Objects.requireNonNull(IRI.create("urn:validate:" + n)));
+            }
+        };
+
+        ManchesterOWLSyntaxParser parser = OWLManager.createManchesterParser();
+        parser.setOWLEntityChecker(permissiveChecker);
+        parser.setStringToParse(expression);
+
+        try {
+            parser.parseClassExpression();
+            return new ValidationResult(true, null);
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            return new ValidationResult(false, msg != null ? msg : e.getClass().getSimpleName());
         }
     }
 

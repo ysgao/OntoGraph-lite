@@ -12,7 +12,7 @@ import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
-import { showEntityInfo, refreshEntityEditorIfOpen } from './views/EntityEditorPanel';
+import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
 import { updateDLQueryModel } from './views/DLQueryPanel';
@@ -96,6 +96,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Reasoner bridge ---
   const reasonerBridge = new ReasonerBridge(context.extensionPath);
   context.subscriptions.push(reasonerBridge);
+  setReasonerBridge(reasonerBridge);
 
   // --- Persistent stats status bar item ---
   const statsBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -227,7 +228,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ontograph.classifyOntology', async () => {
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
-      if (activeModel) { refreshEntityEditorIfOpen(activeModel); }
+      if (activeModel) { await refreshEntityEditorIfOpen(activeModel, context); }
     }),
 
     vscode.commands.registerCommand('ontograph.classifyOntologyStale', async () => {
@@ -239,7 +240,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
-      if (activeModel) { refreshEntityEditorIfOpen(activeModel); }
+      if (activeModel) { await refreshEntityEditorIfOpen(activeModel, context); }
     }),
 
     vscode.commands.registerCommand('ontograph.checkConsistency', () =>
@@ -355,7 +356,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       activeModel = model;
       refreshAllViews(model);
-      refreshEntityEditorIfOpen(model);
+      await refreshEntityEditorIfOpen(model, context);
       updateDLQueryModel(model, activeIndex);
 
       const { classes, objectProperties, dataProperties, individuals } = model;
