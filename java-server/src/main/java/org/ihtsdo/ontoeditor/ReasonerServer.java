@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -186,7 +187,7 @@ public class ReasonerServer {
     }
 
     private static ObjectNode validateExpression(JsonNode params, OntologyService service) {
-        String expression = params.path("expression").asText();
+        String expression = Objects.requireNonNull(params.path("expression").asText());
         OntologyService.ValidationResult result = service.validateClassExpression(expression);
         ObjectNode node = MAPPER.createObjectNode();
         node.put("valid", result.valid);
