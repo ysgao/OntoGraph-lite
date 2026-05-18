@@ -1,8 +1,8 @@
 {
-  "name": "ontograph",
-  "displayName": "OntoGraph: OWL Ontology Editor",
+  "name": "ontograph-lite",
+  "displayName": "OntoGraph Lite: OWL Ontology Editor",
   "version": "0.1.4",
-  "publisher": "ihtsdo",
+  "publisher": "ysgao",
   "description": "Protégé-like OWL ontology editing, reasoning, and visualization for VS Code",
   "icon": "resources/icons/ontology.png",
   "keywords": [
