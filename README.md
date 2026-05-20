@@ -1,4 +1,4 @@
-# OntoGraph: OWL Ontology Editor for VS Code
+# OntoGraph-lite: OWL Ontology Editor lite version for VS Code
 
 OntoGraph is a Protégé-like OWL 2 ontology editing, reasoning, and visualization extension for Visual Studio Code. It is designed to handle everything from small toy ontologies to SNOMED CT-scale knowledge bases.
 
