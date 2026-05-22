@@ -14,7 +14,8 @@ To provide a lightweight yet powerful alternative to Protégé within the modern
 ## Key Features
 - **Multi-format Support:** Native support for OWL Functional Syntax, Manchester Syntax, OWL/XML, and Turtle.
 - **Integrated Reasoning:** Side-by-side Asserted vs. Inferred hierarchies using HermiT and ELK.
-- **Structured Editing:** User-friendly Entity Editor for annotations and axioms with Manchester syntax support.
+- **Structured Editing:** User-friendly Entity Editor for annotations and axioms with Manchester syntax support, including draft-save for invalid expressions.
+- **DL Query:** Protégé-style DL Query panel — enter a Manchester class expression, execute against the reasoner, get six grouped result sections with name filtering and owl:Thing/owl:Nothing controls.
 - **Visualization:** Interactive neighborhood graphs to explore complex entity relationships.
 - **SPARQL Support:** Built-in editor for querying ontologies.
 - **High Performance:** Optimized for large-scale ontologies (e.g., SNOMED CT) using worker threads and high-efficiency reasoners.

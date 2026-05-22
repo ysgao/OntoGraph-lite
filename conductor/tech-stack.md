@@ -1,8 +1,8 @@
-1# Tech Stack: OntoGraph
+# Tech Stack: OntoGraph
 
 ## Core Technologies
-- **Extension Layer:** TypeScript (Node.js) - used for VS Code extension logic, command registration, and view management.
-- **Reasoning Backend:** Java 21 - provides the heavy lifting for OWL reasoning via a JSON-RPC server.
+- **Extension Layer:** TypeScript (Node.js 18+) - used for VS Code extension logic, command registration, and view management.
+- **Reasoning Backend:** Java 21 (minimum) - provides the heavy lifting for OWL reasoning via a JSON-RPC server.
 - **UI Components:** Webviews (HTML/CSS/JS) - used for complex editors and visualizations.
 
 ## Frameworks & Libraries

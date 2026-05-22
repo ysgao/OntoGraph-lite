@@ -29,7 +29,9 @@
       "Bash(.specify/scripts/bash/create-new-feature.sh The annotations for annotation properties skos:definition and rdfs:comment require more space for text entries. Change the field to area of multiple lines in the UI of entity editor. *)",
       "Bash(.specify/scripts/bash/create-new-feature.sh the URLs in all annotations should be displayed as clickable links. *)",
       "Bash(grep -n \"^[A-Z][a-zA-Z]*$\" /Users/yoga/JavaApp/OntoGraph/src/parser/manchester/owl-manchester.peggy)",
-      "Bash(.specify/scripts/bash/create-new-feature.sh *)"
+      "Bash(.specify/scripts/bash/create-new-feature.sh *)",
+      "Bash(awk '{print $NF}')",
+      "Bash(xargs -I {} basename {})"
     ]
   }
 }

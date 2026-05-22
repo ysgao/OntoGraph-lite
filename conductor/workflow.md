@@ -145,34 +145,38 @@ Before marking any task complete, verify:
 - [ ] All public functions/methods are documented (e.g., docstrings, JSDoc)
 - [ ] Type safety is enforced (e.g., TypeScript types)
 - [ ] No linting or static analysis errors
-- [ ] Large ontology benchmark pass (`test-ontologies/anatomy.owl`)
+- [ ] Large ontology benchmark pass (`test-ontologies/bfo-core.ofn`)
 - [ ] OWL Functional Syntax ordering preserved
 - [ ] Documentation updated if needed
 - [ ] No security vulnerabilities (IPC validation, IRI injection)
 
 ## Development Commands
 
-**AI AGENT INSTRUCTION: This section should be adapted to the project's specific language, framework, and build tools.**
-
 ### Setup
 ```bash
-# Example: Commands to set up the development environment (e.g., install dependencies, configure database)
-# e.g., for a Node.js project: npm install
-# e.g., for a Go project: go mod tidy
+npm install                              # install Node dependencies
+cd java-server && mvn clean package      # build fat JAR (only needed after Java changes)
 ```
 
 ### Daily Development
 ```bash
-# Example: Commands for common daily tasks (e.g., start dev server, run tests, lint, format)
-# e.g., for a Node.js project: npm run dev, npm test, npm run lint
-# e.g., for a Go project: go run main.go, go test ./..., go fmt ./...
+npm run build:watch      # TypeScript watch mode (rebuilds dist/ on save)
+npm run test:watch       # Vitest watch mode
+npm run compile          # type-check extension (no emit)
+npm run compile:webview  # type-check webview bundles
 ```
 
 ### Before Committing
 ```bash
-# Example: Commands to run all pre-commit checks (e.g., format, lint, type check, run tests)
-# e.g., for a Node.js project: npm run check
-# e.g., for a Go project: make check (if a Makefile exists)
+npm test                 # full test suite (Vitest, single run)
+npm run compile          # extension type check
+npm run compile:webview  # webview type check
+npm run build            # production build — confirm dist/ is clean
+```
+
+### Packaging
+```bash
+npm run package          # produce ontograph-lite-x.x.x.vsix
 ```
 
 ## Testing Requirements

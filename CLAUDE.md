@@ -68,23 +68,23 @@ Within each class cluster: annotations first (labels, then other), then `Equival
 **IRI abbreviation rule:** The four RDFS built-in annotation property IRIs are written as abbreviated tokens: `rdfs:label`, `rdfs:comment`, `rdfs:seeAlso`, `rdfs:isDefinedBy`. All other IRIs — including entity IRIs, other annotation property IRIs, and class expression IRIs — use the full `<IRI>` bracket form. This matches Protégé output.
 
 **6. Commands Layer** (`src/commands/`)
-One file per VS Code command: `classifyOntology`, `checkConsistency`, `exportOntology`, `addEntity`, `openVisualization`, `openSparqlEditor`. Commands read the shared `activeModel`/`activeIndex` from `extension.ts`.
+One file per VS Code command: `classifyOntology`, `checkConsistency`, `exportOntology`, `addEntity`, `openVisualization`, `openSparqlEditor`, `openDLQuery`. Commands read the shared `activeModel`/`activeIndex` from `extension.ts`.
 
 **7. Reasoner Bridge** (`src/reasoner/ReasonerBridge.ts`)
-Spawns the Java JAR as a child process and communicates via JSON-RPC. Sends requests (classify, checkConsistency, convertFormat) and returns inferred hierarchy/consistency results.
+Spawns the Java JAR as a child process and communicates via JSON-RPC. Sends requests (classify, checkConsistency, convertFormat, dlQuery) and returns inferred hierarchy/consistency/query results.
 
 **8. Java Server** (`java-server/src/main/java/org/ihtsdo/ontoeditor/`)
 `ReasonerServer.java` is the entry point (JSON-RPC on stdin/stdout). `OntologyService.java` wraps OWLAPI 5. Auto-selects HermiT (full OWL 2 DL) or ELK (scalable, for >5k classes) — threshold configurable via extension settings.
 
 **9. Views & Webviews** (`src/views/`, `webview-src/`)
-Tree providers populate the sidebar panels. Three webview bundles (graph, entity-editor, sparql-editor) are built separately. Messages between extension and webviews are typed in `src/views/*Messages.ts`.
+Tree providers populate the sidebar panels. Four webview bundles (graph, entity-editor, sparql-editor, dl-query) are built separately. Messages between extension and webviews are typed in `src/views/*Messages.ts`. `DLQueryPanel.ts` is a singleton panel for DL query execution; `DLQueryState.ts` exports the `temporaryClassIris` set used to inhibit sync-to-disk during in-flight queries.
 
 **10. LSP Server** (`src/lsp/`)
 A Language Server Protocol server (`server/server.ts`) provides completions and diagnostics for OWL files. Launched by `client.ts` as a separate Node process.
 
 ## Build Outputs (`dist/`)
 
-`esbuild.mjs` produces six bundles:
+`esbuild.mjs` produces seven bundles:
 
 | Bundle | Entry | Target |
 |--------|-------|--------|
@@ -94,6 +94,7 @@ A Language Server Protocol server (`server/server.ts`) provides completions and 
 | `graph-webview.js` | `webview-src/graph/GraphViewApp.ts` | Browser/IIFE |
 | `entity-editor-webview.js` | `webview-src/entity-editor/EntityEditorApp.ts` | Browser/IIFE |
 | `sparql-editor-webview.js` | `webview-src/sparql-editor/SparqlEditorApp.ts` | Browser/IIFE |
+| `dl-query-webview.js` | `webview-src/dl-query/DLQueryApp.ts` | Browser/IIFE |
 
 ## Key Files
 
@@ -106,9 +107,11 @@ A Language Server Protocol server (`server/server.ts`) provides completions and 
 | `src/sync/AxiomSync.ts` | In-place axiom writes back to source file |
 | `src/sync/AnnotationSync.ts` | In-place annotation writes back to source file |
 | `src/reasoner/ReasonerBridge.ts` | Java process lifecycle + JSON-RPC |
+| `src/views/DLQueryPanel.ts` | Singleton DL query panel; TempClass lifecycle management |
+| `src/views/DLQueryState.ts` | Exports `temporaryClassIris` set; inhibits sync during in-flight queries |
 | `java-server/.../ReasonerServer.java` | Java entry point |
 | `java-server/.../OntologyService.java` | OWLAPI 5 wrapper |
-| `esbuild.mjs` | Build config — 6 output bundles |
+| `esbuild.mjs` | Build config — 7 output bundles |
 | `ContentArrangementInOWLfunctionalSyntaxDocument.md` | Reference for OWL Functional Syntax ordering conventions |
 
 ## Code Style
@@ -148,7 +151,7 @@ The `conductor/` directory contains project management documents:
 4. Commit code; attach summary via `git notes add -m "<summary>" <sha>`
 5. Update task to `[x] <7-char-sha>` in `plan.md`; commit with `conductor(plan):` scope
 
-**Quality gates before marking a task complete:** all tests pass, coverage >80%, no type errors (`npm run compile`), OWL Functional Syntax ordering preserved, large ontology benchmark passes (`test-ontologies/anatomy.owl`).
+**Quality gates before marking a task complete:** all tests pass, coverage >80%, no type errors (`npm run compile`), OWL Functional Syntax ordering preserved, large ontology benchmark passes (`test-ontologies/bfo-core.ofn`).
 
 Commit convention: `<type>(<scope>): <description>` where type is `feat`, `fix`, `refactor`, `test`, `docs`, or `chore`. Conductor commits use `conductor(plan):` scope.
 
@@ -160,10 +163,12 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 
 `test-ontologies/` contains sample files for manual testing:
 - `animals.omn` / `animals.owx` / `animals.ttl` — small examples for all formats
-- `bfo-core.ofn` — large (~1.3 MB) BFO ontology for performance testing
+- `bfo-core.ofn` — large (~94 KB) BFO ontology for performance testing
+- `pizza.owl` — OWL/XML format example (~163 KB)
+- `bfo-classes-only.ofn` — minimal BFO classes
 
 ## Recent Changes
 - 008-invalid-axiom-draft-save: Draft axiom save — invalid expressions held in `Map<string, DraftExpression[]>` (transient; no new storage); blocking dialog guards model-reload operations
-- 008-invalid-axiom-draft-save: Added TypeScript 5+ (strict mode) + VS Code Extension API, CodeMirror 6 (`@codemirror/lint` `^6.9.6` — already installed), Vitest 1.6.0
+- 005-dl-query-webview: DL Query panel (`ontograph.openDLQuery`) — Manchester-syntax class expression → Java `dlQuery` JSON-RPC → six grouped result sections; client-side name filter and owl:Thing/owl:Nothing toggles; click-to-navigate; `temporaryClassIris` set blocks sync-to-disk during in-flight queries (FR-016)
 
 ## Active Technologies

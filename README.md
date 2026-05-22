@@ -12,6 +12,7 @@ OntoGraph is a Protégé-like OWL 2 ontology editing, reasoning, and visualizati
 - **Inferred Hierarchy**: View the results of classification side-by-side with your asserted hierarchy.
 - **Entity Editor**: Edit axioms and annotations using a user-friendly interface with Manchester Syntax support.
 - **Graph Visualization**: Explore entity relationships visually with interactive neighborhood graphs.
+- **DL Query**: Protégé-style DL Query panel — enter a Manchester Syntax class expression, execute against the loaded reasoner, and browse results grouped by Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, and Instances. Supports name filtering and owl:Thing/owl:Nothing toggles.
 - **SPARQL Editor**: Execute SPARQL queries against your loaded ontology.
 - **SNOMED CT Scale**: Optimized to handle large-scale ontologies with tens of thousands of classes.
 
@@ -27,15 +28,14 @@ OntoGraph provides rich language support for OWL files via the Language Server P
 
 ### Prerequisites
 
-- **Antigravity** (IDE) [Link](https://antigravity.google/)   This IDE has better performance than Visual Studio Code for this project. 
-- **Visual Studio Code** 1.90.0 or newer. [Link](https://code.visualstudio.com/) (Alternatively, you can use this IDE)
-- **Java Runtime Environment (JRE) 11** or newer (required for the reasoning server).
+- **Visual Studio Code** 1.90.0 or newer. [Link](https://code.visualstudio.com/)
+- **Java Runtime Environment (JRE) 21** or newer (required for the reasoning server).
 - **Node.js 18** or newer.
 
 ### Installing from VSIX
 
-1. Download the `ontograph-x.x.x.vsix` file from the releases page.
-2. Open Antigravity or Visual Studio Code.
+1. Download the `ontograph-lite-x.x.x.vsix` file from the releases page.
+2. Open Visual Studio Code.
 3. Go to the **Extensions** view (`Ctrl+Shift+X`).
 4. Click the **...** (Views and More Actions) menu in the top-right corner of the Extensions sidebar.
 5. Select **Install from VSIX...**.
@@ -45,7 +45,7 @@ OntoGraph provides rich language support for OWL files via the Language Server P
 
 ### Loading an Ontology
 
-Simply open any supported OWL file in Antigravity or Visual Studio Code. OntoGraph will automatically detect the format, parse the content, and populate the sidebar views.
+Simply open any supported OWL file in Visual Studio Code. OntoGraph will automatically detect the format, parse the content, and populate the sidebar views.
 
 Supported extensions:
 - `.ofn` (OWL Functional Syntax)
@@ -79,18 +79,32 @@ OntoGraph includes powerful reasoning capabilities to check consistency and comp
 - Right-click an entity and select **Open Graph** to see its immediate neighborhood.
 - The graph view allows you to toggle between asserted and inferred relationships and adjust the visualization depth.
 
+### DL Query
+
+1. Open the **Command Palette** (`Ctrl+Shift+P`) and run `OntoGraph: Open DL Query`.
+2. Enter a Manchester Syntax class expression (e.g., `Animal and hasHabitat some Ocean`) in the query field.
+3. Click **Execute** — requires the ontology to have been classified first.
+4. Results are grouped into six sections: Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, and Instances.
+5. Use the **Name contains** filter to narrow results by substring, and the checkboxes to hide `owl:Thing` or `owl:Nothing`.
+6. Click any result entity to navigate to it in the sidebar tree.
+
 ### Exporting
 
 - Use the `OntoGraph: Export Ontology As...` command to save your ontology in a different format (e.g., convert Manchester Syntax to OWL/XML).
 
 ## Configuration
 
-You can customize OntoGraph's behavior in Antigravity or VS Code Settings (`ontograph.*`):
+You can customize OntoGraph's behavior in VS Code Settings (`ontograph.*`):
 
 - `ontograph.reasoner.engine`: Choose between `hermit`, `elk`, or `auto` (default).
 - `ontograph.reasoner.javaPath`: Specify a custom path to your Java executable.
+- `ontograph.reasoner.jvmArgs`: Extra JVM arguments passed to the reasoner process.
+- `ontograph.reasoner.timeoutSeconds`: Timeout in seconds for reasoning operations (default 120; large ontologies may need 300–600).
 - `ontograph.display.preferredLabelLanguage`: Set the language tag for `rdfs:label` display (e.g., `en`, `fr`).
+- `ontograph.display.showIriOnHover`: Show the full IRI as a tooltip when hovering over tree items.
+- `ontograph.display.axiomEntityStyle`: How entities are displayed in axiom expressions — `label` (default), `iri`, or `shortForm`.
 - `ontograph.graph.defaultDepth`: Set the default neighborhood depth for the graph view.
+- `ontograph.largeOntologyThreshold`: Class count above which large-ontology optimisations apply (Worker Thread parsing, ELK default). Default 50 000.
 
 ## License
 
