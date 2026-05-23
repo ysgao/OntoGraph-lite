@@ -108,15 +108,15 @@ export class InferredHierarchyProvider implements vscode.TreeDataProvider<Inferr
       } else {
         const hasChildren = (this.sortedSubClasses.get(element.iri)?.length ?? 0) > 0;
         if (hasChildren) {
-          icon = ' ›';
+          icon = ' › ';
         }
       }
     }
 
     // Indented label with a larger icon and no extra role text
     element.label = `${element.prefix}${icon} ${element.baseLabel}`;
-    element.description = undefined; 
-    element.iconPath = undefined; 
+    element.description = undefined;
+    element.iconPath = undefined;
 
     return element;
   }
