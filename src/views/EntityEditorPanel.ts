@@ -285,12 +285,14 @@ function handleMessage(
       switch (msg.entityType) {
         case 'class': {
           const cls = entity as OWLClass;
-          cls.superClassIris = msg.superClassIris ?? [];
           const validSuper = filterSection(msg.superClassExpressions, 'superClassExpressions');
-          cls.superClassExpressions = validSuper.map(e => normalizeExpression(e, model, index));
-          cls.equivalentClassIris = msg.equivalentClassIris ?? [];
+          const splitSuper = splitNormalizedExpressions(validSuper.map(e => normalizeExpression(e, model, index)));
+          cls.superClassIris = splitSuper.namedClassIris;
+          cls.superClassExpressions = splitSuper.complexExpressions;
           const validEquiv = filterSection(msg.equivalentClassExpressions, 'equivalentClassExpressions');
-          cls.equivalentClassExpressions = validEquiv.map(e => normalizeExpression(e, model, index));
+          const splitEquiv = splitNormalizedExpressions(validEquiv.map(e => normalizeExpression(e, model, index)));
+          cls.equivalentClassIris = splitEquiv.namedClassIris;
+          cls.equivalentClassExpressions = splitEquiv.complexExpressions;
           const validGci = filterSection(msg.gciExpressions, 'gciExpressions');
           cls.gciExpressions = validGci.map(e => normalizeExpression(e, model, index));
           cls.disjointClassIris = msg.disjointClassIris ?? [];
@@ -572,6 +574,25 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const SINGLE_IRI_RE = /^https?:\/\/\S+$/;
+
+/**
+ * Splits a list of normalized expressions (bare full-IRI strings or Manchester
+ * keyword strings) into named-class IRIs vs complex class expressions.
+ * A normalized expression is a "named class" when it is a single bare IRI
+ * with no spaces (e.g. "http://example.org/Animal"). Everything else
+ * (containing spaces or Manchester operators) is a complex expression.
+ */
+export function splitNormalizedExpressions(normalized: string[]): {
+  namedClassIris: string[];
+  complexExpressions: string[];
+} {
+  return {
+    namedClassIris: normalized.filter(e => SINGLE_IRI_RE.test(e)),
+    complexExpressions: normalized.filter(e => !SINGLE_IRI_RE.test(e)),
+  };
+}
 
 export function renderExpressionsWithRefs(
   sectionKey: string,

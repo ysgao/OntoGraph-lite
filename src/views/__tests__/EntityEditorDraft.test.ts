@@ -143,10 +143,10 @@ describe('T004 – save handler with invalid expression indices', () => {
 
   it('(a) filters invalid indices from model superClassExpressions', () => {
     sendSaveMessage();
-    // Only index 0 ('owl:Thing', normalized to full IRI) should be in the model — index 1 filtered out
-    expect(cls.superClassExpressions).toHaveLength(1);
-    // normalizeExpression expands owl: prefix to full IRI
-    expect(cls.superClassExpressions[0]).toBe('http://www.w3.org/2002/07/owl#Thing');
+    // 'owl:Thing' normalizes to a bare IRI and is routed to superClassIris by splitNormalizedExpressions
+    expect(cls.superClassIris).toHaveLength(1);
+    expect(cls.superClassIris[0]).toBe('http://www.w3.org/2002/07/owl#Thing');
+    expect(cls.superClassExpressions).toHaveLength(0);
   });
 
   it('(b) the subsequent loadEntity postMessage includes draftExpressions for the invalid draft', () => {
@@ -226,8 +226,10 @@ describe('T004b – no server-side filtering when invalidExpressionIndices absen
       // deliberately omitting invalidExpressionIndices
     });
 
-    // Both expressions pass through — server does not filter without webview signal
-    expect(cls.superClassExpressions).toHaveLength(2);
+    // Both expressions pass through — server does not filter without webview signal.
+    // 'owl:Thing' normalizes to a bare IRI → routed to superClassIris; complex expression stays in superClassExpressions.
+    expect(cls.superClassIris).toHaveLength(1);
+    expect(cls.superClassExpressions).toHaveLength(1);
 
     // No draft error posted when no invalid indices are flagged
     const calls = (mockPostMessage as Mock).mock.calls.map((c: unknown[]) => c[0]);

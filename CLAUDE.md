@@ -168,7 +168,10 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-classes-only.ofn` — minimal BFO classes
 
 ## Recent Changes
+- 009-unify-named-class-axiom-display: Added TypeScript 5 (strict), Node.js 20 + VS Code Extension API, CodeMirror (webview editor)
 - 008-invalid-axiom-draft-save: Draft axiom save — invalid expressions held in `Map<string, DraftExpression[]>` (transient; no new storage); blocking dialog guards model-reload operations
 - 005-dl-query-webview: DL Query panel (`ontograph.openDLQuery`) — Manchester-syntax class expression → Java `dlQuery` JSON-RPC → six grouped result sections; client-side name filter and owl:Thing/owl:Nothing toggles; click-to-navigate; `temporaryClassIris` set blocks sync-to-disk during in-flight queries (FR-016)
 
 ## Active Technologies
+- TypeScript 5 (strict), Node.js 20 + VS Code Extension API, CodeMirror (webview editor) (009-unify-named-class-axiom-display)
+- N/A (display layer change only) (009-unify-named-class-axiom-display)
