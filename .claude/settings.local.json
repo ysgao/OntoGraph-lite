@@ -31,7 +31,15 @@
       "Bash(grep -n \"^[A-Z][a-zA-Z]*$\" /Users/yoga/JavaApp/OntoGraph/src/parser/manchester/owl-manchester.peggy)",
       "Bash(.specify/scripts/bash/create-new-feature.sh *)",
       "Bash(awk '{print $NF}')",
-      "Bash(xargs -I {} basename {})"
+      "Bash(xargs -I {} basename {})",
+      "Skill(speckit.plan)",
+      "Skill(speckit.tasks)",
+      "Skill(speckit.implement)",
+      "Bash(git stash *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git merge --no-ff 009-unify-named-class-axiom-display -m ' *)"
     ]
   }
 }
