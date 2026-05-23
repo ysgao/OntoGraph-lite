@@ -1358,20 +1358,31 @@ function renderEntity(msg: LoadEntityMessage): void {
   // Entity-type-specific sections
   switch (msg.entityType) {
     case 'class': {
-      iriListState['superClassIris'] = msg.superClassIris ?? [];
-      iriListState['equivalentClassIris'] = msg.equivalentClassIris ?? [];
       iriListState['disjointClassIris'] = msg.disjointClassIris ?? [];
       // Append draft expressions at the end of each section so they appear in editors
       const draftsFor = (key: string): string[] =>
         (msg.draftExpressions ?? []).filter(d => d.sectionKey === key).map(d => d.text);
-      renderIriListSection(content, 'SubClassOf', 'superClassIris', true);
-      renderExpressionSection(content, 'SubClassOf (expressions)', 'superClassExpressions',
-        [...(msg.superClassExpressions ?? []), ...draftsFor('superClassExpressions')],
-        msg.expressionEntityRefs?.['superClassExpressions'] ?? [], true);
-      renderIriListSection(content, 'EquivalentTo', 'equivalentClassIris', true);
-      renderExpressionSection(content, 'EquivalentTo (expressions)', 'equivalentClassExpressions',
-        [...(msg.equivalentClassExpressions ?? []), ...draftsFor('equivalentClassExpressions')],
-        msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? [], true);
+
+      const namedSuperLabels = (msg.superClassIris ?? []).map(iri => `'${localIriLabels[iri] ?? localNameFromIri(iri)}'`);
+      const namedSuperRefs: ExpressionEntityRef[][] = (msg.superClassIris ?? []).map((iri, idx) => {
+        const quoted = namedSuperLabels[idx];
+        const plainLabel = localIriLabels[iri] ?? localNameFromIri(iri);
+        return [{ from: 0, to: quoted.length, iri, entityType: 'class' as EntityType, label: plainLabel }];
+      });
+      renderExpressionSection(content, 'SubClassOf Axioms', 'superClassExpressions',
+        [...namedSuperLabels, ...(msg.superClassExpressions ?? []), ...draftsFor('superClassExpressions')],
+        [...namedSuperRefs, ...(msg.expressionEntityRefs?.['superClassExpressions'] ?? [])], true);
+
+      const namedEquivLabels = (msg.equivalentClassIris ?? []).map(iri => `'${localIriLabels[iri] ?? localNameFromIri(iri)}'`);
+      const namedEquivRefs: ExpressionEntityRef[][] = (msg.equivalentClassIris ?? []).map((iri, idx) => {
+        const quoted = namedEquivLabels[idx];
+        const plainLabel = localIriLabels[iri] ?? localNameFromIri(iri);
+        return [{ from: 0, to: quoted.length, iri, entityType: 'class' as EntityType, label: plainLabel }];
+      });
+      renderExpressionSection(content, 'EquivalentTo Axioms', 'equivalentClassExpressions',
+        [...namedEquivLabels, ...(msg.equivalentClassExpressions ?? []), ...draftsFor('equivalentClassExpressions')],
+        [...namedEquivRefs, ...(msg.expressionEntityRefs?.['equivalentClassExpressions'] ?? [])], true);
+
       renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
         [...(msg.gciExpressions ?? []), ...draftsFor('gciExpressions')],
         msg.expressionEntityRefs?.['gciExpressions'] ?? [], true);
@@ -1446,9 +1457,9 @@ function getCurrentState(): any {
     case 'class':
       payload = {
         ...base, ...annotData,
-        superClassIris: iriListState['superClassIris'] ?? [],
+        superClassIris: [],
         superClassExpressions: collectEditorLines('superClassExpressions'),
-        equivalentClassIris: iriListState['equivalentClassIris'] ?? [],
+        equivalentClassIris: [],
         equivalentClassExpressions: collectEditorLines('equivalentClassExpressions'),
         gciExpressions: collectEditorLines('gciExpressions'),
         disjointClassIris: iriListState['disjointClassIris'] ?? [],
@@ -1516,8 +1527,8 @@ function checkForChanges(): void {
 type ExpressionSectionKey = 'superClassExpressions' | 'equivalentClassExpressions' | 'gciExpressions';
 
 const SECTION_LABELS: Record<ExpressionSectionKey, string> = {
-  superClassExpressions: 'SubClassOf expressions',
-  equivalentClassExpressions: 'EquivalentTo expressions',
+  superClassExpressions: 'SubClassOf Axioms',
+  equivalentClassExpressions: 'EquivalentTo Axioms',
   gciExpressions: 'GCI expressions',
 };
 
@@ -1961,7 +1972,12 @@ window.addEventListener('message', (event: MessageEvent) => {
       // Drafts were appended after valid expressions — compute their editor indices.
       const draftOffsets: Partial<Record<string, number>> = {};
       const bannerItems = msg.draftExpressions.map(d => {
-        const validLen = ((msg[d.sectionKey as keyof LoadEntityMessage] as string[] | undefined) ?? []).length;
+        const baseLen = ((msg[d.sectionKey as keyof LoadEntityMessage] as string[] | undefined) ?? []).length;
+        const namedOffset =
+          d.sectionKey === 'superClassExpressions' ? (msg.superClassIris ?? []).length
+          : d.sectionKey === 'equivalentClassExpressions' ? (msg.equivalentClassIris ?? []).length
+          : 0;
+        const validLen = namedOffset + baseLen;
         const draftPos = draftOffsets[d.sectionKey] ?? 0;
         draftOffsets[d.sectionKey] = draftPos + 1;
         return { sectionKey: d.sectionKey, index: validLen + draftPos, text: d.text };

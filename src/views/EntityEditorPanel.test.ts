@@ -36,7 +36,7 @@ vi.mock('../extension.js', () => ({
   parsedDocVersions: new Map(),
 }));
 
-import { validateManchesterText, renderExpressionsWithRefs } from './EntityEditorPanel.js';
+import { validateManchesterText, renderExpressionsWithRefs, splitNormalizedExpressions } from './EntityEditorPanel.js';
 import { createEmptyModel } from '../model/OntologyModel.js';
 import type { OWLClass, OWLObjectProperty } from '../model/OntologyModel.js';
 import { OntologyIndex } from '../model/OntologyIndex.js';
@@ -57,6 +57,55 @@ describe('renderExpressionsWithRefs', () => {
     // Currently (flat): refs['superClassExpressions'] = [] (no index 0)
     expect(refs['superClassExpressions']).toHaveLength(2);
     expect(Array.isArray((refs['superClassExpressions'] as unknown[][])[0])).toBe(true);
+  });
+});
+
+describe('splitNormalizedExpressions', () => {
+  it('routes a single bare IRI to namedClassIris', () => {
+    const result = splitNormalizedExpressions(['http://example.org/Animal']);
+    expect(result.namedClassIris).toEqual(['http://example.org/Animal']);
+    expect(result.complexExpressions).toEqual([]);
+  });
+
+  it('routes an https IRI to namedClassIris', () => {
+    const result = splitNormalizedExpressions(['https://example.org/Animal']);
+    expect(result.namedClassIris).toEqual(['https://example.org/Animal']);
+    expect(result.complexExpressions).toEqual([]);
+  });
+
+  it('routes a complex expression (with spaces) to complexExpressions', () => {
+    const expr = 'http://example.org/Animal and http://example.org/hasPart some http://example.org/Bone';
+    const result = splitNormalizedExpressions([expr]);
+    expect(result.namedClassIris).toEqual([]);
+    expect(result.complexExpressions).toEqual([expr]);
+  });
+
+  it('splits a mixed array correctly', () => {
+    const iriA = 'http://example.org/Animal';
+    const complex = 'http://example.org/A and http://example.org/B';
+    const iriC = 'http://example.org/Creature';
+    const result = splitNormalizedExpressions([iriA, complex, iriC]);
+    expect(result.namedClassIris).toEqual([iriA, iriC]);
+    expect(result.complexExpressions).toEqual([complex]);
+  });
+
+  it('returns empty arrays when input is empty', () => {
+    const result = splitNormalizedExpressions([]);
+    expect(result.namedClassIris).toEqual([]);
+    expect(result.complexExpressions).toEqual([]);
+  });
+
+  it('handles owl built-in IRI as a named class', () => {
+    const result = splitNormalizedExpressions(['http://www.w3.org/2002/07/owl#Thing']);
+    expect(result.namedClassIris).toEqual(['http://www.w3.org/2002/07/owl#Thing']);
+    expect(result.complexExpressions).toEqual([]);
+  });
+
+  it('routes equivalentClassExpressions bare IRI to namedClassIris', () => {
+    const iri = 'http://example.org/B';
+    const result = splitNormalizedExpressions([iri]);
+    expect(result.namedClassIris).toEqual([iri]);
+    expect(result.complexExpressions).toEqual([]);
   });
 });
 
