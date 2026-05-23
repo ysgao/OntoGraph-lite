@@ -168,7 +168,7 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-classes-only.ofn` — minimal BFO classes
 
 ## Recent Changes
-- 009-unify-named-class-axiom-display: Added TypeScript 5 (strict), Node.js 20 + VS Code Extension API, CodeMirror (webview editor)
+- 009-unify-named-class-axiom-display: Entity Editor — SubClassOf(A B) and EquivalentClasses(A B) named-class axioms now appear in unified "SubClassOf Axioms" / "EquivalentTo Axioms" sections (displayed as single-quoted labels, e.g. `'Animal'`) alongside complex expressions; separate named-class chip sections removed. `splitNormalizedExpressions()` in `EntityEditorPanel.ts` routes bare-IRI expressions back to `superClassIris`/`equivalentClassIris` on save to preserve model round-trip.
 - 008-invalid-axiom-draft-save: Draft axiom save — invalid expressions held in `Map<string, DraftExpression[]>` (transient; no new storage); blocking dialog guards model-reload operations
 - 005-dl-query-webview: DL Query panel (`ontograph.openDLQuery`) — Manchester-syntax class expression → Java `dlQuery` JSON-RPC → six grouped result sections; client-side name filter and owl:Thing/owl:Nothing toggles; click-to-navigate; `temporaryClassIris` set blocks sync-to-disk during in-flight queries (FR-016)
 

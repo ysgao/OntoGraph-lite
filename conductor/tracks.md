@@ -2,7 +2,7 @@
 
 This file tracks all major conductor-system work tracks. Each track has its own detailed plan in `conductor/tracks/<track>/plan.md`.
 
-Feature work since May 2026 uses the **speckit** system instead — see [`specs/`](../specs/) for individual feature specs (001–008).
+Feature work since May 2026 uses the **speckit** system instead — see [`specs/`](../specs/) for individual feature specs (001–009).
 
 ---
 
@@ -28,4 +28,5 @@ Feature work since May 2026 uses the **speckit** system instead — see [`specs/
 | 006 | Axiom display formatting | ✅ Complete |
 | 007 | Multi-axiom editor | ✅ Complete |
 | 008 | Invalid axiom draft save | ✅ Complete |
+| 009 | Unify named-class axiom display | ✅ Complete |
 
