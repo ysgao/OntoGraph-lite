@@ -123,7 +123,7 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
       } else {
         const hasChildren = (this.childrenOf.get(element.iri)?.length ?? 0) > 0;
         if (hasChildren) {
-          icon = '›';
+          icon = ' › ';
         }
       }
     }
