@@ -264,7 +264,7 @@
             "elk",
             "auto"
           ],
-          "default": "auto",
+          "default": "elk",
           "enumDescriptions": [
             "HermiT — full OWL 2 DL reasoner, best for medium ontologies",
             "ELK — scalable EL reasoner, recommended for SNOMED CT scale",
