@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { generateEntityCluster } from '../serializer/FunctionalSerializer';
 import { manchesterToFunctional } from '../utils/ExpressionUtils';
 import { temporaryClassIris } from '../views/DLQueryState.js';
+import { suppressReloadFor } from './reloadGuard';
 import type {
   OWLEntity,
   OWLClass,
@@ -945,6 +946,7 @@ export async function syncAxiomsToDocument(
   }
 
   if (!result) return null;
+  suppressReloadFor(3000);
   const ok = await vscode.workspace.applyEdit(result.edit);
   return ok ? result.changedRanges : null;
 }

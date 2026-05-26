@@ -39,7 +39,10 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git checkout *)",
-      "Bash(git merge --no-ff 009-unify-named-class-axiom-display -m ' *)"
+      "Bash(git merge --no-ff 009-unify-named-class-axiom-display -m ' *)",
+      "Skill(speckit.specify)",
+      "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline origin/main..HEAD)",
+      "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline main..HEAD)"
     ]
   }
 }

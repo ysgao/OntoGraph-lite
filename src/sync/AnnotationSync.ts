@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { OWLEntity } from '../model/OntologyModel';
 import { BUILTIN_ANNOTATION_PROP_IRIS } from '../model/OntologyModel';
 import { temporaryClassIris } from '../views/DLQueryState.js';
+import { suppressReloadFor } from './reloadGuard';
 
 const RDFS_PREFIX = 'http://www.w3.org/2000/01/rdf-schema#';
 const RDFS_ANN_TO_TOKEN = new Map<string, string>([
@@ -583,6 +584,7 @@ export async function syncAnnotationsToDocument(
   }
 
   if (!result) { return null; }
+  suppressReloadFor(3000);
   const ok = await vscode.workspace.applyEdit(result.edit);
   return ok ? result.addedRanges : null;
 }

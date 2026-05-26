@@ -29,4 +29,5 @@ Feature work since May 2026 uses the **speckit** system instead — see [`specs/
 | 007 | Multi-axiom editor | ✅ Complete |
 | 008 | Invalid axiom draft save | ✅ Complete |
 | 009 | Unify named-class axiom display | ✅ Complete |
+| 010 | Reload ontology from disk | ✅ Complete |
 

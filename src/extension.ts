@@ -16,6 +16,8 @@ import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge } from './
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
 import { updateDLQueryModel } from './views/DLQueryPanel';
+import { reloadOntology } from './commands/reloadOntology';
+import { isReloadSuppressed } from './sync/reloadGuard';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
 import { ParserRegistry } from './parser/ParserRegistry';
@@ -24,6 +26,8 @@ export let outputChannel: vscode.OutputChannel;
 
 let activeModel: OntologyModel | undefined;
 let activeIndex: OntologyIndex | undefined;
+let activeFileWatcher: vscode.FileSystemWatcher | undefined;
+let reloadDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 let lspStarted = false;
 
 export const parsedDocVersions = new Map<string, number>();
@@ -117,6 +121,23 @@ export function activate(context: vscode.ExtensionContext): void {
     annotationPropProvider.setModel(model, preferredLang);
     individualProvider.setModel(model, preferredLang);
     updateClassificationViewState(model);
+  }
+
+  async function executeReload(): Promise<void> {
+    if (!activeModel) { return; }
+    await vscode.commands.executeCommand('setContext', 'ontograph.reloading', true);
+    const reloadingMsg = vscode.window.setStatusBarMessage('$(loading~spin) OntoGraph: reloading…');
+    try {
+      await reloadOntology(activeModel, (model) => {
+        activeModel = model;
+        refreshAllViews(model);
+        reloadingMsg.dispose();
+        vscode.window.setStatusBarMessage('$(check) Ontology reloaded from disk', 8000);
+      });
+    } finally {
+      reloadingMsg.dispose();
+      await vscode.commands.executeCommand('setContext', 'ontograph.reloading', false);
+    }
   }
 
   function hasInferredHierarchy(model: OntologyModel | undefined): model is OntologyModel {
@@ -225,6 +246,8 @@ export function activate(context: vscode.ExtensionContext): void {
       revealInTreeView(iri, entityType);
     }),
 
+    vscode.commands.registerCommand('ontograph.reloadOntology', () => { void executeReload(); }),
+
     vscode.commands.registerCommand('ontograph.classifyOntology', async () => {
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
@@ -311,7 +334,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const fsPath = doc.uri.fsPath.toLowerCase();
     if (fsPath.endsWith('.ofn')) { return 'owl-functional'; }
     if (fsPath.endsWith('.omn')) { return 'manchester'; }
-    if (fsPath.endsWith('.owl')) { return 'owl-xml'; }
+    if (fsPath.endsWith('.owx')) { return 'owl-xml'; }
     if (fsPath.endsWith('.ttl')) { return 'turtle'; }
     return null;
   }
@@ -359,6 +382,19 @@ export function activate(context: vscode.ExtensionContext): void {
       await refreshEntityEditorIfOpen(model, context);
       updateDLQueryModel(model, activeIndex);
 
+      // Set up file watcher for auto-reload on external changes (e.g. git pull)
+      activeFileWatcher?.dispose();
+      const watchedUri = vscode.Uri.parse(model.sourceUri);
+      const filename = watchedUri.path.slice(watchedUri.path.lastIndexOf('/') + 1);
+      activeFileWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(vscode.Uri.joinPath(watchedUri, '..'), filename),
+      );
+      activeFileWatcher.onDidChange(() => {
+        if (isReloadSuppressed()) { return; }
+        clearTimeout(reloadDebounceTimer);
+        reloadDebounceTimer = setTimeout(() => { void executeReload(); }, 500);
+      });
+
       const { classes, objectProperties, dataProperties, individuals } = model;
       const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;
       outputChannel.appendLine(`  → parsed OK: ${stats}`);
@@ -386,6 +422,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   context.subscriptions.push(
+    { dispose: () => { activeFileWatcher?.dispose(); clearTimeout(reloadDebounceTimer); } },
     vscode.workspace.onDidOpenTextDocument(doc => { void handleDocument(doc); }),
     vscode.workspace.onDidSaveTextDocument(doc => { void handleDocument(doc); }),
     vscode.window.onDidChangeActiveTextEditor(editor => {
