@@ -9,13 +9,17 @@ import { RdfXmlParser } from './RdfXmlParser';
 
 export const LARGE_FILE_BYTES = 5 * 1024 * 1024;
 
-function detectOwlFormat(text: string): 'functional' | 'owlxml' | 'rdfxml' | 'unknown' {
+function detectOwlFormat(text: string): 'functional' | 'manchester' | 'owlxml' | 'rdfxml' | 'turtle' | 'unknown' {
   const t = text.trimStart();
-  if (t.startsWith('Prefix(') || t.startsWith('Ontology(')) { return 'functional'; }
-  if (!t.startsWith('<')) { return 'unknown'; }
-  const head = t.slice(0, 2000);
-  if (/<Ontology[\s>]/.test(head)) { return 'owlxml'; }
-  if (/<rdf:RDF[\s>]/.test(head) || /xmlns:rdf=/.test(head)) { return 'rdfxml'; }
+  if (t.startsWith('<')) {
+    const head = t.slice(0, 2000);
+    if (/<Ontology[\s>]/.test(head)) { return 'owlxml'; }
+    if (/<rdf:RDF[\s>]/.test(head) || /xmlns:rdf=/.test(head)) { return 'rdfxml'; }
+    return 'unknown';
+  }
+  if (t.slice(0, 4096).includes('Ontology('))  { return 'functional'; }
+  if (t.slice(0, 2048).includes('Ontology:'))  { return 'manchester'; }
+  if (/(?:@prefix|@base|PREFIX\s|BASE\s)/.test(t.slice(0, 1024))) { return 'turtle'; }
   return 'unknown';
 }
 
@@ -65,9 +69,11 @@ export class ParserRegistry {
 
       case 'owl-xml': {
         const fmt = detectOwlFormat(text);
-        if (fmt === 'functional') { model = new FunctionalParser(text, uri).parse(); sourceFormat = 'functional'; break; }
-        if (fmt === 'owlxml')     { model = new OwlXmlParser(text, uri).parse();     sourceFormat = 'owl-xml';    break; }
-        if (fmt === 'rdfxml')     { model = new RdfXmlParser(text, uri).parse();     sourceFormat = 'rdf-xml';    break; }
+        if (fmt === 'functional') { model = new FunctionalParser(text, uri).parse();  sourceFormat = 'functional'; break; }
+        if (fmt === 'owlxml')     { model = new OwlXmlParser(text, uri).parse();      sourceFormat = 'owl-xml';    break; }
+        if (fmt === 'rdfxml')     { model = new RdfXmlParser(text, uri).parse();      sourceFormat = 'rdf-xml';    break; }
+        if (fmt === 'manchester') { model = new ManchesterParser(text, uri).parse();  sourceFormat = 'manchester'; break; }
+        if (fmt === 'turtle')     { model = new TurtleParser(text, uri).parse();      sourceFormat = 'turtle';     break; }
         throw new Error(`Could not detect OWL serialisation format for: ${uri}`);
       }
 
