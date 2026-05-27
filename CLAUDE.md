@@ -168,10 +168,10 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-classes-only.ofn` — minimal BFO classes
 
 ## Recent Changes
+- 011-autodetect-owl-syntax: Added TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (no new runtime deps)
 - 010-reload-ontology: Added TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (`vscode.FileSystemWatcher`, `vscode.workspace.openTextDocument`), `ParserRegistry.parseAsync` (existing)
 - 009-unify-named-class-axiom-display: Entity Editor — SubClassOf(A B) and EquivalentClasses(A B) named-class axioms now appear in unified "SubClassOf Axioms" / "EquivalentTo Axioms" sections (displayed as single-quoted labels, e.g. `'Animal'`) alongside complex expressions; separate named-class chip sections removed. `splitNormalizedExpressions()` in `EntityEditorPanel.ts` routes bare-IRI expressions back to `superClassIris`/`equivalentClassIris` on save to preserve model round-trip.
-- 008-invalid-axiom-draft-save: Draft axiom save — invalid expressions held in `Map<string, DraftExpression[]>` (transient; no new storage); blocking dialog guards model-reload operations
 
 ## Active Technologies
-- TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (`vscode.FileSystemWatcher`, `vscode.workspace.openTextDocument`), `ParserRegistry.parseAsync` (existing) (010-reload-ontology)
-- File system only (reads the OWL file from disk) (010-reload-ontology)
+- TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (no new runtime deps) (011-autodetect-owl-syntax)
+- N/A — no persistent state changes (011-autodetect-owl-syntax)
