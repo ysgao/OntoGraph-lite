@@ -3,6 +3,7 @@ import { generateEntityCluster } from '../serializer/FunctionalSerializer';
 import { manchesterToFunctional } from '../utils/ExpressionUtils';
 import { temporaryClassIris } from '../views/DLQueryState.js';
 import { suppressReloadFor } from './reloadGuard';
+import { RawTextDocument, applyWorkspaceEditsToText } from './RawTextDocument';
 import type {
   OWLEntity,
   OWLClass,
@@ -926,29 +927,58 @@ function syncAxiomsTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResu
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export async function syncAxiomsToDocument(
-  doc: vscode.TextDocument,
+  uri: vscode.Uri,
   entity: OWLEntity,
   sourceFormat?: string,
-): Promise<vscode.Range[] | null> {
+): Promise<{ changedRanges: vscode.Range[]; updatedText: string } | null> {
   if (temporaryClassIris.has(entity.iri)) { return null; }
-  const fsPath = doc.uri.fsPath.toLowerCase();
-  const fmt = sourceFormat ?? extensionFormat(fsPath);
-  let result: SyncResult | null = null;
+  const fmt = sourceFormat ?? extensionFormat(uri.fsPath.toLowerCase());
+  if (!fmt) { return null; }
 
+  let bytes: Uint8Array;
+  try {
+    bytes = await vscode.workspace.fs.readFile(uri);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+    void vscode.window.showErrorMessage(`OntoGraph: cannot read '${fname}' — ${msg}.`);
+    return null;
+  }
+  const text = new TextDecoder().decode(bytes);
+  const doc = new RawTextDocument(uri, text) as unknown as vscode.TextDocument;
+
+  let result: SyncResult | null = null;
   if (fmt === 'functional') {
     result = syncAxiomsFunctional(doc, entity);
   } else if (fmt === 'manchester') {
     result = syncAxiomsManchester(doc, entity);
   } else if (fmt === 'turtle') {
     result = syncAxiomsTurtle(doc, entity);
-  } else {
+  }
+
+  if (!result) { return null; }
+
+  const updatedText = applyWorkspaceEditsToText(text, result.edit);
+  suppressReloadFor(3000);
+  try {
+    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updatedText));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+    void vscode.window.showErrorMessage(`OntoGraph: cannot write '${fname}' — ${msg}.`);
     return null;
   }
 
-  if (!result) return null;
-  suppressReloadFor(3000);
-  const ok = await vscode.workspace.applyEdit(result.edit);
-  return ok ? result.changedRanges : null;
+  // Mirror the edit to the open text document (if any, and clean) so VS Code's
+  // auto-save writes the updated content rather than stale text-document content.
+  const openTextDoc = vscode.workspace.textDocuments.find(
+    d => d.uri.toString() === uri.toString() && !d.isDirty,
+  );
+  if (openTextDoc) {
+    await vscode.workspace.applyEdit(result.edit);
+  }
+
+  return { changedRanges: result.changedRanges, updatedText };
 }
 
 function extensionFormat(fsPath: string): string | undefined {

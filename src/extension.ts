@@ -17,6 +17,8 @@ import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
 import { updateDLQueryModel } from './views/DLQueryPanel';
 import { reloadOntology } from './commands/reloadOntology';
+import { loadOntologyFile } from './commands/loadOntologyFile';
+import { createLargeFileListener } from './commands/largeFileNotification';
 import { isReloadSuppressed } from './sync/reloadGuard';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
@@ -248,6 +250,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('ontograph.reloadOntology', () => { void executeReload(); }),
 
+    vscode.commands.registerCommand('ontograph.loadOntologyFile', (prefillUri?: vscode.Uri) => {
+      void loadOntologyFile(onLoadedCallback, prefillUri);
+    }),
+
     vscode.commands.registerCommand('ontograph.classifyOntology', async () => {
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
@@ -325,6 +331,20 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  function setupFileWatcher(model: OntologyModel): void {
+    activeFileWatcher?.dispose();
+    const watchedUri = vscode.Uri.parse(model.sourceUri);
+    const filename = watchedUri.path.slice(watchedUri.path.lastIndexOf('/') + 1);
+    activeFileWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.joinPath(watchedUri, '..'), filename),
+    );
+    activeFileWatcher.onDidChange(() => {
+      if (isReloadSuppressed()) { return; }
+      clearTimeout(reloadDebounceTimer);
+      reloadDebounceTimer = setTimeout(() => { void executeReload(); }, 500);
+    });
+  }
+
   // --- Document listener: parse on open/save ---
   const supportedLanguages = new Set(['owl-functional', 'manchester', 'owl-xml', 'turtle']);
 
@@ -381,19 +401,7 @@ export function activate(context: vscode.ExtensionContext): void {
       refreshAllViews(model);
       await refreshEntityEditorIfOpen(model, context);
       updateDLQueryModel(model, activeIndex);
-
-      // Set up file watcher for auto-reload on external changes (e.g. git pull)
-      activeFileWatcher?.dispose();
-      const watchedUri = vscode.Uri.parse(model.sourceUri);
-      const filename = watchedUri.path.slice(watchedUri.path.lastIndexOf('/') + 1);
-      activeFileWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(vscode.Uri.joinPath(watchedUri, '..'), filename),
-      );
-      activeFileWatcher.onDidChange(() => {
-        if (isReloadSuppressed()) { return; }
-        clearTimeout(reloadDebounceTimer);
-        reloadDebounceTimer = setTimeout(() => { void executeReload(); }, 500);
-      });
+      setupFileWatcher(model);
 
       const { classes, objectProperties, dataProperties, individuals } = model;
       const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;
@@ -421,14 +429,25 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
+  const onLoadedCallback = async (model: OntologyModel): Promise<void> => {
+    activeModel = model;
+    refreshAllViews(model);
+    await refreshEntityEditorIfOpen(model, context);
+    updateDLQueryModel(model, activeIndex);
+    setupFileWatcher(model);
+  };
+
+  const largeFileListener = createLargeFileListener(onLoadedCallback);
+
   context.subscriptions.push(
     { dispose: () => { activeFileWatcher?.dispose(); clearTimeout(reloadDebounceTimer); } },
     vscode.workspace.onDidOpenTextDocument(doc => { void handleDocument(doc); }),
     vscode.workspace.onDidSaveTextDocument(doc => { void handleDocument(doc); }),
     vscode.window.onDidChangeActiveTextEditor(editor => {
-      // Only parse if the document has actually changed — switching focus between
-      // the entity editor panel and the OWL file must not re-parse the same content.
+      // Parse on focus change for document-based loading
       if (editor) { void handleDocument(editor.document); }
+      // Detect large files that VS Code cannot display as text documents
+      void largeFileListener(editor);
     }),
   );
 

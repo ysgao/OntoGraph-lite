@@ -23,7 +23,6 @@ import type {
   ValidationResultMessage,
   SaveDraftErrorMessage,
 } from './EntityEditorMessages';
-import { parsedDocVersions } from '../extension';
 
 // ── Singleton panel ───────────────────────────────────────────────────────────
 
@@ -372,54 +371,39 @@ function handleMessage(
 
       // Sync to the source OWL document if it's open.
       // _annotationSyncActive guards refreshEntityEditorIfOpen so it knows not to
-      // clear savedEntityState during the in-flight applyEdit window.
+      // clear savedEntityState during the in-flight write window.
       //
-      // For Turtle: axiom sync is a single combined operation that writes both
-      // structural axioms and annotations atomically, producing one version
-      // increment and one parsedDocVersions update.
-      //
-      // For Manchester and Functional: annotation sync and axiom sync touch
-      // non-overlapping regions of the document (Annotations: section vs. other
-      // sections / AnnotationAssertion lines vs. other axiom lines), so two
-      // sequential edits are safe. parsedDocVersions is updated once at the end.
+      // Sync writes directly to disk via workspace.fs — bypasses VS Code text
+      // document API so files of any size (including >50 MB) are supported.
+      // For Manchester and Functional: two sequential writes are safe because
+      // annotation and axiom regions are non-overlapping; axiom sync reads the
+      // annotation-updated file for its second pass.
       _annotationSyncActive = true;
       void (async () => {
         try {
-          const wasSourceDocOpen = vscode.window.visibleTextEditors.some(e => e.document.uri.toString() === model.sourceUri);
-          const doc = await getSourceDocument(model);
-          if (doc) {
-            const fmt = model.sourceFormat;
-            const changedRanges: vscode.Range[] = [];
-            if (fmt === 'turtle') {
-              // Single combined operation: axiom sync handles both annotations and axioms
-              changedRanges.push(...(await syncAxiomsToDocument(doc, entity, fmt) ?? []));
-            } else {
-              // Two-pass for non-overlapping regions: annotation first, then axioms
-              changedRanges.push(...(await syncAnnotationsToDocument(doc, entity, fmt) ?? []));
-              // Re-fetch so axiom sync reads the annotation-updated content
-              const updatedDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-              if (updatedDoc) {
-                changedRanges.push(...(await syncAxiomsToDocument(updatedDoc, entity, fmt) ?? []));
-              }
-            }
-            highlightSyncedRanges(doc.uri, changedRanges);
-            // Single parsedDocVersions update after all edits are applied, so the
-            // final doc.version is stored and no intermediate version triggers a reload.
-            const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-            if (finalDoc) {
-              // Update tracking BEFORE save to prevent race with onDidSaveTextDocument
-              parsedDocVersions.set(finalDoc.uri.toString(), finalDoc.version);
-              model.rawContent = finalDoc.getText();
+          const uri = vscode.Uri.parse(model.sourceUri);
+          const fmt = model.sourceFormat;
+          const changedRanges: vscode.Range[] = [];
+          let updatedText: string | undefined;
 
-              if (!wasSourceDocOpen) {
-                await finalDoc.save();
-              }
-            }
+          if (fmt === 'turtle') {
+            // Single write: axiom sync handles both annotations and axioms for Turtle
+            const r = await syncAxiomsToDocument(uri, entity, fmt);
+            if (r) { changedRanges.push(...r.changedRanges); updatedText = r.updatedText; }
+          } else {
+            // Two writes: annotations first; axiom sync reads the annotation-updated file
+            const annot = await syncAnnotationsToDocument(uri, entity, fmt);
+            if (annot) { changedRanges.push(...annot.changedRanges); updatedText = annot.updatedText; }
+            const axiom = await syncAxiomsToDocument(uri, entity, fmt);
+            if (axiom) { changedRanges.push(...axiom.changedRanges); updatedText = axiom.updatedText; }
           }
+
+          if (updatedText !== undefined) {
+            model.rawContent = updatedText;
+          }
+          highlightSyncedRanges(uri, changedRanges);
         } finally {
           _annotationSyncActive = false;
-          // Safe to clear now: the file buffer has updated data, so the next
-          // model re-parse (triggered by onDidSaveTextDocument) will have correct data.
           savedEntityState.delete(msg.iri);
         }
       })();
@@ -652,17 +636,6 @@ function clearSyncHighlight(): void {
   }
 }
 
-async function getSourceDocument(model: OntologyModel): Promise<vscode.TextDocument | undefined> {
-  const openDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-  if (openDoc) { return openDoc; }
-  try {
-    return await vscode.workspace.openTextDocument(vscode.Uri.parse(model.sourceUri));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    void vscode.window.showWarningMessage(`OntoGraph: Could not open source ontology for sync: ${msg}`);
-    return undefined;
-  }
-}
 
 function hasInferredHierarchy(model: OntologyModel): boolean {
   for (const children of model.inferredSubClasses.values()) {

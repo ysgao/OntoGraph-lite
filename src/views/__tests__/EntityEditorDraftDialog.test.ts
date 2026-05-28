@@ -32,18 +32,21 @@ vi.mock('vscode', () => ({
     })),
     createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
     showWarningMessage: mockShowWarningMessage,
+    showErrorMessage: vi.fn(),
     visibleTextEditors: [],
     setStatusBarMessage: vi.fn(),
   },
   ViewColumn: { Beside: 2, One: 1 },
   Uri: {
     joinPath: vi.fn((_base: unknown, ...parts: string[]) => parts.join('/')),
-    parse: vi.fn((s: string) => ({ toString: () => s })),
+    parse: vi.fn((s: string) => ({ fsPath: s, toString: () => s })),
   },
   workspace: {
-    applyEdit: vi.fn().mockResolvedValue(true),
+    fs: {
+      readFile: vi.fn().mockResolvedValue(new Uint8Array()),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+    },
     textDocuments: [],
-    openTextDocument: vi.fn(),
     getConfiguration: vi.fn(() => ({
       get: vi.fn((key: string) => {
         if (key === 'display.preferredLabelLanguage') return 'en';
@@ -61,7 +64,20 @@ vi.mock('vscode', () => ({
     end: { line: s2, character: c2 },
   })),
   Position: vi.fn((l: number, c: number) => ({ line: l, character: c })),
-  WorkspaceEdit: vi.fn(() => ({ replace: vi.fn() })),
+  WorkspaceEdit: vi.fn(() => {
+    const editsMap = new Map();
+    const add = (uri: unknown, range: unknown, newText: string) => {
+      const k = (uri as { toString?: () => string }).toString?.() ?? String(uri);
+      if (!editsMap.has(k)) editsMap.set(k, []);
+      editsMap.get(k).push({ range, newText });
+    };
+    return {
+      replace: (uri: unknown, range: unknown, newText: string) => add(uri, range, newText),
+      insert: (uri: unknown, pos: unknown, newText: string) => add(uri, { start: pos, end: pos }, newText),
+      delete: (uri: unknown, range: unknown) => add(uri, range, ''),
+      entries: () => [...editsMap.entries()].map(([, v]) => [null, v]),
+    };
+  }),
   TreeItem: vi.fn(),
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
   EventEmitter: vi.fn(() => ({ event: vi.fn(), fire: vi.fn(), dispose: vi.fn() })),

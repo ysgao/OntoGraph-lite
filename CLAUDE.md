@@ -168,10 +168,10 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-classes-only.ofn` — minimal BFO classes
 
 ## Recent Changes
+- 012-load-large-ontology: `loadOntologyFile` command + toolbar button (`$(folder-opened)`) loads any-sized ontology via `vscode.workspace.fs.readFile`; `createLargeFileListener` shows notification for VS Code large-file conditions; `reloadOntology` refactored from `openTextDocument` to `workspace.fs.readFile`; `setupFileWatcher` extracted from `handleDocument` to shared helper
 - 011-autodetect-owl-syntax: Added TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (no new runtime deps)
 - 010-reload-ontology: Added TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (`vscode.FileSystemWatcher`, `vscode.workspace.openTextDocument`), `ParserRegistry.parseAsync` (existing)
-- 009-unify-named-class-axiom-display: Entity Editor — SubClassOf(A B) and EquivalentClasses(A B) named-class axioms now appear in unified "SubClassOf Axioms" / "EquivalentTo Axioms" sections (displayed as single-quoted labels, e.g. `'Animal'`) alongside complex expressions; separate named-class chip sections removed. `splitNormalizedExpressions()` in `EntityEditorPanel.ts` routes bare-IRI expressions back to `superClassIris`/`equivalentClassIris` on save to preserve model round-trip.
 
 ## Active Technologies
-- TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (no new runtime deps) (011-autodetect-owl-syntax)
-- N/A — no persistent state changes (011-autodetect-owl-syntax)
+- TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API, `vscode.workspace.fs` (raw file I/O), existing `ParserRegistry.parseAsync`, existing `AnnotationSync` / `AxiomSync` (012-load-large-ontology)
+- File system (read via `vscode.workspace.fs.readFile`; write via `WorkspaceEdit` + `workspace.applyEdit`) (012-load-large-ontology)

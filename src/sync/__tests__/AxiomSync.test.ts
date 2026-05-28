@@ -4,11 +4,9 @@ import { syncAxiomsToDocument } from '../AxiomSync';
 import type { OWLClass } from '../../model/OntologyModel';
 import { temporaryClassIris } from '../../views/DLQueryState';
 
-const { mockReplace, mockInsert, mockDelete, mockApplyEdit } = vi.hoisted(() => ({
-  mockReplace: vi.fn(),
-  mockInsert: vi.fn(),
-  mockDelete: vi.fn(),
-  mockApplyEdit: vi.fn().mockResolvedValue(true),
+const { mockReadFile, mockWriteFile } = vi.hoisted(() => ({
+  mockReadFile: vi.fn(),
+  mockWriteFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('vscode', () => ({
@@ -17,41 +15,51 @@ vi.mock('vscode', () => ({
     end: { line: s2, character: c2 },
   })),
   Position: vi.fn((l, c) => ({ line: l, character: c })),
-  WorkspaceEdit: vi.fn(() => ({
-    replace: mockReplace,
-    insert: mockInsert,
-    delete: mockDelete,
-  })),
+  WorkspaceEdit: vi.fn(() => {
+    const editsMap = new Map();
+    const add = (uri: unknown, range: unknown, newText: string) => {
+      const k = (uri as { toString?: () => string })?.toString?.() ?? String(uri);
+      if (!editsMap.has(k)) editsMap.set(k, []);
+      editsMap.get(k).push({ range, newText });
+    };
+    return {
+      replace: (uri: unknown, range: unknown, newText: string) => add(uri, range, newText),
+      insert: (uri: unknown, pos: unknown, newText: string) => add(uri, { start: pos, end: pos }, newText),
+      delete: (uri: unknown, range: unknown) => add(uri, range, ''),
+      entries: () => [...editsMap.entries()].map(([, v]) => [null, v]),
+    };
+  }),
   workspace: {
-    applyEdit: mockApplyEdit,
+    fs: {
+      readFile: mockReadFile,
+      writeFile: mockWriteFile,
+    },
+    textDocuments: [],
+    applyEdit: vi.fn().mockResolvedValue(true),
+  },
+  window: {
+    showErrorMessage: vi.fn(),
   },
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockApplyEdit.mockResolvedValue(true);
+  mockWriteFile.mockResolvedValue(undefined);
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function makeFunctionalDoc(content: string): vscode.TextDocument {
-  const lines = content.split('\n');
-  return {
-    getText: () => content,
-    lineAt: (i: number) => ({
-      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
-      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-      text: lines[i] ?? '',
-    }),
-    uri: { fsPath: 'test.ofn', toString: () => 'file:///test.ofn' },
-    lineCount: lines.length,
-  } as unknown as vscode.TextDocument;
+function setupContent(content: string): void {
+  mockReadFile.mockResolvedValueOnce(new TextEncoder().encode(content));
+}
+
+function makeUri(fsPath: string): vscode.Uri {
+  return { fsPath, toString: () => `file:///${fsPath}` } as unknown as vscode.Uri;
 }
 
 const A = 'http://example.org#A';
 const B = 'http://example.org#B';
 const C = 'http://example.org#C';
-const D = 'http://example.org#D';
 const F = 'http://example.org#F';
 
 function makeClass(
@@ -84,13 +92,12 @@ describe('syncAxiomsFunctional — zero-indent style', () => {
       `)`,                                           // 3
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([B]), 'functional');
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([B]), 'functional');
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain(`<${B}>`);
-    expect(insertedText).toContain('SubClassOf');
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`<${B}>`);
+    expect(result!.updatedText).toContain('SubClassOf');
   });
 
   it('does not apply edit when zero-indent file already has the axiom', async () => {
@@ -102,8 +109,9 @@ describe('syncAxiomsFunctional — zero-indent style', () => {
       `)`,                                            // 4
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([B]), 'functional');
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([B]), 'functional');
+    expect(result).toBeNull();
   });
 
   it('adds new SubClassOf to zero-indent file with existing SubClassOf', async () => {
@@ -115,15 +123,12 @@ describe('syncAxiomsFunctional — zero-indent style', () => {
       `)`,                                            // 4
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([B, C]), 'functional');
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([B, C]), 'functional');
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    expect(mockDelete).not.toHaveBeenCalled();
-
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain(`<${C}>`);
-    expect(insertedText).toContain('SubClassOf');
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`<${C}>`);
+    expect(result!.updatedText).toContain('SubClassOf');
   });
 });
 
@@ -140,8 +145,9 @@ describe('AxiomSync Clustered Functional Syntax', () => {
       ')',
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([C]), 'functional');
-    expect(mockApplyEdit).toHaveBeenCalled();
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([C]), 'functional');
+    expect(result).not.toBeNull();
   });
 });
 
@@ -156,8 +162,9 @@ describe('syncAxiomsFunctional — idempotency', () => {
       ')',
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([B]), 'functional');
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([B]), 'functional');
+    expect(result).toBeNull();
   });
 
   it('does not apply any edit when EquivalentClasses + SubClassOf are both unchanged', async () => {
@@ -169,12 +176,13 @@ describe('syncAxiomsFunctional — idempotency', () => {
       ')',
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ofn'),
       makeClass([B], [F]),
       'functional',
     );
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply any edit when entity has no axioms and model has none', async () => {
@@ -184,8 +192,9 @@ describe('syncAxiomsFunctional — idempotency', () => {
       ')',
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([]), 'functional');
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([]), 'functional');
+    expect(result).toBeNull();
   });
 });
 
@@ -200,16 +209,12 @@ describe('syncAxiomsFunctional — minimal diff', () => {
       ')',                                    // 3
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([B]), 'functional');
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([B]), 'functional');
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    expect(mockDelete).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
-
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain(`<${B}>`);
-    expect(insertedText).toContain('SubClassOf');
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`<${B}>`);
+    expect(result!.updatedText).toContain('SubClassOf');
   });
 
   it('adds new SubClassOf after existing SubClassOf without touching EquivalentClasses', async () => {
@@ -223,25 +228,17 @@ describe('syncAxiomsFunctional — minimal diff', () => {
       ')',                                     // 4
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ofn'),
       makeClass([B, C], [F]),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    expect(mockDelete).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
-
-    // Insert must be at line 4 (after SubClassOf B at line 3)
-    const insertPos: { line: number } = mockInsert.mock.calls[0][1];
-    expect(insertPos.line).toBe(4);
-
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain(`<${C}>`);
-    expect(insertedText).toContain('SubClassOf');
-    expect(insertedText).not.toContain(`<${F}>`);
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`<${C}>`);
+    expect(result!.updatedText).toContain('SubClassOf');
+    expect(result!.updatedText).not.toContain(`SubClassOf(<${A}> <${F}>`);
   });
 
   it('adds EquivalentClasses before existing SubClassOf', async () => {
@@ -253,24 +250,20 @@ describe('syncAxiomsFunctional — minimal diff', () => {
       ')',                                    // 3
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ofn'),
       makeClass([B], [F]),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    expect(mockDelete).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
-
-    // EquivalentClasses must be inserted BEFORE SubClassOf B (at line 2)
-    const insertPos: { line: number } = mockInsert.mock.calls[0][1];
-    expect(insertPos.line).toBe(2);
-
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain('EquivalentClasses');
-    expect(insertedText).toContain(`<${F}>`);
+    expect(result).not.toBeNull();
+    // EquivalentClasses must appear before SubClassOf in the output
+    expect(result!.updatedText.indexOf('EquivalentClasses')).toBeLessThan(
+      result!.updatedText.indexOf('SubClassOf'),
+    );
+    expect(result!.updatedText).toContain('EquivalentClasses');
+    expect(result!.updatedText).toContain(`<${F}>`);
   });
 
   it('removes a SubClassOf without touching EquivalentClasses', async () => {
@@ -284,16 +277,16 @@ describe('syncAxiomsFunctional — minimal diff', () => {
       ')',                                     // 4
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ofn'),
       makeClass([], [F]),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockDelete).toHaveBeenCalledOnce();
-    expect(mockInsert).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).not.toContain(`SubClassOf(<${A}> <${B}>)`);
+    expect(result!.updatedText).toContain(`EquivalentClasses`);
   });
 
   it('replaces SubClassOf B with SubClassOf C at the same position', async () => {
@@ -305,33 +298,16 @@ describe('syncAxiomsFunctional — minimal diff', () => {
       ')',                                    // 3
     ].join('\n');
 
-    await syncAxiomsToDocument(makeFunctionalDoc(content), makeClass([C]), 'functional');
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), makeClass([C]), 'functional');
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockDelete).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain(`<${C}>`);
-    expect(insertedText).not.toContain(`<${B}>`);
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`<${C}>`);
+    expect(result!.updatedText).not.toContain(`<${B}>`);
   });
 });
 
 // ── Manchester axiom sync (T012) ───────────────────────────────────────────────
-
-function makeManchesterDoc(content: string): vscode.TextDocument {
-  const lines = content.split('\n');
-  return {
-    getText: () => content,
-    lineAt: (i: number) => ({
-      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
-      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-      text: lines[i] ?? '',
-    }),
-    uri: { fsPath: 'test.omn', toString: () => 'file:///test.omn' },
-    lineCount: lines.length,
-  } as unknown as vscode.TextDocument;
-}
 
 describe('syncAxiomsManchester — idempotency (T012)', () => {
   it('does not apply edit when SubClassOf is unchanged (full-IRI form)', async () => {
@@ -342,8 +318,9 @@ describe('syncAxiomsManchester — idempotency (T012)', () => {
       '',
     ].join('\n');
 
-    await syncAxiomsToDocument(makeManchesterDoc(content), makeClass([B]), 'manchester');
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.omn'), makeClass([B]), 'manchester');
+    expect(result).toBeNull();
   });
 
   it('does not apply edit when SubClassOf and EquivalentTo are both unchanged', async () => {
@@ -355,12 +332,13 @@ describe('syncAxiomsManchester — idempotency (T012)', () => {
       '',
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.omn'),
       makeClass([B], [F]),
       'manchester',
     );
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply edit when class has no axioms and model has none', async () => {
@@ -370,8 +348,9 @@ describe('syncAxiomsManchester — idempotency (T012)', () => {
       '',
     ].join('\n');
 
-    await syncAxiomsToDocument(makeManchesterDoc(content), makeClass([]), 'manchester');
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.omn'), makeClass([]), 'manchester');
+    expect(result).toBeNull();
   });
 
   it('applies edit when SubClassOf changes', async () => {
@@ -382,26 +361,13 @@ describe('syncAxiomsManchester — idempotency (T012)', () => {
       '',
     ].join('\n');
 
-    await syncAxiomsToDocument(makeManchesterDoc(content), makeClass([C]), 'manchester');
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    setupContent(content);
+    const result = await syncAxiomsToDocument(makeUri('test.omn'), makeClass([C]), 'manchester');
+    expect(result).not.toBeNull();
   });
 });
 
 // ── Turtle combined sync — idempotency (T014) ─────────────────────────────────
-
-function makeTurtleDoc(content: string): vscode.TextDocument {
-  const lines = content.split('\n');
-  return {
-    getText: () => content,
-    lineAt: (i: number) => ({
-      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
-      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-      text: lines[i] ?? '',
-    }),
-    uri: { fsPath: 'test.ttl', toString: () => 'file:///test.ttl' },
-    lineCount: lines.length,
-  } as unknown as vscode.TextDocument;
-}
 
 function makeClassWithLabel(
   superClassIris: string[],
@@ -430,12 +396,13 @@ describe('syncAxiomsTurtle — idempotency (T014)', () => {
       `    rdfs:label "A"@en .`,
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ttl'),
       makeClassWithLabel([B], 'A'),
       'turtle',
     );
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('applies edit when SubClassOf target changes', async () => {
@@ -445,13 +412,13 @@ describe('syncAxiomsTurtle — idempotency (T014)', () => {
       `    rdfs:label "A"@en .`,
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ttl'),
       makeClassWithLabel([C], 'A'),
       'turtle',
     );
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockReplace).toHaveBeenCalledOnce();
+    expect(result).not.toBeNull();
   });
 
   it('does not apply edit when class has no label and no axioms beyond rdf:type', async () => {
@@ -459,12 +426,13 @@ describe('syncAxiomsTurtle — idempotency (T014)', () => {
       `<${A}> rdf:type owl:Class .`,
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ttl'),
       makeClass([]),
       'turtle',
     );
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 });
 
@@ -499,12 +467,13 @@ describe('syncAxiomsTurtle — annotation file-order preservation', () => {
       `    rdfs:label "A"@en .`,
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ttl'),
       makeClassWithLabelAndAnnot([B], 'A', { [DEF]: ['An animal'] }),
       'turtle',
     );
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('appends new annotation without reordering existing file-order annotations', async () => {
@@ -517,18 +486,17 @@ describe('syncAxiomsTurtle — annotation file-order preservation', () => {
       `    rdfs:label "A"@en .`,
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ttl'),
       makeClassWithLabelAndAnnot([B], 'A', { [DEF]: ['An animal'], [ALT]: ['creature'] }),
       'turtle',
     );
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockReplace).toHaveBeenCalledOnce();
+    expect(result).not.toBeNull();
 
-    const replacedText: string = mockReplace.mock.calls[0][2];
-    const defIdx = replacedText.indexOf(`<${DEF}>`);
-    const labelIdx = replacedText.indexOf('rdfs:label');
-    const altIdx = replacedText.indexOf(`<${ALT}>`);
+    const defIdx = result!.updatedText.indexOf(`<${DEF}>`);
+    const labelIdx = result!.updatedText.indexOf('rdfs:label');
+    const altIdx = result!.updatedText.indexOf(`<${ALT}>`);
     expect(defIdx).toBeGreaterThanOrEqual(0);
     expect(labelIdx).toBeGreaterThan(defIdx);
     expect(altIdx).toBeGreaterThan(labelIdx);
@@ -550,16 +518,16 @@ describe('syncAxiomsTurtle — rdfs:comment abbreviated (T008)', () => {
       `    rdfs:label "A"@en .`,
     ].join('\n');
 
-    await syncAxiomsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAxiomsToDocument(
+      makeUri('test.ttl'),
       makeClassWithLabelAndAnnot([B], 'A', { [RDFS_COMMENT]: ['An animal class'] }),
       'turtle',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    const replacedText: string = mockReplace.mock.calls[0][2];
-    expect(replacedText).toContain('rdfs:comment');
-    expect(replacedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain('rdfs:comment');
+    expect(result!.updatedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
   });
 });
 
@@ -576,23 +544,23 @@ describe('syncAxiomsToDocument — DL query sync inhibition guard', () => {
   afterEach(() => { temporaryClassIris.clear(); });
 
   it('T032a: returns null without calling applyEdit when entity IRI is in temporaryClassIris', async () => {
-    const doc = makeFunctionalDoc(GUARD_CONTENT_AX);
+    setupContent(GUARD_CONTENT_AX);
     const entity = makeClass([B]);
 
     temporaryClassIris.add(A);
-    const result = await syncAxiomsToDocument(doc, entity, 'functional');
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), entity, 'functional');
 
     expect(result).toBeNull();
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(mockWriteFile).not.toHaveBeenCalled();
   });
 
   it('T032b: proceeds normally when entity IRI is NOT in temporaryClassIris', async () => {
-    const doc = makeFunctionalDoc(GUARD_CONTENT_AX);
+    setupContent(GUARD_CONTENT_AX);
     const entity = makeClass([B]);
 
-    const result = await syncAxiomsToDocument(doc, entity, 'functional');
+    const result = await syncAxiomsToDocument(makeUri('test.ofn'), entity, 'functional');
 
-    expect(mockApplyEdit).toHaveBeenCalled();
+    expect(mockWriteFile).toHaveBeenCalled();
     expect(result).not.toBeNull();
   });
 });

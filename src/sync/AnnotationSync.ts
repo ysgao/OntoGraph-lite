@@ -3,6 +3,7 @@ import type { OWLEntity } from '../model/OntologyModel';
 import { BUILTIN_ANNOTATION_PROP_IRIS } from '../model/OntologyModel';
 import { temporaryClassIris } from '../views/DLQueryState.js';
 import { suppressReloadFor } from './reloadGuard';
+import { RawTextDocument, applyWorkspaceEditsToText } from './RawTextDocument';
 
 const RDFS_PREFIX = 'http://www.w3.org/2000/01/rdf-schema#';
 const RDFS_ANN_TO_TOKEN = new Map<string, string>([
@@ -558,35 +559,70 @@ interface SyncResult {
 }
 
 export async function syncAnnotationsToDocument(
-  doc: vscode.TextDocument,
+  uri: vscode.Uri,
   entity: OWLEntity,
   sourceFormat?: string,
-): Promise<vscode.Range[] | null> {
+): Promise<{ changedRanges: vscode.Range[]; updatedText: string } | null> {
   if (temporaryClassIris.has(entity.iri)) { return null; }
-  const fsPath = doc.uri.fsPath.toLowerCase();
-  let result: SyncResult | null = null;
 
   // Resolve format: prefer the caller-supplied sourceFormat (derived from parse-time detection),
   // then fall back to file extension so the function still works standalone.
-  const fmt = sourceFormat ?? extensionFormat(fsPath);
+  const fmt = sourceFormat ?? extensionFormat(uri.fsPath.toLowerCase());
 
-  if (fmt === 'functional') {
-    result = syncFunctional(doc, entity);
-  } else if (fmt === 'manchester') {
-    result = syncManchester(doc, entity);
-  } else if (fmt === 'turtle') {
-    result = syncTurtle(doc, entity);
-  } else {
+  if (!fmt) {
     void vscode.window.showInformationMessage(
       'OntoGraph: Annotation sync is supported for functional (.ofn, .owl), Manchester (.omn), and Turtle (.ttl) files.'
     );
     return null;
   }
 
+  let bytes: Uint8Array;
+  try {
+    bytes = await vscode.workspace.fs.readFile(uri);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+    void vscode.window.showErrorMessage(`OntoGraph: cannot read '${fname}' — ${msg}.`);
+    return null;
+  }
+  const text = new TextDecoder().decode(bytes);
+  const doc = new RawTextDocument(uri, text) as unknown as vscode.TextDocument;
+
+  let result: SyncResult | null = null;
+  if (fmt === 'functional') {
+    result = syncFunctional(doc, entity);
+  } else if (fmt === 'manchester') {
+    result = syncManchester(doc, entity);
+  } else if (fmt === 'turtle') {
+    result = syncTurtle(doc, entity);
+  }
+
   if (!result) { return null; }
+
+  const updatedText = applyWorkspaceEditsToText(text, result.edit);
   suppressReloadFor(3000);
-  const ok = await vscode.workspace.applyEdit(result.edit);
-  return ok ? result.addedRanges : null;
+  try {
+    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updatedText));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+    void vscode.window.showErrorMessage(`OntoGraph: cannot write '${fname}' — ${msg}.`);
+    return null;
+  }
+
+  // If the file is open as a VS Code text document (e.g., < 50 MB), mirror the
+  // edit so the text document stays in sync with what we wrote to disk.  Without
+  // this, VS Code's auto-save writes the stale text-document content back over
+  // our changes.  Skip if the document is dirty (user has unsaved edits) to
+  // avoid clobbering in-progress work.
+  const openTextDoc = vscode.workspace.textDocuments.find(
+    d => d.uri.toString() === uri.toString() && !d.isDirty,
+  );
+  if (openTextDoc) {
+    await vscode.workspace.applyEdit(result.edit);
+  }
+
+  return { changedRanges: result.addedRanges, updatedText };
 }
 
 function extensionFormat(fsPath: string): string | undefined {
