@@ -50,9 +50,11 @@ export async function loadOntologyFile(
       },
       async () => {
         let text: string;
+        let stat: vscode.FileStat;
         try {
           const bytes = await vscode.workspace.fs.readFile(uri!);
           text = new TextDecoder().decode(bytes);
+          stat = await vscode.workspace.fs.stat(uri!);
         } catch (readErr) {
           const msg = readErr instanceof Error ? readErr.message : String(readErr);
           void vscode.window.showErrorMessage(`OntoGraph: failed to read '${filename}' — ${msg}.`);
@@ -62,6 +64,8 @@ export async function loadOntologyFile(
         const langId = resolveLanguageIdFromPath(uri!.fsPath);
         try {
           const model = await ParserRegistry.parseAsync(text, langId, uri!.toString());
+          model.sourceMtimeMs = stat.mtime;
+          model.sourceSize = stat.size;
           onLoaded(model);
         } catch (parseErr) {
           const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);

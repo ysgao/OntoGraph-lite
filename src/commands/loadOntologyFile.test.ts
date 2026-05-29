@@ -5,6 +5,7 @@ import type { OntologyModel } from '../model/OntologyModel';
 const {
   mockShowOpenDialog,
   mockReadFile,
+  mockStat,
   mockWithProgress,
   mockShowInformationMessage,
   mockShowErrorMessage,
@@ -12,6 +13,7 @@ const {
 } = vi.hoisted(() => ({
   mockShowOpenDialog: vi.fn(),
   mockReadFile: vi.fn(),
+  mockStat: vi.fn(),
   mockWithProgress: vi.fn(),
   mockShowInformationMessage: vi.fn(),
   mockShowErrorMessage: vi.fn(),
@@ -30,7 +32,7 @@ vi.mock('vscode', () => ({
     withProgress: mockWithProgress,
   },
   workspace: {
-    fs: { readFile: mockReadFile },
+    fs: { readFile: mockReadFile, stat: mockStat },
   },
   ProgressLocation: { Notification: 15 },
 }));
@@ -44,6 +46,7 @@ describe('loadOntologyFile', () => {
     vi.clearAllMocks();
     mockShowOpenDialog.mockResolvedValue([fakeUri]);
     mockReadFile.mockResolvedValue(fakeBytes);
+    mockStat.mockResolvedValue({ mtime: 1000, size: fakeBytes.length, type: 1, ctime: 0 });
     mockParseAsync.mockResolvedValue(fakeModel);
     mockWithProgress.mockImplementation(
       (_opts: unknown, task: () => Promise<void>) => task(),

@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import type { OWLEntity } from '../model/OntologyModel';
+import type { OWLEntity, EntitySegment } from '../model/OntologyModel';
 import { BUILTIN_ANNOTATION_PROP_IRIS } from '../model/OntologyModel';
 import { temporaryClassIris } from '../views/DLQueryState.js';
-import { suppressReloadFor } from './reloadGuard';
-import { RawTextDocument, applyWorkspaceEditsToText } from './RawTextDocument';
+import { beginSyncWrite, endSyncWrite } from './reloadGuard';
+import { RawTextDocument, applyWorkspaceEditsToText, countLineDelta, type OffsetEdit } from './RawTextDocument';
+import type { EditSummary } from '../model/SegmentIndex';
 
 const RDFS_PREFIX = 'http://www.w3.org/2000/01/rdf-schema#';
 const RDFS_ANN_TO_TOKEN = new Map<string, string>([
@@ -57,10 +58,56 @@ function resolveIri(token: string, prefixes: Map<string, string>): string {
   return token;
 }
 
-function abbreviateIri(iri: string, prefixes: Map<string, string>): string {
+function abbreviateIri(iri: string, prefixes: Map<string, string>, usedPrefixes?: Set<string>): string {
   const token = RDFS_ANN_TO_TOKEN.get(iri);
   if (token !== undefined) { return token; }
+  if (usedPrefixes && usedPrefixes.size > 0 && prefixes.size > 0) {
+    // Use the prefix actually employed by the file; longest matching expansion wins.
+    let bestName: string | null = null;
+    let bestExpansion = '';
+    for (const [name, expansion] of prefixes) {
+      if (!usedPrefixes.has(name)) continue;
+      if (expansion.length > bestExpansion.length && iri.startsWith(expansion)) {
+        bestName = name;
+        bestExpansion = expansion;
+      }
+    }
+    if (bestName !== null) {
+      const localName = iri.slice(bestExpansion.length);
+      if (localName.length > 0 && !/[\s<>"\\]/.test(localName)) {
+        return bestName + localName; // bestName already has trailing ':'
+      }
+    }
+  }
   return `<${iri}>`;
+}
+
+// Detect which prefixes appear as CURIEs in a small set of sample lines (e.g. an entity's
+// existing axiom lines). Returns a Set of prefix names (with trailing ':') seen in CURIE form.
+// Empty Set when no samples (caller defaults to <full-IRI> form).
+function detectUsedPrefixesFromLines(sampleLines: string[], prefixes: Map<string, string>): Set<string> {
+  const used = new Set<string>();
+  if (prefixes.size === 0 || sampleLines.length === 0) return used;
+  for (const line of sampleLines) {
+    if (used.size === prefixes.size) break;
+    for (const [name] of prefixes) {
+      if (used.has(name)) continue;
+      let idx = line.indexOf(name);
+      while (idx >= 0) {
+        const prevCh = idx > 0 ? line.charCodeAt(idx - 1) : 0;
+        const prevDelim = prevCh === 0 || prevCh === 32 || prevCh === 9
+          || prevCh === 40 || prevCh === 44 || prevCh === 91 || prevCh === 13;
+        if (prevDelim) {
+          const c = line.charCodeAt(idx + name.length);
+          const idChar = (c >= 48 && c <= 57) || (c >= 65 && c <= 90)
+            || (c >= 97 && c <= 122) || c === 95 || c === 45;
+          if (idChar) { used.add(name); break; }
+        }
+        idx = line.indexOf(name, idx + 1);
+      }
+    }
+  }
+  return used;
 }
 
 interface AnnotationPair { propIri: string; text: string; lang?: string; }
@@ -169,76 +216,148 @@ function detectFunctionalIndent(lines: string[]): string {
   return '  ';
 }
 
-function syncFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | null {
+function syncFunctional(
+  doc: vscode.TextDocument,
+  entity: OWLEntity,
+  segment?: EntitySegment,
+): SyncResult | null {
   const text = doc.getText();
-  const lines = text.split('\n');
   const prefixes = parsePrefixes(text, 'functional');
 
-  // Build file's current annotation set in document order (preserving positions).
-  // Annotations whose values contain real newlines span multiple physical lines;
-  // join continuation lines before parsing.
+  // O(entity-axiom-count) fast path: use the entity's exact line list when available
+  // (essential for SNOMED-scale files where the entity segment spans 1M+ lines because
+  // axioms are grouped by axiom type, not by entity).
+  const useLineList = !!(segment && segment.lineIndices && segment.lineCharStarts);
+  // Fall-back chunk path (Protégé-style clusters or no segment hint).
+  const lineOffset = useLineList ? 0 : (segment?.startLine ?? 0);
+  // Direct assignment instead of `push(...arr)` — spread invokes apply with
+  // one argument per element, and 2.9M args blows the V8 call-stack limit
+  // when no segment is available and we have to split the whole 200MB file.
+  const lines: string[] = useLineList
+    ? []
+    : (segment
+      ? text.slice(segment.startChar, Math.min(segment.endChar + 4096, text.length)).split('\n')
+      : text.split('\n'));
+
   const fileItems: Array<{ key: string; lineIdx: number; lineCount: number }> = [];
-  let i = 0;
-  while (i < lines.length) {
-    let combined = lines[i];
-    let lineCount = 1;
-    while (hasUnclosedString(combined) && i + lineCount < lines.length) {
-      combined += '\n' + lines[i + lineCount];
-      lineCount++;
+  // Sample of entity's existing axiom lines — used to detect whether the file writes this
+  // entity's IRIs as CURIE (`:N`) or full form (`<http://...>`). Empty for non-line-list path.
+  const sampleLines: string[] = [];
+
+  if (useLineList) {
+    const idx = segment!.lineIndices!;
+    const starts = segment!.lineCharStarts!;
+    for (let k = 0; k < idx.length; k++) {
+      const lineStart = starts[k];
+      let lineEnd = text.indexOf('\n', lineStart);
+      if (lineEnd < 0) lineEnd = text.length;
+      let combined = text.slice(lineStart, lineEnd);
+      let lineCount = 1;
+      // Multi-line annotation value: extend by reading next physical line(s).
+      while (hasUnclosedString(combined)) {
+        const nextStart = lineEnd + 1;
+        if (nextStart >= text.length) break;
+        let nextEnd = text.indexOf('\n', nextStart);
+        if (nextEnd < 0) nextEnd = text.length;
+        combined += '\n' + text.slice(nextStart, nextEnd);
+        lineEnd = nextEnd;
+        lineCount++;
+      }
+      sampleLines.push(combined);
+      const parsed = parseFunctionalAnnotationItem(combined, entity, prefixes);
+      if (parsed) fileItems.push({ key: parsed.key, lineIdx: idx[k], lineCount });
     }
-    const parsed = parseFunctionalAnnotationItem(combined, entity, prefixes);
-    if (parsed) fileItems.push({ key: parsed.key, lineIdx: i, lineCount });
-    i += lineCount;
+  } else {
+    let i = 0;
+    while (i < lines.length) {
+      let combined = lines[i];
+      let lineCount = 1;
+      while (hasUnclosedString(combined) && i + lineCount < lines.length) {
+        combined += '\n' + lines[i + lineCount];
+        lineCount++;
+      }
+      const parsed = parseFunctionalAnnotationItem(combined, entity, prefixes);
+      if (parsed) fileItems.push({ key: parsed.key, lineIdx: lineOffset + i, lineCount });
+      i += lineCount;
+    }
   }
   const fileKeySet = new Set(fileItems.map(f => f.key));
 
   // Use the indentation of existing annotation lines; fall back to file convention.
-  const indent = fileItems.length > 0
-    ? (lines[fileItems[0].lineIdx].match(/^(\s+)/)?.[1] ?? detectFunctionalIndent(lines))
-    : detectFunctionalIndent(lines);
+  let indent: string;
+  if (fileItems.length > 0) {
+    let firstAnnotLine: string;
+    if (useLineList) {
+      const first = fileItems[0];
+      // Find this lineIdx in segment.lineIndices to get its char offset.
+      const idx = segment!.lineIndices!;
+      const starts = segment!.lineCharStarts!;
+      let charStart = -1;
+      for (let k = 0; k < idx.length; k++) {
+        if (idx[k] === first.lineIdx) { charStart = starts[k]; break; }
+      }
+      const nl = charStart >= 0 ? text.indexOf('\n', charStart) : -1;
+      firstAnnotLine = charStart >= 0 ? text.slice(charStart, nl < 0 ? text.length : nl) : '';
+    } else {
+      firstAnnotLine = lines[fileItems[0].lineIdx - lineOffset];
+    }
+    indent = firstAnnotLine.match(/^(\s+)/)?.[1] ?? (useLineList ? '' : detectFunctionalIndent(lines));
+  } else if (useLineList) {
+    // No existing annotations for this entity — infer indent from any of its own axiom lines.
+    let detected = '';
+    for (const s of sampleLines) {
+      const m = s.match(/^(\s+)/);
+      if (m) { detected = m[1]; break; }
+    }
+    indent = detected;
+  } else {
+    indent = detectFunctionalIndent(lines);
+  }
+
+  // Detect IRI-form convention from the entity's actual axiom lines (CURIE vs full).
+  const usedPrefixesEntity = detectUsedPrefixesFromLines(sampleLines, prefixes);
 
   // Build model's desired annotation set
   const modelItems: Array<{ key: string; line: string }> = entityAnnotationPairs(entity)
     .map(({ propIri, text: t, lang }) => ({
       key: annotationModelKey(propIri, t, lang),
-      line: `${indent}AnnotationAssertion(${abbreviateIri(propIri, new Map())} ${abbreviateIri(entity.iri, new Map())} ${fmtLiteral(t, lang)})`,
+      line: `${indent}AnnotationAssertion(${abbreviateIri(propIri, prefixes, usedPrefixesEntity)} ${abbreviateIri(entity.iri, prefixes, usedPrefixesEntity)} ${fmtLiteral(t, lang)})`,
     }));
   const modelKeySet = new Set(modelItems.map(m => m.key));
 
-  // Diff: items only in file must be deleted; items only in model must be inserted
   const toRemove = fileItems.filter(f => !modelKeySet.has(f.key));
   const toAdd = modelItems.filter(m => !fileKeySet.has(m.key));
 
   if (toRemove.length === 0 && toAdd.length === 0) return null;
 
-  // Insertion point: after the last existing annotation for this entity.
-  // If there are none, fall back to cluster header or closing paren.
+  // Insertion point: after the last existing annotation, or at segment start+1 when
+  // no annotations exist in the cluster, or full-scan fallback (no segment).
   let insertAt: number;
   if (fileItems.length > 0) {
     const last = fileItems[fileItems.length - 1];
     insertAt = last.lineIdx + last.lineCount;
+  } else if (segment) {
+    insertAt = segment.startLine + 1;
   } else {
     const entityToken = `<${entity.iri}>`;
     const typeLabel = entity.type.charAt(0).toUpperCase() + entity.type.slice(1);
     const headerMatch = `# ${typeLabel}: ${entityToken}`;
     let clusterHeaderIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith(headerMatch)) { clusterHeaderIdx = i; break; }
+    for (let j = 0; j < lines.length; j++) {
+      if (lines[j].startsWith(headerMatch)) { clusterHeaderIdx = j; break; }
     }
     if (clusterHeaderIdx >= 0) {
       insertAt = clusterHeaderIdx + 1;
     } else {
       insertAt = lines.length > 1 ? lines.length - 1 : lines.length;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].trim() === ')') { insertAt = i; break; }
+      for (let j = lines.length - 1; j >= 0; j--) {
+        if (lines[j].trim() === ')') { insertAt = j; break; }
       }
     }
   }
 
   const edit = new vscode.WorkspaceEdit();
 
-  // Delete removed annotations (reverse order preserves original line indices).
-  // Multi-line annotations span lineCount physical lines.
   for (const item of [...toRemove].sort((a, b) => b.lineIdx - a.lineIdx)) {
     edit.delete(doc.uri, new vscode.Range(
       item.lineIdx, 0,
@@ -246,8 +365,6 @@ function syncFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult
     ));
   }
 
-  // Insert new annotations after the last existing annotation.
-  // Each m.line may contain real newlines if the annotation value is multi-line.
   if (toAdd.length > 0) {
     edit.insert(doc.uri, new vscode.Position(insertAt, 0), toAdd.map(m => m.line).join('\n') + '\n');
   }
@@ -562,7 +679,10 @@ export async function syncAnnotationsToDocument(
   uri: vscode.Uri,
   entity: OWLEntity,
   sourceFormat?: string,
-): Promise<{ changedRanges: vscode.Range[]; updatedText: string } | null> {
+  rawContent?: string,
+  segment?: EntitySegment,
+  skipWrite = false,
+): Promise<{ changedRanges: vscode.Range[]; updatedText: string; lineDelta: number; editSummaries: EditSummary[] } | null> {
   if (temporaryClassIris.has(entity.iri)) { return null; }
 
   // Resolve format: prefer the caller-supplied sourceFormat (derived from parse-time detection),
@@ -576,53 +696,66 @@ export async function syncAnnotationsToDocument(
     return null;
   }
 
-  let bytes: Uint8Array;
-  try {
-    bytes = await vscode.workspace.fs.readFile(uri);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
-    void vscode.window.showErrorMessage(`OntoGraph: cannot read '${fname}' — ${msg}.`);
-    return null;
+  let text: string;
+  if (rawContent !== undefined) {
+    text = rawContent;
+  } else {
+    let bytes: Uint8Array;
+    try {
+      bytes = await vscode.workspace.fs.readFile(uri);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+      void vscode.window.showErrorMessage(`OntoGraph: cannot read '${fname}' — ${msg}.`);
+      return null;
+    }
+    text = new TextDecoder().decode(bytes);
   }
-  const text = new TextDecoder().decode(bytes);
   const doc = new RawTextDocument(uri, text) as unknown as vscode.TextDocument;
 
   let result: SyncResult | null = null;
   if (fmt === 'functional') {
-    result = syncFunctional(doc, entity);
+    result = syncFunctional(doc, entity, segment);
   } else if (fmt === 'manchester') {
     result = syncManchester(doc, entity);
   } else if (fmt === 'turtle') {
     result = syncTurtle(doc, entity);
+  } else {
+    console.error(`[OntoGraph syncAnnotations] unsupported fmt='${fmt}' for ${uri.fsPath}`);
+    void vscode.window.showErrorMessage(`OntoGraph: annotation sync not supported for format '${fmt}'. Only functional, manchester, and turtle are supported.`);
+    return null;
   }
 
   if (!result) { return null; }
 
-  const updatedText = applyWorkspaceEditsToText(text, result.edit);
-  suppressReloadFor(3000);
-  try {
-    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updatedText));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
-    void vscode.window.showErrorMessage(`OntoGraph: cannot write '${fname}' — ${msg}.`);
-    return null;
+  const hint = segment ? { startLine: segment.startLine, startChar: segment.startChar } : undefined;
+  const offsetEdits: OffsetEdit[] = [];
+  const updatedText = applyWorkspaceEditsToText(text, result.edit, hint, offsetEdits);
+  // AnnotationSync only ever touches the entity's main cluster (annotation
+  // lines), so every edit belongs to the 'entity' segment map.
+  const editSummaries: EditSummary[] = offsetEdits.map(o => ({ ...o, segmentMap: 'entity' as const }));
+  if (!skipWrite) {
+    const uriKey = uri.toString();
+    beginSyncWrite(uriKey);
+    try {
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updatedText));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+      console.error(`[OntoGraph syncAnnotations] writeFile FAILED: ${msg}`);
+      void vscode.window.showErrorMessage(`OntoGraph: cannot write '${fname}' — ${msg}.`);
+      return null;
+    } finally {
+      endSyncWrite(uriKey);
+    }
   }
 
-  // If the file is open as a VS Code text document (e.g., < 50 MB), mirror the
-  // edit so the text document stays in sync with what we wrote to disk.  Without
-  // this, VS Code's auto-save writes the stale text-document content back over
-  // our changes.  Skip if the document is dirty (user has unsaved edits) to
-  // avoid clobbering in-progress work.
-  const openTextDoc = vscode.workspace.textDocuments.find(
-    d => d.uri.toString() === uri.toString() && !d.isDirty,
-  );
-  if (openTextDoc) {
-    await vscode.workspace.applyEdit(result.edit);
-  }
-
-  return { changedRanges: result.addedRanges, updatedText };
+  return {
+    changedRanges: result.addedRanges,
+    updatedText,
+    lineDelta: countLineDelta(result.edit),
+    editSummaries,
+  };
 }
 
 function extensionFormat(fsPath: string): string | undefined {

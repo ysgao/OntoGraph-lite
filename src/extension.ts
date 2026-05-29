@@ -19,10 +19,14 @@ import { updateDLQueryModel } from './views/DLQueryPanel';
 import { reloadOntology } from './commands/reloadOntology';
 import { loadOntologyFile } from './commands/loadOntologyFile';
 import { createLargeFileListener } from './commands/largeFileNotification';
-import { isReloadSuppressed } from './sync/reloadGuard';
+import { isReloadSuppressed, isOwnRecentWrite, registerWatcherSuspendHandler } from './sync/reloadGuard';
+import { computeLineDiff, canApplyIncremental } from './sync/lineDiff';
+import { applyIncrementalReload } from './sync/incrementalReload';
+import { buildModelSegmentIndexAsync } from './model/SegmentIndex';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
 import { ParserRegistry } from './parser/ParserRegistry';
+import { buildModelSegmentIndex } from './model/SegmentIndex';
 
 export let outputChannel: vscode.OutputChannel;
 
@@ -30,9 +34,6 @@ let activeModel: OntologyModel | undefined;
 let activeIndex: OntologyIndex | undefined;
 let activeFileWatcher: vscode.FileSystemWatcher | undefined;
 let reloadDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-let lspStarted = false;
-
-export const parsedDocVersions = new Map<string, number>();
 
 export function activate(context: vscode.ExtensionContext): void {
   outputChannel = vscode.window.createOutputChannel('OntoGraph');
@@ -116,6 +117,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   function refreshAllViews(model: OntologyModel): void {
     activeIndex = new OntologyIndex(model);
+    // Large functional files have entitySegments pre-built in the parser Worker Thread.
+    // Small functional files (< largeOntologyThreshold) need it built here — fast for small files.
+    // Saves maintain the index incrementally (shiftSegmentsAfter), so skip on re-refresh.
+    if (model.sourceFormat === 'functional' && !model.entitySegments) {
+      buildModelSegmentIndex(model);
+    }
     classProvider.setModel(model, preferredLang);
     inferredProvider.setModel(model, preferredLang);
     objectPropProvider.setModel(model, preferredLang);
@@ -127,19 +134,127 @@ export function activate(context: vscode.ExtensionContext): void {
 
   async function executeReload(): Promise<void> {
     if (!activeModel) { return; }
+    const uri = vscode.Uri.parse(activeModel.sourceUri);
+    const filename = uri.fsPath.split(/[\\/]/).pop() ?? 'ontology';
+
+    // Phase 1 — disk fingerprint short-circuit. If mtime + size haven't moved
+    // since we last parsed, the file is byte-identical to our in-memory model
+    // and a re-parse would just rebuild what we already have. Skip the whole
+    // pipeline (read + decode + worker postMessage + parse + view rebuild),
+    // which on a 200MB ontology is ~15s of work for zero gain.
+    if (activeModel.sourceMtimeMs !== undefined && activeModel.sourceSize !== undefined) {
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        if (stat.mtime === activeModel.sourceMtimeMs && stat.size === activeModel.sourceSize) {
+          // File on disk hasn't changed. The in-memory model is authoritative,
+          // but the SEGMENT INDEX might have drifted from rawContent (e.g. if
+          // a past buggy save inserted duplicate axiom lines without
+          // registering them in segment.lineIndices). A reload click is the
+          // user's signal to refresh things, so rebuild segments from
+          // rawContent — cheap (~2s) and fixes any drift without re-parsing.
+          outputChannel.appendLine(`[reload] file unchanged; rebuilding segment index to clear any drift`);
+          const t0 = Date.now();
+          await buildModelSegmentIndexAsync(activeModel);
+          outputChannel.appendLine(`[reload] segment rebuild took ${Date.now() - t0}ms`);
+          vscode.window.setStatusBarMessage('$(check) OntoGraph: segment index refreshed', 4000);
+          return;
+        }
+      } catch { /* stat failed — fall through to defensive full reload */ }
+    }
+
     await vscode.commands.executeCommand('setContext', 'ontograph.reloading', true);
-    const reloadingMsg = vscode.window.setStatusBarMessage('$(loading~spin) OntoGraph: reloading…');
     try {
-      await reloadOntology(activeModel, (model) => {
-        activeModel = model;
-        refreshAllViews(model);
-        reloadingMsg.dispose();
-        vscode.window.setStatusBarMessage('$(check) Ontology reloaded from disk', 8000);
-      });
+      // Phase 2 — try incremental patch first. For typical external edits
+      // (one or a few entity clusters changed in a multi-hundred-MB
+      // ontology) this finishes in ~1s instead of ~15s. Falls back to a
+      // full re-parse on any condition the incremental path can't handle.
+      const tryIncremental = activeModel
+        && activeModel.sourceFormat === 'functional'
+        && activeModel.rawContent
+        && activeModel.entitySegments;
+
+      if (tryIncremental) {
+        const incrementalOk = await tryIncrementalReload(uri, filename);
+        if (incrementalOk) {
+          vscode.window.setStatusBarMessage('$(check) Ontology reloaded (incremental)', 8000);
+          return;
+        }
+        outputChannel.appendLine('[reload] incremental skipped — falling back to full re-parse');
+      }
+
+      // Full re-parse path. Same pipeline as loadOntologyFile.
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `OntoGraph: reloading ${filename}…`,
+          cancellable: false,
+        },
+        async () => {
+          // Drop heavy fields BEFORE reading + parsing the new copy. See
+          // streamWrite.ts memory notes — old rawContent + segments alone
+          // hold ~450MB on a 200MB SNOMED.
+          if (activeModel) {
+            activeModel.rawContent = '';
+            activeModel.entitySegments = undefined;
+            activeModel.gciSegments = undefined;
+          }
+          await reloadOntology(activeModel!, async (model) => {
+            await onLoadedCallback(model);
+          });
+        },
+      );
+      vscode.window.setStatusBarMessage('$(check) Ontology reloaded from disk', 8000);
     } finally {
-      reloadingMsg.dispose();
       await vscode.commands.executeCommand('setContext', 'ontograph.reloading', false);
     }
+  }
+
+  /**
+   * Phase 2 incremental reload. Reads the file, computes a line-level diff
+   * vs `activeModel.rawContent`, and patches the in-memory model in place
+   * (replacing only affected entity clusters). Returns true on success;
+   * false means caller should fall back to the full re-parse pipeline.
+   */
+  async function tryIncrementalReload(uri: vscode.Uri, filename: string): Promise<boolean> {
+    if (!activeModel || !activeModel.rawContent) return false;
+    let newText: string;
+    let stat: vscode.FileStat;
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      newText = new TextDecoder().decode(bytes);
+      stat = await vscode.workspace.fs.stat(uri);
+    } catch (err) {
+      outputChannel.appendLine(`[reload incremental] read failed: ${String(err)}`);
+      return false;
+    }
+    const oldText = activeModel.rawContent;
+    const oldTextLength = oldText.length;
+    const diff = computeLineDiff(oldText, newText);
+    if (!canApplyIncremental(oldText, newText, diff)) {
+      outputChannel.appendLine(`[reload incremental] diff classification rejected for ${filename}`);
+      return false;
+    }
+    let ok: boolean;
+    try {
+      ok = applyIncrementalReload(activeModel, oldTextLength, newText, diff, { mtime: stat.mtime, size: stat.size });
+    } catch (err) {
+      // Any throw (parser error, OOM during mini-parse, etc.) is non-fatal:
+      // fall back to full re-parse which drops old rawContent first.
+      outputChannel.appendLine(`[reload incremental] applyIncrementalReload threw: ${String(err)}`);
+      return false;
+    }
+    if (!ok) {
+      outputChannel.appendLine(`[reload incremental] applyIncrementalReload returned false for ${filename}`);
+      return false;
+    }
+    outputChannel.appendLine(`[reload incremental] OK — diff lines ${diff.oldStartLine}-${diff.oldEndLine} → ${diff.newStartLine}-${diff.newEndLine}`);
+    // Refresh UI against the patched model (same hooks the full path uses,
+    // but the model object identity is preserved so we don't need to rerun
+    // setupFileWatcher — watcher is already on the right URI).
+    refreshAllViews(activeModel);
+    await refreshEntityEditorIfOpen(activeModel, context);
+    updateDLQueryModel(activeModel, activeIndex);
+    return true;
   }
 
   function hasInferredHierarchy(model: OntologyModel | undefined): model is OntologyModel {
@@ -261,12 +376,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('ontograph.classifyOntologyStale', async () => {
-      if (activeModel) {
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(activeModel.sourceUri));
-        // Force re-parse: ignore the cached version
-        parsedDocVersions.delete(activeModel.sourceUri);
-        await handleDocument(doc);
-      }
+      // No re-parse here. EntityEditorPanel's save flow mutates activeModel in
+      // place and keeps model.rawContent + segments in sync with disk, so the
+      // in-memory state IS the latest. `openTextDocument` also fails for
+      // ontologies >50MB ("Files above 50MB cannot be synchronized with
+      // extensions"), which would block classify-stale on SNOMED.
       await classifyOntology(activeModel, reasonerBridge, inferredProvider);
       updateClassificationViewState(activeModel);
       if (activeModel) { await refreshEntityEditorIfOpen(activeModel, context); }
@@ -338,123 +452,85 @@ export function activate(context: vscode.ExtensionContext): void {
     activeFileWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.joinPath(watchedUri, '..'), filename),
     );
-    activeFileWatcher.onDidChange(() => {
-      if (isReloadSuppressed()) { return; }
+    const watchedKey = watchedUri.toString();
+    activeFileWatcher.onDidChange(async () => {
+      if (isReloadSuppressed(watchedKey)) { return; }
+      // macOS fsevents can deliver the change from our own writeFile
+      // milliseconds after the watcher is recreated. Stat the file and skip
+      // reload when it matches the fingerprint recorded by writeTextStreamed.
+      try {
+        const stat = await vscode.workspace.fs.stat(watchedUri);
+        if (isOwnRecentWrite(watchedKey, stat.mtime, stat.size)) { return; }
+      } catch { /* stat failure → fall through to defensive reload */ }
       clearTimeout(reloadDebounceTimer);
-      reloadDebounceTimer = setTimeout(() => { void executeReload(); }, 500);
+      reloadDebounceTimer = setTimeout(async () => {
+        if (isReloadSuppressed(watchedKey)) { return; }
+        try {
+          const stat = await vscode.workspace.fs.stat(watchedUri);
+          if (isOwnRecentWrite(watchedKey, stat.mtime, stat.size)) { return; }
+        } catch { /* */ }
+        void executeReload();
+      }, 500);
     });
   }
 
-  // --- Document listener: parse on open/save ---
-  const supportedLanguages = new Set(['owl-functional', 'manchester', 'owl-xml', 'turtle']);
-
-  /** Resolve effective language ID — falls back to file extension if VS Code assigns wrong ID */
-  function resolveLanguageId(doc: vscode.TextDocument): string | null {
-    if (supportedLanguages.has(doc.languageId)) { return doc.languageId; }
-    const fsPath = doc.uri.fsPath.toLowerCase();
-    if (fsPath.endsWith('.ofn')) { return 'owl-functional'; }
-    if (fsPath.endsWith('.omn')) { return 'manchester'; }
-    if (fsPath.endsWith('.owx')) { return 'owl-xml'; }
-    if (fsPath.endsWith('.ttl')) { return 'turtle'; }
-    return null;
-  }
-
-  // Track the last-parsed version of each document URI so we skip redundant parses.
-  // doc.version increments on every edit; switching tabs with no edits keeps it the same.
-  // Exported so programmatic edits (like annotation sync) can update this to prevent reloads.
-
-  async function handleDocument(doc: vscode.TextDocument): Promise<void> {
-    const langId = resolveLanguageId(doc);
-    if (!langId) { return; }
-
-    // Skip if the document content hasn't changed since the last parse.
-    const key = doc.uri.toString();
-    const version = doc.version;
-    if (parsedDocVersions.get(key) === version) { return; }
-
-    const content = doc.getText();
-    // Optimization: Skip re-parsing if the document matches the memory model exactly
-    // (e.g. after a programmatic open of a closed file that is already loaded).
-    if (activeModel?.sourceUri === key && activeModel.rawContent === content) {
-      parsedDocVersions.set(key, version);
-      return;
+  // While a programmatic write is in progress, dispose the watcher so OS change
+  // events from our own writeFile are never delivered to onDidChange. Recreate
+  // it as soon as the write finishes. Bounded by the actual write window — no
+  // fixed cooldown.
+  registerWatcherSuspendHandler((uri, suspend) => {
+    if (!activeModel || activeModel.sourceUri !== uri) { return; }
+    if (suspend) {
+      activeFileWatcher?.dispose();
+      activeFileWatcher = undefined;
+      clearTimeout(reloadDebounceTimer);
+    } else {
+      setupFileWatcher(activeModel);
     }
+  });
 
-    parsedDocVersions.set(key, version);
-
-    outputChannel.appendLine(`[handleDocument] lang=${langId} uri=${doc.uri.fsPath.split(/[\\/]/).pop()} v${version}`);
-
-    const statusMsg = vscode.window.setStatusBarMessage(`$(loading~spin) OntoGraph: parsing…`);
-
-    try {
-      const model = await ParserRegistry.parseAsync(content, langId, key);
-      
-      // Preserve classification state if re-parsing the same ontology,
-      // ensuring the "stale" hierarchy remains visible during edits.
-      if (activeModel && activeModel.sourceUri === key) {
-        model.isClassified = activeModel.isClassified;
-        model.classificationNeedsUpdate = activeModel.classificationNeedsUpdate;
-        model.inferredSubClasses = activeModel.inferredSubClasses;
-      }
-
-      activeModel = model;
-      refreshAllViews(model);
-      await refreshEntityEditorIfOpen(model, context);
-      updateDLQueryModel(model, activeIndex);
-      setupFileWatcher(model);
-
-      const { classes, objectProperties, dataProperties, individuals } = model;
-      const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;
-      outputChannel.appendLine(`  → parsed OK: ${stats}`);
-      statusMsg.dispose();
-      vscode.window.setStatusBarMessage(`$(check) OntoGraph: ${stats}`, 8000);
-
-      statsBar.text = `$(type-hierarchy) ${classes.size} cls · ${objectProperties.size} prop · ${individuals.size} ind`;
-      statsBar.tooltip = `OntoGraph: ${classes.size} classes · ${objectProperties.size} object properties · ${dataProperties.size} data properties · ${individuals.size} individuals\nClick for details`;
-      statsBar.show();
-    } catch (err) {
-      statusMsg.dispose();
-      const msg = err instanceof Error ? err.message : String(err);
-      outputChannel.appendLine(`  → ERROR: ${msg}`);
-      vscode.window.showErrorMessage(`OntoGraph parse error: ${msg}`);
-    }
-
-    // Start LSP client lazily (fire-and-forget, non-blocking)
-    if (!lspStarted) {
-      lspStarted = true;
-      void import('./lsp/client').then(({ startLanguageClient }) => {
-        startLanguageClient(context);
-        outputChannel.appendLine('Language server started.');
-      });
-    }
-  }
-
+  // Ontology parsing is triggered ONLY by the explicit "Load Ontology File"
+  // command. Opening a `.owl`/`.ofn`/etc. file in VS Code via the file
+  // explorer, double-click, or any other native document-open path no longer
+  // auto-parses — that path would block the extension host on multi-hundred-MB
+  // ontologies and conflicts with the 50 MB TextDocument synchronization
+  // limit. Users must invoke OntoGraph's load command to bring an ontology
+  // into the editor.
   const onLoadedCallback = async (model: OntologyModel): Promise<void> => {
     activeModel = model;
     refreshAllViews(model);
     await refreshEntityEditorIfOpen(model, context);
     updateDLQueryModel(model, activeIndex);
     setupFileWatcher(model);
+
+    const { classes, objectProperties, dataProperties, individuals } = model;
+    const stats = `${classes.size} classes, ${objectProperties.size} obj props, ${individuals.size} individuals`;
+    outputChannel.appendLine(`[loaded] ${stats}`);
+    vscode.window.setStatusBarMessage(`$(check) OntoGraph: ${stats}`, 8000);
+
+    statsBar.text = `$(type-hierarchy) ${classes.size} cls · ${objectProperties.size} prop · ${individuals.size} ind`;
+    statsBar.tooltip = `OntoGraph: ${classes.size} classes · ${objectProperties.size} object properties · ${dataProperties.size} data properties · ${individuals.size} individuals\nClick for details`;
+    statsBar.show();
   };
 
   const largeFileListener = createLargeFileListener(onLoadedCallback);
 
+  // Start LSP eagerly so completions/diagnostics work in any ontology file the
+  // user opens via VS Code's native document path — independent of whether
+  // they've invoked OntoGraph's load command.
+  void import('./lsp/client').then(({ startLanguageClient }) => {
+    startLanguageClient(context);
+    outputChannel.appendLine('Language server started.');
+  });
+
   context.subscriptions.push(
     { dispose: () => { activeFileWatcher?.dispose(); clearTimeout(reloadDebounceTimer); } },
-    vscode.workspace.onDidOpenTextDocument(doc => { void handleDocument(doc); }),
-    vscode.workspace.onDidSaveTextDocument(doc => { void handleDocument(doc); }),
+    // Only the large-file notification listener remains — it surfaces the
+    // "too big for VS Code" hint without parsing.
     vscode.window.onDidChangeActiveTextEditor(editor => {
-      // Parse on focus change for document-based loading
-      if (editor) { void handleDocument(editor.document); }
-      // Detect large files that VS Code cannot display as text documents
       void largeFileListener(editor);
     }),
   );
-
-  // Process any already-open documents
-  for (const doc of vscode.workspace.textDocuments) {
-    void handleDocument(doc);
-  }
 
   outputChannel.appendLine('OntoGraph ready. Open an .ofn, .omn, or .owl file to begin.');
 }

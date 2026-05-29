@@ -19,11 +19,13 @@ import type { OntologyModel } from '../model/OntologyModel';
 
 const {
   mockReadFile,
+  mockStat,
   mockShowErrorMessage,
   mockParseAsync,
   mockOpenTextDocument,
 } = vi.hoisted(() => ({
   mockReadFile: vi.fn(),
+  mockStat: vi.fn(),
   mockShowErrorMessage: vi.fn(),
   mockParseAsync: vi.fn(),
   mockOpenTextDocument: vi.fn(),
@@ -35,7 +37,7 @@ vi.mock('../parser/ParserRegistry', () => ({
 
 vi.mock('vscode', () => ({
   workspace: {
-    fs: { readFile: mockReadFile },
+    fs: { readFile: mockReadFile, stat: mockStat },
     openTextDocument: mockOpenTextDocument,
   },
   window: {
@@ -61,6 +63,7 @@ describe('reloadOntology — T012 regression tests (post-T013)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockReadFile.mockResolvedValue(fileBytes);
+    mockStat.mockResolvedValue({ mtime: 1000, size: fileBytes.length, type: 1, ctime: 0 });
     mockParseAsync.mockResolvedValue(makeParsedModel('file:///test/animals.ofn', fileContent));
   });
 

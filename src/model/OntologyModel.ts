@@ -78,6 +78,20 @@ export interface OntologyMetadata {
   annotations: Record<string, string[]>;
 }
 
+/** Char/line range of an entity's cluster in the source file (functional syntax only). */
+export interface EntitySegment {
+  startLine: number;
+  endLine: number;
+  startChar: number;
+  endChar: number;
+  /** Exact absolute line indices of every axiom line for this entity (sorted ascending).
+   *  Used when entity's axioms are scattered (e.g. SNOMED groups by axiom type, not entity)
+   *  so sync iterates only the entity's lines instead of a wide chunk. */
+  lineIndices?: Int32Array;
+  /** Parallel to lineIndices: char offset (in rawContent) of each line's start. */
+  lineCharStarts?: Int32Array;
+}
+
 export interface OntologyModel {
   metadata: OntologyMetadata;
   classes: Map<string, OWLClass>;
@@ -91,8 +105,22 @@ export interface OntologyModel {
   rawContent: string;
   /** Format string for the Java reasoner: 'functional' | 'rdf-xml' | 'owl-xml' | 'turtle' | 'manchester' */
   sourceFormat: string;
+  /** File mtime (ms since epoch) at parse time. Used for reload no-op detection
+   *  — if stat matches both this and sourceSize, the file hasn't changed since
+   *  this model was built. */
+  sourceMtimeMs?: number;
+  /** File size in bytes at parse time. Paired with sourceMtimeMs for fingerprinting. */
+  sourceSize?: number;
   /** GCI axioms where both the subclass and superclass expressions are complex (no named anchor class) — stored as functional syntax strings */
   standaloneGcis: string[];
+  /** Entity cluster segments for O(cluster) sync — functional format only, built after parse. */
+  entitySegments?: Map<string, EntitySegment>;
+  /** GCI line segments per class — functional format only, built after parse. */
+  gciSegments?: Map<string, EntitySegment>;
+  /** Line index of Ontology closing ')' — functional format only. */
+  closingParenLine?: number;
+  /** Line index for GCI/property-chain insertion — functional format only. */
+  gciInsertLine?: number;
   /** Inferred class hierarchy populated after reasoning; parent IRI → Set of child IRIs */
   inferredSubClasses: Map<string, Set<string>>;
   /** Whether the ontology has been classified by a reasoner */
