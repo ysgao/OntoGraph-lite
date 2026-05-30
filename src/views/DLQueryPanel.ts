@@ -5,6 +5,8 @@ import { OntologyIndex } from '../model/OntologyIndex.js';
 import { ManchesterParser } from '../parser/ManchesterParser.js';
 import { stripAndContinuations } from '../utils/ManchesterFormatting';
 import { normalizeExpression } from '../model/AxiomDisplay.js';
+import { serializeToFunctional } from '../serializer/FunctionalSerializer.js';
+import { manchesterToFunctional } from '../utils/ExpressionUtils.js';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge.js';
 import type {
   DLQueryExtToWebview,
@@ -155,14 +157,35 @@ async function runQuery(
 ): Promise<void> {
   const model = currentModel;
   const index = currentIndex ?? (model ? new OntologyIndex(model) : null);
-  const format = model?.sourceFormat ?? 'functional';
-  const content = model?.rawContent ?? '';
+  // Mirror classifyOntology's content/format resolution exactly:
+  //   1. live TextDocument (file open in VS Code — picks up unsaved edits)
+  //   2. rawContent (loaded via loadOntologyFile or reloadOntology)
+  //   3. serialize from in-memory model (last resort)
+  // This ensures DL Query classifies the same ontology state as Classify.
+  const sourceDoc = model
+    ? vscode.workspace.textDocuments?.find(d => d.uri.toString() === model.sourceUri)
+    : undefined;
+  const { content, format } = sourceDoc
+    ? { content: sourceDoc.getText(), format: model!.sourceFormat }
+    : model?.rawContent
+      ? { content: model.rawContent, format: model.sourceFormat }
+      : model
+        ? { content: serializeToFunctional(model), format: 'functional' }
+        : { content: '', format: 'functional' };
 
-  // Resolve label names and quoted labels to angle-bracket IRI form so that
-  // Java's Manchester parser can handle them without an entity checker.
-  const resolvedExpression = (model && index)
-    ? wrapIrisInAngleBrackets(normalizeExpression(classExpression, model, index))
-    : classExpression;
+  // Strip multi-line continuation formatting, resolve labels to IRIs, then convert
+  // to OWL Functional Syntax — the same pipeline the entity editor uses for
+  // EquivalentClasses axioms. Java's dlQuery dispatches on the leading token to
+  // parse functional-syntax expressions via OWLAPI's functional parser.
+  // Fall back to the Manchester expression when normalization produced no IRIs
+  // (manchesterToFunctional only handles IRI tokens; bare names yield empty output).
+  const strippedExpression = stripAndContinuations(classExpression);
+  const normalized = (model && index)
+    ? normalizeExpression(strippedExpression, model, index)
+    : strippedExpression;
+  const resolvedExpression = /https?:\/\//.test(normalized)
+    ? manchesterToFunctional(normalized)
+    : strippedExpression;
 
   executing = true;
   temporaryClassIris.add(TEMP_CLASS_IRI);
@@ -226,10 +249,6 @@ function localName(iri: string): string {
   return slash >= 0 ? iri.slice(slash + 1) : iri;
 }
 
-/** Wrap bare full IRIs (output of normalizeExpression) in angle brackets for the Java Manchester parser. */
-function wrapIrisInAngleBrackets(expr: string): string {
-  return expr.replace(/https?:\/\/[^\s(),{}<>]+/g, u => `<${u}>`);
-}
 
 function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const scriptUri = webview.asWebviewUri(

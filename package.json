@@ -1,7 +1,7 @@
 {
   "name": "ontograph-lite",
   "displayName": "OntoGraph Lite: OWL Ontology Editor",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "ysgao",
   "description": "Protégé-like OWL ontology editing, reasoning, and visualization for VS Code",
   "icon": "resources/icons/ontology.png",
@@ -101,12 +101,6 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "ontograph.reloadOntology",
-        "title": "OntoGraph: Reload Ontology",
-        "category": "OntoGraph",
-        "icon": "$(refresh)"
-      },
-      {
         "command": "ontograph.classifyOntology",
         "title": "OntoGraph: Classify Ontology",
         "icon": "$(run)"
@@ -183,12 +177,6 @@
           "command": "ontograph.refresh",
           "when": "view =~ /^ontograph\\./",
           "group": "navigation@1"
-        },
-        {
-          "command": "ontograph.reloadOntology",
-          "when": "view == ontograph.classes",
-          "enablement": "!ontograph.reloading",
-          "group": "navigation@0"
         },
         {
           "command": "ontograph.classifyOntology",

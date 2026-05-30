@@ -51,8 +51,8 @@ vi.mock('vscode', () => ({
 const fileContent = 'Prefix(:=<http://example.org/animals#>)\nOntology(<http://example.org/animals>)';
 const fileBytes = new TextEncoder().encode(fileContent);
 
-function makeModel(sourceUri: string): OntologyModel {
-  return { sourceUri } as unknown as OntologyModel;
+function makeModel(sourceUri: string, sourceFormat = 'functional'): OntologyModel {
+  return { sourceUri, sourceFormat } as unknown as OntologyModel;
 }
 
 function makeParsedModel(sourceUri: string, rawContent: string): OntologyModel {
@@ -100,42 +100,42 @@ describe('reloadOntology — T012 regression tests (post-T013)', () => {
     expect(onReloaded).toHaveBeenCalledOnce();
   });
 
-  // --- Language ID derived from sourceUri path ---
+  // --- Language ID derived from model.sourceFormat (set at initial load, not re-detected) ---
 
-  it('passes owl-functional langId for .ofn sourceUri', async () => {
-    const model = makeModel('file:///test/animals.ofn');
+  it('passes owl-functional langId for sourceFormat=functional', async () => {
+    const model = makeModel('file:///test/animals.ofn', 'functional');
     await reloadOntology(model, vi.fn());
     expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'owl-functional', expect.any(String));
   });
 
-  it('passes manchester langId for .omn sourceUri', async () => {
-    const model = makeModel('file:///test/animals.omn');
+  it('passes manchester langId for sourceFormat=manchester', async () => {
+    const model = makeModel('file:///test/animals.omn', 'manchester');
     await reloadOntology(model, vi.fn());
     expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'manchester', expect.any(String));
   });
 
-  it('passes owl-xml langId for .owl sourceUri (triggers content detection)', async () => {
-    const model = makeModel('file:///test/pizza.owl');
+  it('passes owl-xml langId for sourceFormat=owl-xml (direct dispatch, no re-detection)', async () => {
+    const model = makeModel('file:///test/pizza.owl', 'owl-xml');
     await reloadOntology(model, vi.fn());
     expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'owl-xml', expect.any(String));
   });
 
-  it('passes owl-xml langId for .owx sourceUri', async () => {
-    const model = makeModel('file:///test/ont.owx');
+  it('passes owl-xml langId for sourceFormat=rdf-xml (detectOwlFormat identifies <rdf:RDF in ≤2000 bytes)', async () => {
+    const model = makeModel('file:///test/ont.rdf', 'rdf-xml');
     await reloadOntology(model, vi.fn());
     expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'owl-xml', expect.any(String));
   });
 
-  it('passes turtle langId for .ttl sourceUri', async () => {
-    const model = makeModel('file:///test/ont.ttl');
+  it('passes turtle langId for sourceFormat=turtle', async () => {
+    const model = makeModel('file:///test/ont.ttl', 'turtle');
     await reloadOntology(model, vi.fn());
     expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'turtle', expect.any(String));
   });
 
-  it('passes turtle langId for .n3 sourceUri', async () => {
-    const model = makeModel('file:///test/ont.n3');
+  it('passes auto langId for unknown sourceFormat (falls back to content detection)', async () => {
+    const model = makeModel('file:///test/ont.unknown', 'unknown-format');
     await reloadOntology(model, vi.fn());
-    expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'turtle', expect.any(String));
+    expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'auto', expect.any(String));
   });
 
   // --- Scenario 2: rawContent on reloaded model matches file content ---

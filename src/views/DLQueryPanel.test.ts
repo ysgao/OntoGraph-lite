@@ -31,7 +31,7 @@ vi.mock('vscode', () => ({
   window: { createWebviewPanel: mockCreateWebviewPanel },
   ViewColumn: { Beside: 2 },
   Uri: { joinPath: vi.fn((_base: unknown, ...parts: string[]) => parts.join('/')) },
-  workspace: { getConfiguration: vi.fn(() => ({ get: vi.fn() })) },
+  workspace: { getConfiguration: vi.fn(() => ({ get: vi.fn() })), textDocuments: [] },
 }));
 
 vi.mock('../reasoner/ReasonerBridge.js', () => ({

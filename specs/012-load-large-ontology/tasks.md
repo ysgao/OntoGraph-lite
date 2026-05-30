@@ -89,6 +89,7 @@ No cross-cutting prerequisites blocking all stories. US2/US3/US4 each depend onl
 ### Implementation for User Story 3
 
 - [x] T011 [US3] **Conditional on T009 spike result** — implement only if T009 reveals `openTextDocument.getText()` returns empty for large-file-loaded models: refactor `EntityEditorPanel.ts` save handler to detect large-file case (check `workspace.openTextDocument(uri).getText().length === 0` after open); if detected, read via `vscode.workspace.fs.readFile`, apply sync diff manually, write result via `vscode.workspace.fs.writeFile`; call `suppressReloadFor(3000)` before write; update `parsedDocVersions` if applicable. **If T009 shows `getText()` returns content, mark this task skipped and document finding.**
+  **T009 outcome (2026-05-27)**: `workspace.openTextDocument(uri).getText()` returned content for bfo-core.ofn loaded via `loadOntologyFile`. Existing `WorkspaceEdit` + `applyEdit` sync path works for large-file-loaded models. T011 **skipped** — no refactor of `EntityEditorPanel.ts` required.
 
 **Checkpoint**: Entity editor annotation save on a large-file-loaded model writes change to disk. `npm test` — all existing sync tests still pass.
 

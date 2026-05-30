@@ -6,16 +6,6 @@ const ONTOLOGY_EXTENSIONS = ['owl', 'ofn', 'omn', 'ttl', 'owx', 'n3'];
 
 let isLoading = false;
 
-function resolveLanguageIdFromPath(fsPath: string): string {
-  const lower = fsPath.toLowerCase();
-  if (lower.endsWith('.ofn')) { return 'owl-functional'; }
-  if (lower.endsWith('.omn')) { return 'manchester'; }
-  if (lower.endsWith('.owx')) { return 'owl-xml'; }
-  if (lower.endsWith('.ttl') || lower.endsWith('.n3')) { return 'turtle'; }
-  // .owl and unknown extensions: pass 'owl-xml' to trigger content-based autodetect in ParserRegistry
-  return 'owl-xml';
-}
-
 export async function loadOntologyFile(
   onLoaded: (model: OntologyModel) => void,
   prefillUri?: vscode.Uri,
@@ -61,7 +51,7 @@ export async function loadOntologyFile(
           return;
         }
 
-        const langId = resolveLanguageIdFromPath(uri!.fsPath);
+        const langId = 'auto';
         try {
           const model = await ParserRegistry.parseAsync(text, langId, uri!.toString());
           model.sourceMtimeMs = stat.mtime;

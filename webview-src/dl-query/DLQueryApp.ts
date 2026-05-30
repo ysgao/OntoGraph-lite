@@ -93,7 +93,7 @@ const manchesterLanguage = StreamLanguage.define({
     }
     if (stream.match(/^\d+(\.\d+)?/)) { return 'number'; }
     const word = stream.match(/^[A-Za-z_][\w-]*/);
-    const w = typeof word === 'object' ? (word as RegExpMatchArray)[0] : '';
+    const w = Array.isArray(word) ? word[0] : '';
     if (MANCHESTER_KEYWORDS.has(w)) { return 'keyword'; }
     if (stream.peek() === ':') {
       stream.next();

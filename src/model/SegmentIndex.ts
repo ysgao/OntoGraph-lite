@@ -21,10 +21,12 @@ const CH_GT = 62;
 const CH_DQUOTE = 34;
 const CH_BACKSLASH = 92;
 const CH_COLON = 58;
+const CH_CR = 13;
 
 function isDelimiter(ch: number): boolean {
   return ch === CH_SPACE || ch === CH_TAB || ch === CH_LPAREN || ch === CH_RPAREN
-      || ch === CH_COMMA || ch === CH_LT || ch === CH_GT || ch === CH_DQUOTE;
+      || ch === CH_COMMA || ch === CH_LT || ch === CH_GT || ch === CH_DQUOTE
+      || ch === CH_CR;
 }
 
 /**
@@ -42,7 +44,7 @@ function extractNthEntityToken(
   let pos = from;
   while (pos < to) {
     const c = raw.charCodeAt(pos);
-    if (c === CH_SPACE || c === CH_TAB || c === CH_LPAREN || c === CH_RPAREN || c === CH_COMMA) {
+    if (c === CH_SPACE || c === CH_TAB || c === CH_LPAREN || c === CH_RPAREN || c === CH_COMMA || c === CH_GT || c === CH_CR) {
       pos++; continue;
     }
     if (c === CH_DQUOTE) {
@@ -79,6 +81,10 @@ function extractNthEntityToken(
         return knownTokens.get(raw.slice(pos, j)) ?? null;
       }
     }
+    if (j === pos) {
+      pos++;
+      continue;
+    }
     pos = j;
   }
   return null;
@@ -92,7 +98,7 @@ function extractLastEntityToken(
   let pos = from;
   while (pos < to) {
     const c = raw.charCodeAt(pos);
-    if (c === CH_SPACE || c === CH_TAB || c === CH_LPAREN || c === CH_RPAREN || c === CH_COMMA) {
+    if (c === CH_SPACE || c === CH_TAB || c === CH_LPAREN || c === CH_RPAREN || c === CH_COMMA || c === CH_GT || c === CH_CR) {
       pos++; continue;
     }
     if (c === CH_DQUOTE) {
@@ -123,6 +129,10 @@ function extractLastEntityToken(
     if (hasColon) {
       const matched = knownTokens.get(raw.slice(pos, j));
       if (matched) lastMatch = matched;
+    }
+    if (j === pos) {
+      pos++;
+      continue;
     }
     pos = j;
   }
@@ -570,11 +580,13 @@ export function applyIncrementalSegmentUpdate(
     // 1. Shift every segment that sits at or beyond the edit boundary.
     //    Owner's own lines IN the deleted range stay untouched here (line < oldEndLine);
     //    step 2 removes them.
-    for (const seg of model.entitySegments.values()) {
+    for (const [iri, seg] of model.entitySegments) {
+      if (edit.segmentMap === 'entity' && iri === ownerIri) { continue; }
       shiftSegOnEditBoundary(seg, edit.oldEndLine, lineDelta, charDelta);
     }
     if (model.gciSegments) {
-      for (const seg of model.gciSegments.values()) {
+      for (const [iri, seg] of model.gciSegments) {
+        if (edit.segmentMap === 'gci' && iri === ownerIri) { continue; }
         shiftSegOnEditBoundary(seg, edit.oldEndLine, lineDelta, charDelta);
       }
     }
@@ -601,8 +613,13 @@ export function applyIncrementalSegmentUpdate(
         const l = owner.lineIndices[k];
         // Drop entries that fell inside the deleted line range.
         if (l >= edit.oldStartLine && l < edit.oldEndLine) continue;
-        keptIndices.push(l);
-        keptStarts.push(owner.lineCharStarts[k]);
+        if (l >= edit.oldEndLine) {
+          keptIndices.push(l + lineDelta);
+          keptStarts.push(owner.lineCharStarts[k] + charDelta);
+        } else {
+          keptIndices.push(l);
+          keptStarts.push(owner.lineCharStarts[k]);
+        }
       }
     }
 

@@ -114,7 +114,7 @@ While a large ontology is loaded, an external process modifies the file on disk.
 - **SC-003**: Disk-change detection triggers a reload within 2 seconds of the file modification timestamp changing.
 - **SC-004**: Loading a large file produces zero regressions in loading normal-sized files via the existing open-document pathway.
 - **SC-005**: A clear, named error is shown for every failure mode (unrecognised format, read error, write error) — zero silent failures.
-- **SC-006**: A user unfamiliar with the "Load Ontology File…" command can discover and use the large-file pathway within 30 seconds of VS Code showing a large-file warning, guided solely by the OntoGraph notification.
+- **SC-006**: A user unfamiliar with the "Load Ontology File…" command can discover and use the large-file pathway within 30 seconds of VS Code showing a large-file warning, guided solely by the OntoGraph notification. *(Manual acceptance only — cannot be measured in automated CI. Not a CI quality gate.)*
 
 ## Assumptions
 

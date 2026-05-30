@@ -17,8 +17,8 @@ function detectOwlFormat(text: string): 'functional' | 'manchester' | 'owlxml' |
     if (/<rdf:RDF[\s>]/.test(head) || /xmlns:rdf=/.test(head)) { return 'rdfxml'; }
     return 'unknown';
   }
-  if (t.slice(0, 4096).includes('Ontology('))  { return 'functional'; }
-  if (t.slice(0, 2048).includes('Ontology:'))  { return 'manchester'; }
+  if (t.slice(0, 16384).includes('Ontology(')) { return 'functional'; }
+  if (t.slice(0, 16384).includes('Ontology:')) { return 'manchester'; }
   if (/(?:@prefix|@base|PREFIX\s|BASE\s)/.test(t.slice(0, 1024))) { return 'turtle'; }
   return 'unknown';
 }
@@ -67,6 +67,7 @@ export class ParserRegistry {
         sourceFormat = 'turtle';
         break;
 
+      case 'auto':
       case 'owl-xml': {
         const fmt = detectOwlFormat(text);
         if (fmt === 'functional') { model = new FunctionalParser(text, uri).parse();  sourceFormat = 'functional'; break; }

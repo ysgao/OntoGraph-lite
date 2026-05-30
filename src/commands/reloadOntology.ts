@@ -2,14 +2,15 @@ import * as vscode from 'vscode';
 import type { OntologyModel } from '../model/OntologyModel';
 import { ParserRegistry } from '../parser/ParserRegistry';
 
-function resolveLanguageIdFromPath(fsPath: string): string {
-  const lower = fsPath.toLowerCase();
-  if (lower.endsWith('.ofn')) { return 'owl-functional'; }
-  if (lower.endsWith('.omn')) { return 'manchester'; }
-  if (lower.endsWith('.owx')) { return 'owl-xml'; }
-  if (lower.endsWith('.ttl') || lower.endsWith('.n3')) { return 'turtle'; }
-  // .owl and unknown: pass 'owl-xml' to trigger content-based autodetect in ParserRegistry
-  return 'owl-xml';
+function sourceFormatToLangId(format: string): string {
+  switch (format) {
+    case 'functional': return 'owl-functional';
+    case 'manchester': return 'manchester';
+    case 'turtle':     return 'turtle';
+    case 'owl-xml':    return 'owl-xml';
+    case 'rdf-xml':    return 'owl-xml';  // detectOwlFormat identifies <rdf:RDF in ≤2000 bytes
+    default:           return 'auto';
+  }
 }
 
 // Scope the Uint8Array `bytes` to a helper so it goes out of scope at return
@@ -29,7 +30,7 @@ export async function reloadOntology(
     const uri = vscode.Uri.parse(activeModel.sourceUri);
     const text = await readFileAsText(uri);
     const stat = await vscode.workspace.fs.stat(uri);
-    const langId = resolveLanguageIdFromPath(uri.fsPath);
+    const langId = sourceFormatToLangId(activeModel.sourceFormat);
     const model = await ParserRegistry.parseAsync(text, langId, activeModel.sourceUri);
     model.sourceMtimeMs = stat.mtime;
     model.sourceSize = stat.size;

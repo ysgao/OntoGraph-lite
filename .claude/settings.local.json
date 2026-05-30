@@ -42,7 +42,12 @@
       "Bash(git merge --no-ff 009-unify-named-class-axiom-display -m ' *)",
       "Skill(speckit.specify)",
       "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline origin/main..HEAD)",
-      "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline main..HEAD)"
+      "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline main..HEAD)",
+      "WebFetch(domain:www.w3.org)",
+      "Bash(mkdir -p /Users/yoga/JavaApp/OntoGraph-lite/specs/012-load-large-ontology/checklists)"
+    ],
+    "additionalDirectories": [
+      "/Users/yoga/JavaApp/OntoGraph-lite/specs/012-load-large-ontology/checklists"
     ]
   }
 }

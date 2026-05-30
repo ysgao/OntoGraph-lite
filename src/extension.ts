@@ -18,7 +18,7 @@ import { openDLQuery } from './commands/openDLQuery';
 import { updateDLQueryModel } from './views/DLQueryPanel';
 import { reloadOntology } from './commands/reloadOntology';
 import { loadOntologyFile } from './commands/loadOntologyFile';
-import { createLargeFileListener } from './commands/largeFileNotification';
+
 import { isReloadSuppressed, isOwnRecentWrite, registerWatcherSuspendHandler } from './sync/reloadGuard';
 import { computeLineDiff, canApplyIncremental } from './sync/lineDiff';
 import { applyIncrementalReload } from './sync/incrementalReload';
@@ -156,7 +156,8 @@ export function activate(context: vscode.ExtensionContext): void {
           const t0 = Date.now();
           await buildModelSegmentIndexAsync(activeModel);
           outputChannel.appendLine(`[reload] segment rebuild took ${Date.now() - t0}ms`);
-          vscode.window.setStatusBarMessage('$(check) OntoGraph: segment index refreshed', 4000);
+          refreshAllViews(activeModel);
+          vscode.window.setStatusBarMessage('$(check) OntoGraph: views refreshed', 4000);
           return;
         }
       } catch { /* stat failed — fall through to defensive full reload */ }
@@ -348,7 +349,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('ontograph.refresh', () => {
-      if (activeModel) { refreshAllViews(activeModel); }
+      if (activeModel) { void executeReload(); }
     }),
 
     vscode.commands.registerCommand('ontograph.focusEntity', (item?: { iri?: string }) => {
@@ -362,8 +363,6 @@ export function activate(context: vscode.ExtensionContext): void {
       showEntityInfo(context, activeModel, iri);
       revealInTreeView(iri, entityType);
     }),
-
-    vscode.commands.registerCommand('ontograph.reloadOntology', () => { void executeReload(); }),
 
     vscode.commands.registerCommand('ontograph.loadOntologyFile', (prefillUri?: vscode.Uri) => {
       void loadOntologyFile(onLoadedCallback, prefillUri);
@@ -513,8 +512,6 @@ export function activate(context: vscode.ExtensionContext): void {
     statsBar.show();
   };
 
-  const largeFileListener = createLargeFileListener(onLoadedCallback);
-
   // Start LSP eagerly so completions/diagnostics work in any ontology file the
   // user opens via VS Code's native document path — independent of whether
   // they've invoked OntoGraph's load command.
@@ -525,11 +522,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     { dispose: () => { activeFileWatcher?.dispose(); clearTimeout(reloadDebounceTimer); } },
-    // Only the large-file notification listener remains — it surfaces the
-    // "too big for VS Code" hint without parsing.
-    vscode.window.onDidChangeActiveTextEditor(editor => {
-      void largeFileListener(editor);
-    }),
   );
 
   outputChannel.appendLine('OntoGraph ready. Open an .ofn, .omn, or .owl file to begin.');

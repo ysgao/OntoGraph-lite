@@ -8,7 +8,7 @@ import type {
   OWLAnnotationProperty,
   OWLIndividual,
 } from '../model/OntologyModel';
-import { getLabel } from '../model/OntologyModel';
+import { createEmptyModel, getLabel } from '../model/OntologyModel';
 import { OntologyIndex } from '../model/OntologyIndex';
 import { collectLogicalLines } from '../utils/ManchesterFormatting';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge';
@@ -98,6 +98,62 @@ function getIndex(model: OntologyModel): OntologyIndex {
     _cachedIndex = new OntologyIndex(model);
   }
   return _cachedIndex;
+}
+
+function cloneSegment(segment: EntitySegment | undefined): EntitySegment | undefined {
+  if (segment === undefined) { return undefined; }
+  return {
+    startLine: segment.startLine,
+    endLine: segment.endLine,
+    startChar: segment.startChar,
+    endChar: segment.endChar,
+    lineIndices: segment.lineIndices ? new Int32Array(segment.lineIndices) : undefined,
+    lineCharStarts: segment.lineCharStarts ? new Int32Array(segment.lineCharStarts) : undefined,
+  };
+}
+
+function updateFunctionalSyncHints(
+  entityIri: string,
+  updatedText: string,
+  segment: EntitySegment | undefined,
+  gciSegment: EntitySegment | undefined,
+  closingParenLine: number | undefined,
+  gciInsertLine: number | undefined,
+  editSummaries: EditSummary[],
+): {
+  segment: EntitySegment | undefined;
+  gciSegment: EntitySegment | undefined;
+  closingParenLine: number | undefined;
+  gciInsertLine: number | undefined;
+} {
+  if (editSummaries.length === 0) {
+    return { segment, gciSegment, closingParenLine, gciInsertLine };
+  }
+
+  const tempModel = createEmptyModel('sync-hints.ofn');
+  tempModel.rawContent = updatedText;
+  tempModel.sourceFormat = 'functional';
+  tempModel.closingParenLine = closingParenLine;
+  tempModel.gciInsertLine = gciInsertLine;
+
+  const clonedSegment = cloneSegment(segment);
+  if (clonedSegment) {
+    tempModel.entitySegments = new Map([[entityIri, clonedSegment]]);
+  }
+
+  const clonedGciSegment = cloneSegment(gciSegment);
+  if (clonedGciSegment) {
+    tempModel.gciSegments = new Map([[entityIri, clonedGciSegment]]);
+  }
+
+  applyIncrementalSegmentUpdate(tempModel, entityIri, editSummaries);
+
+  return {
+    segment: tempModel.entitySegments?.get(entityIri),
+    gciSegment: tempModel.gciSegments?.get(entityIri),
+    closingParenLine: tempModel.closingParenLine,
+    gciInsertLine: tempModel.gciInsertLine,
+  };
 }
 
 export function registerEntityEditorRefreshCallback(cb: () => void): void {
@@ -226,7 +282,7 @@ export function showEntityInfo(
  * so memory peak at write time is one final-text copy + the stream's 1MB
  * chunk buffer (not three copies + a 200MB encode buffer).
  */
-async function computeUpdatedText(
+export async function computeUpdatedText(
   uri: vscode.Uri,
   entity: OWLEntity,
   fmt: string,
@@ -268,9 +324,25 @@ async function computeUpdatedText(
   const annot = await syncAnnotationsToDocument(uri, entity, fmt, baseContent, seg, true);
   if (annot) { ranges.push(...annot.changedRanges); lineDelta += annot.lineDelta; }
 
+  const axiomHints = fmt === 'functional' && annot?.updatedText
+    ? updateFunctionalSyncHints(
+      entity.iri,
+      annot.updatedText,
+      seg,
+      gciSeg,
+      cpLine,
+      giLine,
+      annot.editSummaries,
+    )
+    : { segment: seg, gciSegment: gciSeg, closingParenLine: cpLine, gciInsertLine: giLine };
+
   const axiom = await syncAxiomsToDocument(
     uri, entity, fmt, annot?.updatedText ?? baseContent,
-    seg, gciSeg, cpLine, giLine, true,
+    axiomHints.segment,
+    axiomHints.gciSegment,
+    axiomHints.closingParenLine,
+    axiomHints.gciInsertLine,
+    true,
   );
   if (axiom) { ranges.push(...axiom.changedRanges); lineDelta += axiom.lineDelta; }
 

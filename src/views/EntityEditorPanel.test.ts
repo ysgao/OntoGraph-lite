@@ -52,10 +52,54 @@ vi.mock('../extension.js', () => ({
   parsedDocVersions: new Map(),
 }));
 
-import { validateManchesterText, renderExpressionsWithRefs, splitNormalizedExpressions } from './EntityEditorPanel.js';
+import * as vscode from 'vscode';
+import {
+  computeUpdatedText,
+  validateManchesterText,
+  renderExpressionsWithRefs,
+  splitNormalizedExpressions,
+} from './EntityEditorPanel.js';
 import { createEmptyModel } from '../model/OntologyModel.js';
-import type { OWLClass, OWLObjectProperty } from '../model/OntologyModel.js';
+import type { EntitySegment, OWLClass, OWLObjectProperty } from '../model/OntologyModel.js';
 import { OntologyIndex } from '../model/OntologyIndex.js';
+
+const RDFS_COMMENT = 'http://www.w3.org/2000/01/rdf-schema#comment';
+
+function lineStarts(text: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10 && i + 1 < text.length) {
+      starts.push(i + 1);
+    }
+  }
+  return starts;
+}
+
+function segmentForLines(text: string, lines: number[]): EntitySegment {
+  const starts = lineStarts(text);
+  const firstLine = lines[0];
+  const lastLine = lines[lines.length - 1];
+  const lastStart = starts[lastLine];
+  const nextStart = starts[lastLine + 1] ?? text.length + 1;
+  return {
+    startLine: firstLine,
+    endLine: lastLine,
+    startChar: starts[firstLine],
+    endChar: nextStart - 1,
+    lineIndices: new Int32Array(lines),
+    lineCharStarts: new Int32Array(lines.map(line => starts[line])),
+  };
+}
+
+function countOccurrences(text: string, needle: string): number {
+  let count = 0;
+  let idx = text.indexOf(needle);
+  while (idx >= 0) {
+    count++;
+    idx = text.indexOf(needle, idx + needle.length);
+  }
+  return count;
+}
 
 describe('renderExpressionsWithRefs', () => {
   it('produces an array-of-arrays indexed by expression position', () => {
@@ -122,6 +166,102 @@ describe('splitNormalizedExpressions', () => {
     const result = splitNormalizedExpressions([iri]);
     expect(result.namedClassIris).toEqual([iri]);
     expect(result.complexExpressions).toEqual([]);
+  });
+});
+
+describe('computeUpdatedText', () => {
+  it('does not duplicate class axioms after adding an annotation with segment hints', async () => {
+    const a = 'http://example.org#A';
+    const b = 'http://example.org#B';
+    const f = 'http://example.org#F';
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${a}>))`,
+      `  EquivalentClasses(<${a}> <${f}>)`,
+      `  SubClassOf(<${a}> <${b}>)`,
+      ')',
+    ].join('\n');
+    const entity: OWLClass = {
+      iri: a,
+      type: 'class',
+      labels: {},
+      annotations: { [RDFS_COMMENT]: ['A useful note'] },
+      superClassIris: [b],
+      equivalentClassIris: [f],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+
+    const result = await computeUpdatedText(
+      vscode.Uri.parse('file:///test.ofn'),
+      entity,
+      'functional',
+      content,
+      segmentForLines(content, [1, 2, 3]),
+      undefined,
+      4,
+      4,
+    );
+
+    expect(result.text).toContain('AnnotationAssertion(rdfs:comment');
+    expect(countOccurrences(result.text ?? '', `EquivalentClasses(<${a}> <${f}>)`)).toBe(1);
+    expect(countOccurrences(result.text ?? '', `SubClassOf(<${a}> <${b}>)`)).toBe(1);
+  });
+
+  it('returns to the original text after adding and then deleting an annotation', async () => {
+    const a = 'http://example.org#A';
+    const b = 'http://example.org#B';
+    const f = 'http://example.org#F';
+    const original = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${a}>))`,
+      `  EquivalentClasses(<${a}> <${f}>)`,
+      `  SubClassOf(<${a}> <${b}>)`,
+      ')',
+    ].join('\n');
+    const withAnnotation: OWLClass = {
+      iri: a,
+      type: 'class',
+      labels: {},
+      annotations: { [RDFS_COMMENT]: ['A useful note'] },
+      superClassIris: [b],
+      equivalentClassIris: [f],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+    const withoutAnnotation: OWLClass = { ...withAnnotation, annotations: {} };
+
+    const addResult = await computeUpdatedText(
+      vscode.Uri.parse('file:///test.ofn'),
+      withAnnotation,
+      'functional',
+      original,
+      segmentForLines(original, [1, 2, 3]),
+      undefined,
+      4,
+      4,
+    );
+    expect(addResult.text).toBeDefined();
+
+    const addedText = addResult.text ?? '';
+    const deleteResult = await computeUpdatedText(
+      vscode.Uri.parse('file:///test.ofn'),
+      withoutAnnotation,
+      'functional',
+      addedText,
+      segmentForLines(addedText, [1, 2, 3, 4]),
+      undefined,
+      5,
+      5,
+    );
+
+    expect(deleteResult.text).toBe(original);
+    expect(countOccurrences(deleteResult.text ?? '', `EquivalentClasses(<${a}> <${f}>)`)).toBe(1);
+    expect(countOccurrences(deleteResult.text ?? '', `SubClassOf(<${a}> <${b}>)`)).toBe(1);
   });
 });
 

@@ -69,36 +69,20 @@ describe('loadOntologyFile', () => {
     expect(mockReadFile).toHaveBeenCalledWith(fakeUri);
   });
 
-  it('passes decoded text and owl-functional langId to parseAsync for .ofn file', async () => {
+  it('always passes auto langId to parseAsync regardless of file extension', async () => {
     await loadOntologyFile(vi.fn());
     expect(mockParseAsync).toHaveBeenCalledWith(
       'Ontology(<http://example.org/animals>)',
-      'owl-functional',
+      'auto',
       fakeUri.toString(),
     );
   });
 
-  it('derives owl-xml langId for .owl file', async () => {
+  it('passes auto langId for .owl file (content detection, not extension)', async () => {
     const owlUri = { fsPath: '/test/pizza.owl', toString: () => 'file:///test/pizza.owl' };
     mockShowOpenDialog.mockResolvedValueOnce([owlUri]);
     await loadOntologyFile(vi.fn());
-    expect(mockParseAsync).toHaveBeenCalledWith(
-      expect.any(String), 'owl-xml', owlUri.toString(),
-    );
-  });
-
-  it('derives manchester langId for .omn file', async () => {
-    const omnUri = { fsPath: '/test/ont.omn', toString: () => 'file:///test/ont.omn' };
-    mockShowOpenDialog.mockResolvedValueOnce([omnUri]);
-    await loadOntologyFile(vi.fn());
-    expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'manchester', omnUri.toString());
-  });
-
-  it('derives turtle langId for .ttl file', async () => {
-    const ttlUri = { fsPath: '/test/ont.ttl', toString: () => 'file:///test/ont.ttl' };
-    mockShowOpenDialog.mockResolvedValueOnce([ttlUri]);
-    await loadOntologyFile(vi.fn());
-    expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'turtle', ttlUri.toString());
+    expect(mockParseAsync).toHaveBeenCalledWith(expect.any(String), 'auto', owlUri.toString());
   });
 
   it('calls onLoaded with parsed model on success', async () => {

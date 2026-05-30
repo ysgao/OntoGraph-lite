@@ -238,9 +238,10 @@ public class OntologyService {
     public DLQueryResult dlQuery(OWLOntology ontology, String classExpression,
                                   List<String> queryTypes, String engine, int contentLength)
             throws Exception {
-        OWLClassExpression expr = parseManchesterExpression(classExpression, ontology);
-
         OWLOntologyManager manager = ontology.getOWLOntologyManager();
+        OWLClassExpression expr = isFunctionalSyntaxExpression(classExpression)
+            ? parseFunctionalClassExpression(classExpression)
+            : parseManchesterExpression(classExpression, ontology);
         OWLDataFactory df = manager.getOWLDataFactory();
 
         IRI tempIri = IRI.create("urn:ontograph:dlquery#TempQuery");
@@ -353,6 +354,36 @@ public class OntologyService {
     }
 
     // ---- private helpers -------------------------------------------------------
+
+    /** True when expression is OWL Functional Syntax (output of manchesterToFunctional). */
+    private static boolean isFunctionalSyntaxExpression(String expr) {
+        String t = expr.trim();
+        return t.startsWith("Object") || t.startsWith("Data") || t.startsWith("<");
+    }
+
+    /**
+     * Parse an OWL Functional Syntax class expression by wrapping it in a minimal
+     * functional ontology and extracting the parsed expression from the resulting
+     * EquivalentClasses axiom. Lets OWLAPI handle full IRIs in any position, which
+     * the Manchester parser does not reliably support.
+     */
+    private static OWLClassExpression parseFunctionalClassExpression(String expr)
+            throws OWLOntologyCreationException {
+        IRI tIri = IRI.create("urn:ontograph:tmp#T");
+        String mini = "Prefix(:=<urn:ontograph:tmp#>)\nOntology(<urn:ontograph:tmp>\n"
+                + "EquivalentClasses(<urn:ontograph:tmp#T> " + expr + ")\n)";
+        StringDocumentSource src = new StringDocumentSource(
+                mini, IRI.create("urn:ontograph:tmp"),
+                new FunctionalSyntaxDocumentFormat(), null);
+        OWLOntology tmp = OWLManager.createOWLOntologyManager()
+                .loadOntologyFromOntologyDocument(src);
+        return tmp.getAxioms(AxiomType.EQUIVALENT_CLASSES).stream()
+                .flatMap(ax -> ax.getClassExpressions().stream())
+                .filter(ce -> ce.isAnonymous() || !((OWLClass) ce).getIRI().equals(tIri))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException(
+                        "Cannot parse functional class expression: " + expr));
+    }
 
     @SuppressWarnings("null")
     private static OWLClassExpression parseManchesterExpression(String expression, OWLOntology ontology) {

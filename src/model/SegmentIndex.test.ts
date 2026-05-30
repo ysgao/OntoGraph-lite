@@ -99,6 +99,24 @@ describe('buildModelSegmentIndex', () => {
     expect(annotLine).toBeLessThanOrEqual(seg.endLine);
   });
 
+  it('does not hang on multiline annotation continuation lines containing >', () => {
+    const rawContent = `Prefix(:=<http://example.org/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(
+Declaration(Class(:A))
+AnnotationAssertion(rdfs:comment :A "first line
+continuation with > delimiter and no opening quote on this physical line"@en)
+)`;
+    const model = ParserRegistry.parse(rawContent, 'owl-xml', 'file.ofn');
+    model.rawContent = rawContent;
+
+    buildModelSegmentIndex(model);
+
+    const seg = model.entitySegments!.get(A);
+    expect(seg).toBeDefined();
+    expect(seg!.lineIndices?.length).toBe(2);
+  });
+
   it('records GCI lines in gciSegments not entitySegments', () => {
     const rawContent = `Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
 Ontology(<http://example.org/>
@@ -284,6 +302,27 @@ describe('applyIncrementalSegmentUpdate matches full rebuild', () => {
     ].join('\n'));
     const m = loadOnt(oldText);
     const summary = makeSummary(oldText, 5, 6, '');
+    m.rawContent = newText;
+    applyIncrementalSegmentUpdate(m, 'http://example.org/A', [summary]);
+    const full = snap(loadOnt(newText));
+    expect(snap(m).entities).toEqual(full.entities);
+    expect(snap(m).closingParenLine).toBe(full.closingParenLine);
+  });
+
+  it('delete annotation line before existing axioms', () => {
+    const oldText = wrapOnt([
+      'Declaration(Class(:A))',
+      'AnnotationAssertion(rdfs:comment :A "temporary"@en)',
+      'EquivalentClasses(:A :C)',
+      'SubClassOf(:A :B)',
+    ].join('\n'));
+    const newText = wrapOnt([
+      'Declaration(Class(:A))',
+      'EquivalentClasses(:A :C)',
+      'SubClassOf(:A :B)',
+    ].join('\n'));
+    const m = loadOnt(oldText);
+    const summary = makeSummary(oldText, 4, 5, '');
     m.rawContent = newText;
     applyIncrementalSegmentUpdate(m, 'http://example.org/A', [summary]);
     const full = snap(loadOnt(newText));
