@@ -8,6 +8,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -93,19 +96,29 @@ public class ReasonerServer {
         String format = params.path("format").asText(null);
         String engine = params.path("engine").asText("auto");
 
-        org.semanticweb.owlapi.model.OWLOntology ontology;
+        org.semanticweb.owlapi.model.OWLOntology ontology = null;
         int contentLength;
+        String cacheKey = null;
+
         if (params.has("filePath")) {
             String filePath = params.path("filePath").asText();
-            ontology = service.loadFromFile(filePath, format);
-            contentLength = (int) new java.io.File(filePath).length();
+            BasicFileAttributes attrs = Files.readAttributes(Paths.get(filePath), BasicFileAttributes.class);
+            contentLength = (int) attrs.size();
+            cacheKey = filePath + "@" + attrs.lastModifiedTime().toMillis();
+            if (!service.isCached(cacheKey)) {
+                long t = System.currentTimeMillis();
+                ontology = service.loadFromFile(filePath, format);
+                ERR.println("[timing] load=" + (System.currentTimeMillis() - t) + "ms  size=" + contentLength);
+            }
         } else {
             String content = params.path("content").asText();
+            long t = System.currentTimeMillis();
             ontology = service.loadFromString(content, format);
             contentLength = content.length();
+            ERR.println("[timing] load=" + (System.currentTimeMillis() - t) + "ms  size=" + contentLength);
         }
 
-        OntologyService.ClassificationResult result = service.classify(ontology, engine, contentLength);
+        OntologyService.ClassificationResult result = service.classify(ontology, engine, contentLength, cacheKey);
 
         ObjectNode node = MAPPER.createObjectNode();
         node.put("consistent", result.consistent);
@@ -118,18 +131,24 @@ public class ReasonerServer {
         String format = params.path("format").asText(null);
         String engine = params.path("engine").asText("auto");
 
-        org.semanticweb.owlapi.model.OWLOntology ontology;
+        org.semanticweb.owlapi.model.OWLOntology ontology = null;
         int contentLength;
+        String cacheKey = null;
+
         if (params.has("filePath")) {
             String filePath = params.path("filePath").asText();
-            ontology = service.loadFromFile(filePath, format);
-            contentLength = (int) new java.io.File(filePath).length();
+            BasicFileAttributes attrs = Files.readAttributes(Paths.get(filePath), BasicFileAttributes.class);
+            contentLength = (int) attrs.size();
+            cacheKey = filePath + "@" + attrs.lastModifiedTime().toMillis();
+            if (!service.isCached(cacheKey)) {
+                ontology = service.loadFromFile(filePath, format);
+            }
         } else {
             String content = params.path("content").asText();
             ontology = service.loadFromString(content, format);
             contentLength = content.length();
         }
-        OntologyService.ConsistencyResult result = service.checkConsistency(ontology, engine, contentLength);
+        OntologyService.ConsistencyResult result = service.checkConsistency(ontology, engine, contentLength, cacheKey);
 
         ObjectNode node = MAPPER.createObjectNode();
         node.put("consistent", result.consistent);
@@ -161,20 +180,30 @@ public class ReasonerServer {
             for (JsonNode n : qtNode) { queryTypes.add(n.asText()); }
         }
 
-        org.semanticweb.owlapi.model.OWLOntology ontology;
+        org.semanticweb.owlapi.model.OWLOntology ontology = null;
         int contentLength;
+        String cacheKey = null;
+
         if (params.has("filePath")) {
             String filePath = params.path("filePath").asText();
-            ontology = service.loadFromFile(filePath, format);
-            contentLength = (int) new java.io.File(filePath).length();
+            BasicFileAttributes attrs = Files.readAttributes(Paths.get(filePath), BasicFileAttributes.class);
+            contentLength = (int) attrs.size();
+            cacheKey = filePath + "@" + attrs.lastModifiedTime().toMillis();
+            if (!service.isCached(cacheKey)) {
+                long t = System.currentTimeMillis();
+                ontology = service.loadFromFile(filePath, format);
+                ERR.println("[timing] load=" + (System.currentTimeMillis() - t) + "ms  size=" + contentLength);
+            }
         } else {
             String content = params.path("content").asText();
+            long t = System.currentTimeMillis();
             ontology = service.loadFromString(content, format);
             contentLength = content.length();
+            ERR.println("[timing] load=" + (System.currentTimeMillis() - t) + "ms  size=" + contentLength);
         }
 
         OntologyService.DLQueryResult result =
-            service.dlQuery(ontology, classExpression, queryTypes, engine, contentLength);
+            service.dlQuery(ontology, classExpression, queryTypes, engine, contentLength, cacheKey);
 
         ObjectNode node = MAPPER.createObjectNode();
         node.set("directSuperClasses", MAPPER.valueToTree(result.directSuperClasses));

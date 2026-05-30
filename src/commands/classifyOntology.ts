@@ -23,15 +23,12 @@ export async function classifyOntology(
     ? (model.classes.size > threshold ? 'elk' : 'hermit')
     : engineSetting;
 
-  // Use the current open document text when possible so classifications include
-  // axioms saved through the Entity Editor. Fall back to rawContent for parsed
-  // files, then to model serialization for programmatic models.
+  // Use the source file directly when it is saved; for very large ontologies this
+  // avoids copying hundreds of MB through a temporary file before Java reloads it.
+  // Dirty editors still classify their current text so unsaved axioms are included.
+  const sourceUri = vscode.Uri.parse(model.sourceUri);
   const sourceDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-  const { content, format } = sourceDoc
-    ? { content: sourceDoc.getText(), format: model.sourceFormat }
-    : model.rawContent
-      ? { content: model.rawContent, format: model.sourceFormat }
-      : { content: serializeToFunctional(model), format: 'functional' };
+  const canClassifySourceFile = sourceUri.scheme === 'file' && (!sourceDoc || !sourceDoc.isDirty);
 
   await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
@@ -39,7 +36,20 @@ export async function classifyOntology(
     cancellable: false,
   }, async () => {
     try {
-      const result = await bridge.classify(format, content, resolvedEngine);
+      let result: Awaited<ReturnType<ReasonerBridge['classify']>>;
+      if (canClassifySourceFile) {
+        result = await bridge.classifyFile(model.sourceFormat, sourceUri.fsPath, resolvedEngine);
+      } else {
+        // Use the current open document text when possible so classifications include
+        // axioms saved through the Entity Editor. Fall back to rawContent for parsed
+        // files, then to model serialization for programmatic models.
+        const { content, format } = sourceDoc
+          ? { content: sourceDoc.getText(), format: model.sourceFormat }
+          : model.rawContent
+            ? { content: model.rawContent, format: model.sourceFormat }
+            : { content: serializeToFunctional(model), format: 'functional' };
+        result = await bridge.classify(format, content, resolvedEngine);
+      }
 
       // Populate inferred sub-class map on the model
       model.inferredSubClasses.clear();

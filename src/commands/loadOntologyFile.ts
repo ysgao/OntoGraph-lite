@@ -39,19 +39,15 @@ export async function loadOntologyFile(
         cancellable: false,
       },
       async () => {
-        const tTotal = Date.now();
         let text: string;
         let stat: vscode.FileStat;
         try {
-          const tRead = Date.now();
-          const bytes = await vscode.workspace.fs.readFile(uri!);
-          console.log(`[perf:load] readFile: ${Date.now() - tRead}ms (${(bytes.length / 1048576).toFixed(1)} MB)`);
-          const tDecode = Date.now();
+          const [bytes, fileStat] = await Promise.all([
+            vscode.workspace.fs.readFile(uri!),
+            vscode.workspace.fs.stat(uri!),
+          ]);
           text = new TextDecoder().decode(bytes);
-          console.log(`[perf:load] TextDecoder.decode: ${Date.now() - tDecode}ms`);
-          const tStat = Date.now();
-          stat = await vscode.workspace.fs.stat(uri!);
-          console.log(`[perf:load] stat: ${Date.now() - tStat}ms`);
+          stat = fileStat;
         } catch (readErr) {
           const msg = readErr instanceof Error ? readErr.message : String(readErr);
           void vscode.window.showErrorMessage(`OntoGraph: failed to read '${filename}' — ${msg}.`);
@@ -60,15 +56,10 @@ export async function loadOntologyFile(
 
         const langId = 'auto';
         try {
-          const tParse = Date.now();
           const model = await ParserRegistry.parseAsync(text, langId, uri!.toString());
-          console.log(`[perf:load] parseAsync total: ${Date.now() - tParse}ms`);
           model.sourceMtimeMs = stat.mtime;
           model.sourceSize = stat.size;
-          const tOnLoad = Date.now();
           onLoaded(model);
-          console.log(`[perf:load] onLoaded (views): ${Date.now() - tOnLoad}ms`);
-          console.log(`[perf:load] TOTAL: ${Date.now() - tTotal}ms`);
         } catch (parseErr) {
           const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
           if (msg.toLowerCase().includes('could not detect') || msg.toLowerCase().includes('no parser registered')) {

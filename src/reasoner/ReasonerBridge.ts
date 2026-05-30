@@ -31,12 +31,14 @@ export class ReasonerBridge implements vscode.Disposable {
   private pending = new Map<number, PendingRequest>();
   private nextId = 1;
   private statusBarItem: vscode.StatusBarItem;
+  private outputChannel: vscode.OutputChannel;
   private ready = false;
 
   constructor(private extensionPath: string) {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
     this.statusBarItem.text = '$(beaker) Reasoner: idle';
     this.statusBarItem.show();
+    this.outputChannel = vscode.window.createOutputChannel('OntoGraph Reasoner');
   }
 
   async start(): Promise<void> {
@@ -84,6 +86,9 @@ export class ReasonerBridge implements vscode.Disposable {
       }
     });
 
+    const stderrRl = readline.createInterface({ input: this.proc.stderr! });
+    stderrRl.on('line', (line) => this.outputChannel.appendLine(line));
+
     // Pre-warm the JVM
     try {
       await this.request('ping', {});
@@ -117,6 +122,19 @@ export class ReasonerBridge implements vscode.Disposable {
     if (!this.proc) { await this.start(); }
     this.statusBarItem.text = '$(loading~spin) Classifying…';
     const { params, tempFile } = await this.buildParams({ format, content, engine });
+    return this.classifyWithParams(params, tempFile);
+  }
+
+  async classifyFile(format: string, filePath: string, engine = 'auto'): Promise<ClassificationResult> {
+    if (!this.proc) { await this.start(); }
+    this.statusBarItem.text = '$(loading~spin) Classifying…';
+    return this.classifyWithParams({ format, filePath, engine }, undefined);
+  }
+
+  private async classifyWithParams(
+    params: Record<string, unknown>,
+    tempFile: string | undefined,
+  ): Promise<ClassificationResult> {
     try {
       const result = await this.request('classify', params) as ClassificationResult;
       this.statusBarItem.text = result.consistent
@@ -207,6 +225,7 @@ export class ReasonerBridge implements vscode.Disposable {
 
   dispose(): void {
     this.statusBarItem.dispose();
+    this.outputChannel.dispose();
     for (const req of this.pending.values()) {
       clearTimeout(req.timer);
       req.reject(new Error('ReasonerBridge disposed'));

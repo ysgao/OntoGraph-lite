@@ -9,6 +9,7 @@ import org.semanticweb.owlapi.io.StringDocumentSource;
 import org.semanticweb.owlapi.io.StringDocumentTarget;
 import org.semanticweb.owlapi.model.*;
 import org.semanticweb.owlapi.model.OWLOntologySetProvider;
+import org.semanticweb.owlapi.model.RemoveAxiom;
 import org.semanticweb.owlapi.reasoner.InferenceType;
 import org.semanticweb.owlapi.reasoner.OWLReasoner;
 import org.semanticweb.owlapi.util.AnnotationValueShortFormProvider;
@@ -22,7 +23,10 @@ import java.util.*;
 
 /**
  * Wraps OWLAPI 5 for ontology loading, reasoning, and format conversion.
- * Creates a fresh OWLOntologyManager per operation to avoid state contamination.
+ *
+ * Caches the last classified ontology+reasoner by cache key (filePath@mtime) so
+ * repeated classify calls and subsequent DL queries skip load+precompute entirely.
+ * Content-based requests (no file path) are never cached.
  */
 public class OntologyService {
 
@@ -83,35 +87,55 @@ public class OntologyService {
         }
     }
 
+    // ---- reasoner cache --------------------------------------------------------
+    // Key = filePath + "@" + lastModified. File edits change mtime → cache miss →
+    // full reload+reclassify. Content-based requests (no filePath) use null key (never cached).
+
+    private String cachedKey;
+    private OWLOntology cachedOntology;
+    private OWLReasoner cachedReasoner;
+    private ClassificationResult cachedClassification;
+
+    /** True when both ontology and reasoner are cached (full classify cache hit). */
+    boolean isCached(String key) {
+        return key != null && key.equals(this.cachedKey) && this.cachedReasoner != null;
+    }
+
+    /** True when the parsed ontology is cached — even if the reasoner is not yet stored. */
+    private boolean isOntologyCached(String key) {
+        return key != null && key.equals(this.cachedKey) && this.cachedOntology != null;
+    }
+
+    private void evictCache() {
+        if (this.cachedReasoner != null) {
+            try { this.cachedReasoner.dispose(); } catch (Exception ignored) {}
+            this.cachedReasoner = null;
+        }
+        this.cachedOntology = null;
+        this.cachedKey = null;
+        this.cachedClassification = null;
+    }
+
     // ---- public API ------------------------------------------------------------
 
-    /**
-     * Load an ontology from a file path using a fresh manager.
-     * Avoids the cost of JSON-encoding/decoding the file content over the IPC pipe.
-     */
     public OWLOntology loadFromFile(String filePath, String format) throws OWLOntologyCreationException {
         OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
         File file = new File(filePath);
         OWLDocumentFormat docFormat = mapFormat(format);
         if (docFormat == null) {
-            return manager.loadOntologyFromOntologyDocument(Objects.requireNonNull(IRI.create(Objects.requireNonNull(file.toURI()))));
+            return manager.loadOntologyFromOntologyDocument(
+                Objects.requireNonNull(IRI.create(Objects.requireNonNull(file.toURI()))));
         }
         return manager.loadOntologyFromOntologyDocument(
             new FileDocumentSource(file, docFormat, null));
     }
 
-    /**
-     * Load an ontology from string content using a fresh manager.
-     * @param content  The ontology serialization.
-     * @param format   One of "functional", "manchester", "turtle", "rdf-xml", "owl-xml", or null for auto-detect.
-     */
     public OWLOntology loadFromString(String content, String format) throws OWLOntologyCreationException {
         Objects.requireNonNull(content, "content");
         OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
         OWLDocumentFormat docFormat = mapFormat(format);
         StringDocumentSource source;
         if (docFormat == null) {
-            // Auto-detect: OWLAPI sniffs format from content
             source = new StringDocumentSource(content);
         } else {
             source = new StringDocumentSource(
@@ -126,91 +150,109 @@ public class OntologyService {
 
     /**
      * Classify the ontology: precompute hierarchy, detect incoherent classes.
+     *
+     * @param ontology  Loaded ontology. May be null only when isCached(cacheKey) is true.
+     * @param cacheKey  filePath + "@" + lastModified, or null (no caching, always disposes reasoner).
      */
-    public ClassificationResult classify(OWLOntology ontology, String engine, int contentLength)
-            throws Exception {
-        boolean useElk = shouldUseElk(engine, contentLength);
-        OWLReasoner reasoner = useElk
-            ? ElkAdapter.createReasoner(ontology)
-            : HermiTAdapter.createReasoner(ontology);
-        try {
-            reasoner.precomputeInferences(
-                InferenceType.CLASS_HIERARCHY,
-                InferenceType.CLASS_ASSERTIONS
-            );
+    public ClassificationResult classify(OWLOntology ontology, String engine,
+                                         int contentLength, String cacheKey) throws Exception {
+        // Full cache hit: skip load, skip precompute, skip BFS traversal
+        if (isCached(cacheKey) && cachedClassification != null) {
+            System.err.println("[timing] classify: cache HIT");
+            return cachedClassification;
+        }
 
-            boolean consistent = reasoner.isConsistent();
-            List<String> incoherent = new ArrayList<>();
-            List<List<String>> hierarchy = new ArrayList<>(ontology.getClassesInSignature().size());
+        OWLReasoner reasoner;
+        OWLOntology work;
 
-            if (consistent) {
-                OWLDataFactory df = ontology.getOWLOntologyManager().getOWLDataFactory();
-                OWLClass owlThing = df.getOWLThing();
-                @SuppressWarnings("unused")
-                OWLClass owlNothing = df.getOWLNothing(); // reserved for DL inconsistency reporting
-
-                // Find incoherent (unsatisfiable) named classes
-                Set<OWLClass> unsatisfiable = reasoner.getUnsatisfiableClasses().getEntities();
-                for (OWLClass cls : unsatisfiable) {
-                    if (!cls.isOWLNothing()) {
-                        incoherent.add(cls.getIRI().toString());
-                    }
-                }
-
-                // BFS from owl:Thing to collect all direct subclass edges
-                Queue<OWLClass> queue = new ArrayDeque<>();
-                Set<OWLClass> visited = new HashSet<>();
-                queue.add(owlThing);
-                visited.add(owlThing);
-
-                while (!queue.isEmpty()) {
-                    OWLClass parent = Objects.requireNonNull(queue.poll());
-                    Set<OWLClass> children = reasoner.getSubClasses(parent, true).getFlattened();
-                    for (OWLClass child : children) {
-                        if (child.isOWLNothing()) continue;
-                        List<String> edge = Arrays.asList(
-                            parent.getIRI().toString(),
-                            child.getIRI().toString()
-                        );
-                        hierarchy.add(edge);
-                        if (!visited.contains(child)) {
-                            visited.add(child);
-                            queue.add(child);
-                        }
-                    }
-                }
+        if (isCached(cacheKey)) {
+            // Reasoner cached but classification result missing — re-traverse only
+            reasoner = cachedReasoner;
+            work = cachedOntology;
+        } else {
+            evictCache();
+            work = Objects.requireNonNull(ontology, "ontology required on cache miss");
+            boolean useElk = shouldUseElk(engine, contentLength);
+            long t0 = System.currentTimeMillis();
+            reasoner = useElk ? ElkAdapter.createReasoner(work) : HermiTAdapter.createReasoner(work);
+            System.err.println("[timing] reasoner-init=" + (System.currentTimeMillis() - t0)
+                    + "ms  cpus=" + Runtime.getRuntime().availableProcessors());
+            try {
+                long t1 = System.currentTimeMillis();
+                reasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY);
+                System.err.println("[timing] precompute=" + (System.currentTimeMillis() - t1) + "ms");
+            } catch (Exception e) {
+                reasoner.dispose();
+                throw e;
             }
+        }
 
-            return new ClassificationResult(consistent, incoherent, hierarchy);
-        } finally {
+        // Build result outside any cache-write: if this throws, reasoner is disposed and
+        // no partial cache entry is left (cachedReasoner without cachedClassification).
+        ClassificationResult result;
+        try {
+            result = buildClassificationResult(work, reasoner);
+        } catch (Exception e) {
+            reasoner.dispose();
+            throw e;
+        }
+
+        if (cacheKey != null) {
+            cachedKey = cacheKey;
+            cachedOntology = work;
+            cachedReasoner = reasoner;
+            cachedClassification = result;
+        } else {
             reasoner.dispose();
         }
+        return result;
     }
 
     /**
-     * Check ontology consistency.
+     * Check ontology consistency. Reuses cached reasoner when available.
+     *
+     * @param ontology  May be null when isCached(cacheKey) is true.
+     * @param cacheKey  filePath + "@" + lastModified, or null.
      */
-    public ConsistencyResult checkConsistency(OWLOntology ontology, String engine, int contentLength)
-            throws Exception {
-        boolean useElk = shouldUseElk(engine, contentLength);
-        OWLReasoner reasoner = useElk
-            ? ElkAdapter.createReasoner(ontology)
-            : HermiTAdapter.createReasoner(ontology);
-        try {
-            boolean consistent = reasoner.isConsistent();
-            if (consistent) {
-                return new ConsistencyResult(true, Collections.emptyList());
+    public ConsistencyResult checkConsistency(OWLOntology ontology, String engine,
+                                              int contentLength, String cacheKey) throws Exception {
+        boolean fromCache = isCached(cacheKey);
+        OWLReasoner reasoner;
+
+        if (fromCache) {
+            reasoner = cachedReasoner;
+        } else {
+            evictCache();
+            OWLOntology work = Objects.requireNonNull(ontology, "ontology required on cache miss");
+            boolean useElk = shouldUseElk(engine, contentLength);
+            reasoner = useElk ? ElkAdapter.createReasoner(work) : HermiTAdapter.createReasoner(work);
+            // Cache only after isConsistent() succeeds to avoid storing a broken reasoner.
+            // isConsistent() call and cache population happen below.
+            final OWLOntology finalWork = work;
+            boolean consistent;
+            try {
+                consistent = reasoner.isConsistent();
+            } catch (Exception e) {
+                reasoner.dispose();
+                throw e;
             }
-            // Inconsistent — return empty explanation list (Phase 6 feature)
+            if (cacheKey != null) {
+                cachedKey = cacheKey;
+                cachedOntology = finalWork;
+                cachedReasoner = reasoner;
+            } else {
+                reasoner.dispose();
+            }
+            if (consistent) return new ConsistencyResult(true, Collections.emptyList());
             return new ConsistencyResult(false, Collections.emptyList());
-        } finally {
-            reasoner.dispose();
         }
+
+        // fromCache path — reasoner already verified; no dispose needed
+        boolean consistent = reasoner.isConsistent();
+        if (consistent) return new ConsistencyResult(true, Collections.emptyList());
+        return new ConsistencyResult(false, Collections.emptyList());
     }
 
-    /**
-     * Convert ontology from one serialization format to another.
-     */
     public String convertFormat(String content, String fromFormat, String toFormat)
             throws Exception {
         OWLOntology ontology = loadFromString(content, fromFormat);
@@ -224,37 +266,72 @@ public class OntologyService {
     }
 
     /**
-     * Execute a DL query: evaluate a Manchester Syntax class expression against the ontology
-     * and return entities matching the requested relationship types.
+     * Execute a DL query against the ontology.
      *
-     * @param ontology      Loaded ontology (use loadFromFile or loadFromString first).
-     * @param classExpression Manchester Syntax class expression, e.g. "Animal and hasLegs some xsd:integer".
-     * @param queryTypes    Subset of: directSuperClasses, superClasses, equivalentClasses,
-     *                      directSubClasses, subClasses, instances.
-     * @param engine        "auto", "elk", or "hermit".
-     * @param contentLength Used for auto engine selection (proxy for ontology size).
+     * On cache hit, reuses the pre-classified ELK reasoner: adds the temp class axioms,
+     * triggers incremental classification (~200ms), queries, then removes the axioms.
+     * On cache miss, classifies from scratch and caches.
+     *
+     * @param ontology  May be null when isCached(cacheKey) is true.
+     * @param cacheKey  filePath + "@" + lastModified, or null.
+     */
+    /**
+     * Execute a DL query against the ontology.
+     *
+     * Temp axioms are added to the ontology BEFORE creating the ELK reasoner so that
+     * ELK classifies the temp class during initial load rather than via incremental mode.
+     * ELK incremental classification does not reliably handle complex EquivalentClasses
+     * expressions (e.g. SNOMED role-group patterns), so we always use a fresh reasoner here.
+     *
+     * If classify was previously run on the same file (cache hit), the cached ontology is
+     * reused to skip the 13s parse. The classify reasoner cache is unaffected.
+     *
+     * @param ontology  Freshly loaded ontology from ReasonerServer. May be null when
+     *                  isOntologyCached(cacheKey) is true.
+     * @param cacheKey  filePath + "@" + lastModified, or null.
      */
     @SuppressWarnings("null")
     public DLQueryResult dlQuery(OWLOntology ontology, String classExpression,
-                                  List<String> queryTypes, String engine, int contentLength)
-            throws Exception {
-        OWLOntologyManager manager = ontology.getOWLOntologyManager();
+                                 List<String> queryTypes, String engine,
+                                 int contentLength, String cacheKey) throws Exception {
+        // Reuse the cached ontology to skip the 13s parse phase if available.
+        // The classify reasoner cache is preserved — we only read cachedOntology here.
+        OWLOntology work;
+        if (isOntologyCached(cacheKey)) {
+            work = cachedOntology;
+            System.err.println("[timing] dlQuery: using cached ontology (load skipped)");
+        } else {
+            work = Objects.requireNonNull(ontology, "ontology required on cache miss");
+        }
+
+        OWLOntologyManager manager = work.getOWLOntologyManager();
+        OWLDataFactory df = manager.getOWLDataFactory();
         OWLClassExpression expr = isFunctionalSyntaxExpression(classExpression)
             ? parseFunctionalClassExpression(classExpression)
-            : parseManchesterExpression(classExpression, ontology);
-        OWLDataFactory df = manager.getOWLDataFactory();
+            : parseManchesterExpression(classExpression, work);
 
+        // Add temp axioms BEFORE creating the reasoner so ELK classifies them from scratch.
         IRI tempIri = IRI.create("urn:ontograph:dlquery#TempQuery");
         OWLClass tempClass = df.getOWLClass(tempIri);
-        manager.addAxiom(ontology, df.getOWLDeclarationAxiom(tempClass));
-        manager.addAxiom(ontology, df.getOWLEquivalentClassesAxiom(tempClass, expr));
+        OWLAxiom declAxiom = df.getOWLDeclarationAxiom(tempClass);
+        OWLAxiom eqAxiom = df.getOWLEquivalentClassesAxiom(tempClass, expr);
+        manager.addAxiom(work, declAxiom);
+        manager.addAxiom(work, eqAxiom);
+        // Pre-allocate undo changes before the try block so the finally cleanup does not
+        // allocate on a potentially heap-exhausted JVM (OOM in precomputeInferences).
+        RemoveAxiom removeDecl = new RemoveAxiom(work, declAxiom);
+        RemoveAxiom removeEq   = new RemoveAxiom(work, eqAxiom);
 
         boolean useElk = shouldUseElk(engine, contentLength);
-        OWLReasoner reasoner = useElk
-            ? ElkAdapter.createReasoner(ontology)
-            : HermiTAdapter.createReasoner(ontology);
+        OWLReasoner freshReasoner = useElk ? ElkAdapter.createReasoner(work) : HermiTAdapter.createReasoner(work);
         try {
-            reasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS);
+            long t0 = System.currentTimeMillis();
+            if (queryTypes.contains("instances")) {
+                freshReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY, InferenceType.CLASS_ASSERTIONS);
+            } else {
+                freshReasoner.precomputeInferences(InferenceType.CLASS_HIERARCHY);
+            }
+            System.err.println("[timing] dlQuery precompute=" + (System.currentTimeMillis() - t0) + "ms");
 
             List<String> directSuperClasses = new ArrayList<>();
             List<String> superClasses       = new ArrayList<>();
@@ -266,29 +343,29 @@ public class OntologyService {
             for (String qt : queryTypes) {
                 switch (qt) {
                     case "directSuperClasses":
-                        for (OWLClass c : reasoner.getSuperClasses(tempClass, true).getFlattened())
+                        for (OWLClass c : freshReasoner.getSuperClasses(tempClass, true).getFlattened())
                             directSuperClasses.add(c.getIRI().toString());
                         break;
                     case "superClasses":
-                        for (OWLClass c : reasoner.getSuperClasses(tempClass, false).getFlattened())
+                        for (OWLClass c : freshReasoner.getSuperClasses(tempClass, false).getFlattened())
                             superClasses.add(c.getIRI().toString());
                         break;
                     case "equivalentClasses":
-                        for (OWLClass c : reasoner.getEquivalentClasses(tempClass).getEntities()) {
+                        for (OWLClass c : freshReasoner.getEquivalentClasses(tempClass).getEntities()) {
                             if (!tempIri.equals(c.getIRI()))
                                 equivalentClasses.add(c.getIRI().toString());
                         }
                         break;
                     case "directSubClasses":
-                        for (OWLClass c : reasoner.getSubClasses(tempClass, true).getFlattened())
+                        for (OWLClass c : freshReasoner.getSubClasses(tempClass, true).getFlattened())
                             directSubClasses.add(c.getIRI().toString());
                         break;
                     case "subClasses":
-                        for (OWLClass c : reasoner.getSubClasses(tempClass, false).getFlattened())
+                        for (OWLClass c : freshReasoner.getSubClasses(tempClass, false).getFlattened())
                             subClasses.add(c.getIRI().toString());
                         break;
                     case "instances":
-                        for (OWLNamedIndividual i : reasoner.getInstances(tempClass, false).getFlattened())
+                        for (OWLNamedIndividual i : freshReasoner.getInstances(tempClass, false).getFlattened())
                             instances.add(i.getIRI().toString());
                         break;
                     default:
@@ -299,26 +376,23 @@ public class OntologyService {
             return new DLQueryResult(directSuperClasses, superClasses, equivalentClasses,
                                      directSubClasses, subClasses, instances);
         } finally {
-            reasoner.dispose();
+            freshReasoner.dispose();
+            // Remove temp axioms to restore the cached ontology to its original state.
+            // Uses pre-allocated objects; wrapped in catch(Throwable) so a secondary OOM
+            // in applyChange is logged rather than suppressing the original exception.
+            try {
+                manager.applyChange(removeDecl);
+                manager.applyChange(removeEq);
+            } catch (Throwable t) {
+                System.err.println("[warn] dlQuery: temp axiom removal failed: " + t.getMessage());
+            }
         }
     }
 
-    /**
-     * Validate a single Manchester Syntax class expression for syntactic correctness.
-     * Uses a permissive entity checker that accepts any name, so no ontology context
-     * is required. This enables fast, lightweight validation without loading a file.
-     *
-     * @param expression  A single-line or multi-line class expression (newlines are treated
-     *                    as whitespace by the OWLAPI Manchester parser).
-     * @return ValidationResult with valid=true on success, or valid=false plus an error
-     *         message on syntax failure.
-     */
     public ValidationResult validateClassExpression(@Nonnull String expression) {
         OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
         OWLDataFactory df = manager.getOWLDataFactory();
 
-        // Permissive checker: returns a synthetic OWL entity for any name.
-        // This allows pure structural/syntax validation without requiring declared entities.
         OWLEntityChecker permissiveChecker = new OWLEntityChecker() {
             @Override public OWLClass getOWLClass(@Nonnull String n) {
                 return df.getOWLClass(Objects.requireNonNull(IRI.create("urn:validate:" + n)));
@@ -355,18 +429,48 @@ public class OntologyService {
 
     // ---- private helpers -------------------------------------------------------
 
-    /** True when expression is OWL Functional Syntax (output of manchesterToFunctional). */
+    private ClassificationResult buildClassificationResult(OWLOntology ontology, OWLReasoner reasoner) {
+        boolean consistent = reasoner.isConsistent();
+        List<String> incoherent = new ArrayList<>();
+        List<List<String>> hierarchy = new ArrayList<>(ontology.getClassesInSignature().size());
+
+        if (consistent) {
+            OWLDataFactory df = ontology.getOWLOntologyManager().getOWLDataFactory();
+            OWLClass owlThing = df.getOWLThing();
+
+            Set<OWLClass> unsatisfiable = reasoner.getUnsatisfiableClasses().getEntities();
+            for (OWLClass cls : unsatisfiable) {
+                if (!cls.isOWLNothing()) incoherent.add(cls.getIRI().toString());
+            }
+
+            Queue<OWLClass> queue = new ArrayDeque<>();
+            Set<OWLClass> visited = new HashSet<>();
+            queue.add(owlThing);
+            visited.add(owlThing);
+
+            while (!queue.isEmpty()) {
+                OWLClass parent = Objects.requireNonNull(queue.poll());
+                Set<OWLClass> children = reasoner.getSubClasses(parent, true).getFlattened();
+                for (OWLClass child : children) {
+                    if (child.isOWLNothing()) continue;
+                    hierarchy.add(Arrays.asList(parent.getIRI().toString(), child.getIRI().toString()));
+                    if (!visited.contains(child)) {
+                        visited.add(child);
+                        queue.add(child);
+                    }
+                }
+            }
+        }
+
+        return new ClassificationResult(consistent, incoherent, hierarchy);
+    }
+
     private static boolean isFunctionalSyntaxExpression(String expr) {
         String t = expr.trim();
         return t.startsWith("Object") || t.startsWith("Data") || t.startsWith("<");
     }
 
-    /**
-     * Parse an OWL Functional Syntax class expression by wrapping it in a minimal
-     * functional ontology and extracting the parsed expression from the resulting
-     * EquivalentClasses axiom. Lets OWLAPI handle full IRIs in any position, which
-     * the Manchester parser does not reliably support.
-     */
+    @SuppressWarnings("null")
     private static OWLClassExpression parseFunctionalClassExpression(String expr)
             throws OWLOntologyCreationException {
         IRI tIri = IRI.create("urn:ontograph:tmp#T");
@@ -391,7 +495,6 @@ public class OntologyService {
         OWLDataFactory df = manager.getOWLDataFactory();
         Set<OWLOntology> ontologies = ontology.getImportsClosure();
 
-        // Label-based checker: resolves 'quoted rdfs:label names' like 'Body structure'
         OWLOntologySetProvider setProvider = ontologies::stream;
         List<OWLAnnotationProperty> labelProps = Collections.singletonList(df.getRDFSLabel());
         AnnotationValueShortFormProvider labelSfp = new AnnotationValueShortFormProvider(
@@ -400,12 +503,10 @@ public class OntologyService {
             manager, ontologies, labelSfp);
         ShortFormEntityChecker labelChecker = new ShortFormEntityChecker(labelBsf);
 
-        // Local-name checker: resolves unquoted names like Mammal, hasHabitat
         BidirectionalShortFormProviderAdapter localBsf = new BidirectionalShortFormProviderAdapter(
             manager, ontologies, new SimpleShortFormProvider());
         ShortFormEntityChecker localChecker = new ShortFormEntityChecker(localBsf);
 
-        // Combined: try label first, fall back to local name
         OWLEntityChecker checker = new OWLEntityChecker() {
             @Override public OWLClass getOWLClass(String n) {
                 OWLClass c = labelChecker.getOWLClass(n);
@@ -443,14 +544,9 @@ public class OntologyService {
     private static boolean shouldUseElk(String engine, int contentLength) {
         if ("elk".equalsIgnoreCase(engine)) return true;
         if ("hermit".equalsIgnoreCase(engine)) return false;
-        // auto: use ELK for very large functional-syntax ontologies
         return contentLength > 2_000_000;
     }
 
-    /**
-     * Map format string to OWLAPI OWLDocumentFormat. Returns null for auto-detect.
-     * Supported values: "functional", "manchester", "turtle", "rdf-xml", "owl-xml".
-     */
     static OWLDocumentFormat mapFormat(String format) {
         if (format == null) return null;
         switch (format.toLowerCase(Locale.ROOT)) {
@@ -459,7 +555,7 @@ public class OntologyService {
             case "turtle":      return new TurtleDocumentFormat();
             case "rdf-xml":     return new RDFXMLDocumentFormat();
             case "owl-xml":     return new OWLXMLDocumentFormat();
-            default:            return null; // auto-detect
+            default:            return null;
         }
     }
 }
