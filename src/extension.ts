@@ -116,13 +116,18 @@ export function activate(context: vscode.ExtensionContext): void {
   const preferredLang: string = config.get('display.preferredLabelLanguage') ?? 'en';
 
   function refreshAllViews(model: OntologyModel): void {
+    const tRefresh = Date.now();
     activeIndex = new OntologyIndex(model);
+    console.log(`[perf:refresh] OntologyIndex: ${Date.now() - tRefresh}ms`);
     // Large functional files have entitySegments pre-built in the parser Worker Thread.
     // Small functional files (< largeOntologyThreshold) need it built here — fast for small files.
     // Saves maintain the index incrementally (shiftSegmentsAfter), so skip on re-refresh.
     if (model.sourceFormat === 'functional' && !model.entitySegments) {
+      const tSeg = Date.now();
       buildModelSegmentIndex(model);
+      console.log(`[perf:refresh] buildSegmentIndex (small file): ${Date.now() - tSeg}ms`);
     }
+    const tProviders = Date.now();
     classProvider.setModel(model, preferredLang);
     inferredProvider.setModel(model, preferredLang);
     objectPropProvider.setModel(model, preferredLang);
@@ -130,6 +135,8 @@ export function activate(context: vscode.ExtensionContext): void {
     annotationPropProvider.setModel(model, preferredLang);
     individualProvider.setModel(model, preferredLang);
     updateClassificationViewState(model);
+    console.log(`[perf:refresh] tree providers: ${Date.now() - tProviders}ms`);
+    console.log(`[perf:refresh] total: ${Date.now() - tRefresh}ms`);
   }
 
   async function executeReload(): Promise<void> {

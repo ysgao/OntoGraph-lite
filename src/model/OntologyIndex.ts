@@ -13,16 +13,16 @@ export class OntologyIndex {
     this.rebuild();
   }
 
-  private static stripLangTag(value: string): string {
-    return value.includes('@') ? value.slice(0, value.lastIndexOf('@')) : value;
+  /** Strip lang tag and lowercase in one pass — avoids two separate string allocations per label. */
+  private static stripAndLower(value: string): string {
+    const at = value.lastIndexOf('@');
+    return (at > 0 ? value.slice(0, at) : value).toLowerCase();
   }
 
-  private indexLabel(iri: string, rawValue: string): void {
-    const clean = OntologyIndex.stripLangTag(rawValue);
-    const key = clean.toLowerCase();
-    const existing = this.labelToIris.get(key) ?? [];
+  private addToIndex(iri: string, key: string): void {
+    const existing = this.labelToIris.get(key);
+    if (!existing) { this.labelToIris.set(key, [iri]); return; }
     if (!existing.includes(iri)) { existing.push(iri); }
-    this.labelToIris.set(key, existing);
   }
 
   rebuild(): void {
@@ -42,24 +42,33 @@ export class OntologyIndex {
         const allValues: string[] = [];
         for (const labels of Object.values(entity.labels)) {
           for (const label of labels) {
-            this.indexLabel(entity.iri, label);
-            allValues.push(OntologyIndex.stripLangTag(label).toLowerCase());
+            const key = OntologyIndex.stripAndLower(label);
+            this.addToIndex(entity.iri, key);
+            allValues.push(key);
           }
         }
         for (const annotIri of [SKOS_PREF_LABEL, SKOS_ALT_LABEL]) {
           const values = entity.annotations[annotIri];
           if (values) {
             for (const val of values) {
-              this.indexLabel(entity.iri, val);
-              allValues.push(OntologyIndex.stripLangTag(val).toLowerCase());
+              const key = OntologyIndex.stripAndLower(val);
+              this.addToIndex(entity.iri, key);
+              allValues.push(key);
             }
           }
         }
-        const pos = Math.max(entity.iri.lastIndexOf('#'), entity.iri.lastIndexOf('/'));
-        const localName = pos >= 0 ? entity.iri.slice(pos + 1) : entity.iri;
+        // Single backward scan — avoids two lastIndexOf calls per entity
+        const iri = entity.iri;
+        let sep = -1;
+        for (let j = iri.length - 1; j >= 0; j--) {
+          const c = iri.charCodeAt(j);
+          if (c === 35 /* # */ || c === 47 /* / */) { sep = j; break; }
+        }
+        const localName = sep >= 0 ? iri.slice(sep + 1) : iri;
         if (localName) {
-          allValues.push(localName.toLowerCase());
-          this.indexLabel(entity.iri, localName);
+          const localKey = localName.toLowerCase();
+          this.addToIndex(entity.iri, localKey);
+          allValues.push(localKey);
         }
         this.searchText.set(entity.iri, allValues);
       }
