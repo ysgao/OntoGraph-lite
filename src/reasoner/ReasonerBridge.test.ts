@@ -8,6 +8,10 @@ vi.mock('vscode', () => ({
       show: vi.fn(),
       dispose: vi.fn(),
     })),
+    createOutputChannel: vi.fn(() => ({
+      appendLine: vi.fn(),
+      dispose: vi.fn(),
+    })),
   },
   StatusBarAlignment: { Left: 1 },
   workspace: {

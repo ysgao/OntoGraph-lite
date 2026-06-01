@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -16,10 +16,6 @@ npm run compile         # Type-check extension (no emit)
 npm run compile:webview # Type-check webview bundles (separate tsconfig)
 npm run build:parser    # Regenerate Manchester syntax parser from Peggy grammar
 npm run package         # Create .vsix for VS Code marketplace
-```
-or 
-```bash
-npm run build && npm run build:watch && npm run compile && npm run compile:webview && npm run build:parser && npm run package
 ```
 
 ### Java Reasoner Server

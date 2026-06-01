@@ -27,10 +27,12 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private model: OntologyModel | undefined;
-  /** parent IRI → child IRIs (asserted, pre-sorted by label) */
+  /** parent IRI → child IRIs (asserted; sorted lazily on first display) */
   private childrenOf = new Map<string, string[]>();
-  /** child IRI → parent IRIs (asserted, pre-sorted by label) */
+  /** child IRI → parent IRIs (asserted; sorted lazily on first display) */
   private parentsOf = new Map<string, string[]>();
+  /** Keys of childrenOf/parentsOf arrays already sorted. Cleared on buildIndex. */
+  private sorted = new Set<string>();
   private focusIri: string | undefined = OWL_THING;
   private preferredLang = 'en';
   private readonly collator = new Intl.Collator(undefined, { sensitivity: 'base' });
@@ -60,6 +62,7 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
   private buildIndex(): void {
     this.childrenOf.clear();
     this.parentsOf.clear();
+    this.sorted.clear();
     if (!this.model) { return; }
 
     for (const cls of this.model.classes.values()) {
@@ -84,27 +87,20 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
         this.childrenOf.set(parent, siblings);
       }
     }
-
-    // Sort children
-    for (const [, children] of this.childrenOf) {
-      this.sortIris(children);
-    }
-    // Sort parents
-    for (const [, parents] of this.parentsOf) {
-      this.sortIris(parents);
-    }
+    // Sorting is deferred to getChildren() — only the focused node's arrays are
+    // sorted, on first display, instead of all N arrays at setModel time.
   }
 
-  private sortIris(iris: string[]): void {
-    if (!this.model) { return; }
-    iris.sort((a, b) => {
-      const la = this.model!.classes.get(a);
-      const lb = this.model!.classes.get(b);
-      return this.collator.compare(
-        la ? getLabel(la, this.preferredLang) : a,
-        lb ? getLabel(lb, this.preferredLang) : b,
-      );
+  private ensureSorted(key: string, iris: string[]): void {
+    if (this.sorted.has(key) || iris.length < 2) { return; }
+    this.sorted.add(key);
+    // Pre-compute labels once so the comparator doesn't call getLabel O(N log N) times.
+    const keyed = iris.map(iri => {
+      const cls = this.model!.classes.get(iri);
+      return { iri, key: cls ? getLabel(cls, this.preferredLang) : iri };
     });
+    keyed.sort((a, b) => this.collator.compare(a.key, b.key));
+    for (let i = 0; i < iris.length; i++) { iris[i] = keyed[i].iri; }
   }
 
   refresh(): void {
@@ -151,8 +147,13 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
     // Neighborhood view: [parents] + [focus] + [children]
     const result: ClassTreeItem[] = [];
 
-    // 1. Parents (Level 0)
+    // Lazily sort parent and child arrays for the current focus on first display.
     const parentIris = this.parentsOf.get(this.focusIri) ?? [];
+    this.ensureSorted(`p:${this.focusIri}`, parentIris);
+    const childIrisForSort = this.childrenOf.get(this.focusIri) ?? [];
+    this.ensureSorted(`c:${this.focusIri}`, childIrisForSort);
+
+    // 1. Parents (Level 0)
     for (const iri of parentIris) {
       if (iri === OWL_THING) { continue; }
       const item = this.makeItem(iri, "");
@@ -172,8 +173,7 @@ export class ClassHierarchyProvider implements vscode.TreeDataProvider<ClassTree
 
     // 3. Children (Level 2, or Level 1 if Thing is focus)
     const childPrefix = (this.focusIri === OWL_THING) ? "  " : "    ";
-    const childIris = this.childrenOf.get(this.focusIri) ?? [];
-    for (const iri of childIris) {
+    for (const iri of childIrisForSort) {
       const item = this.makeItem(iri, childPrefix);
       if (item) {
         item.collapsibleState = vscode.TreeItemCollapsibleState.None;

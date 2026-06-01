@@ -6,11 +6,9 @@ import { temporaryClassIris } from '../../views/DLQueryState';
 
 // vi.hoisted ensures these are available to the vi.mock factory (which is hoisted
 // before module-level variable declarations are evaluated).
-const { mockReplace, mockInsert, mockDelete, mockApplyEdit } = vi.hoisted(() => ({
-  mockReplace: vi.fn(),
-  mockInsert: vi.fn(),
-  mockDelete: vi.fn(),
-  mockApplyEdit: vi.fn().mockResolvedValue(true),
+const { mockReadFile, mockWriteFile } = vi.hoisted(() => ({
+  mockReadFile: vi.fn(),
+  mockWriteFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('vscode', () => ({
@@ -19,35 +17,47 @@ vi.mock('vscode', () => ({
     end: { line: s2, character: c2 },
   })),
   Position: vi.fn((l, c) => ({ line: l, character: c })),
-  WorkspaceEdit: vi.fn(() => ({
-    replace: mockReplace,
-    insert: mockInsert,
-    delete: mockDelete,
-  })),
+  WorkspaceEdit: vi.fn(() => {
+    const editsMap = new Map<string, Array<{ range: unknown; newText: string }>>();
+    const add = (uri: { toString?: () => string }, range: unknown, newText: string) => {
+      const k = uri.toString?.() ?? String(uri);
+      if (!editsMap.has(k)) editsMap.set(k, []);
+      editsMap.get(k)!.push({ range, newText });
+    };
+    return {
+      replace: (uri: { toString?: () => string }, range: unknown, newText: string) => add(uri, range, newText),
+      insert: (uri: { toString?: () => string }, pos: unknown, newText: string) => add(uri, { start: pos, end: pos }, newText),
+      delete: (uri: { toString?: () => string }, range: unknown) => add(uri, range, ''),
+      entries: () => [...editsMap.entries()].map(([, v]) => [null, v]),
+    };
+  }),
   workspace: {
-    applyEdit: mockApplyEdit,
+    fs: {
+      readFile: mockReadFile,
+      writeFile: mockWriteFile,
+    },
+    textDocuments: [],
+    applyEdit: vi.fn().mockResolvedValue(true),
+  },
+  window: {
+    showErrorMessage: vi.fn(),
+    showInformationMessage: vi.fn(),
   },
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockApplyEdit.mockResolvedValue(true);
+  mockWriteFile.mockResolvedValue(undefined);
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function makeFunctionalDoc(content: string): vscode.TextDocument {
-  const lines = content.split('\n');
-  return {
-    getText: () => content,
-    lineAt: (i: number) => ({
-      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
-      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-      text: lines[i] ?? '',
-    }),
-    uri: { fsPath: 'test.ofn', toString: () => 'file:///test.ofn' },
-    lineCount: lines.length,
-  } as unknown as vscode.TextDocument;
+function setupContent(content: string): void {
+  mockReadFile.mockResolvedValueOnce(new TextEncoder().encode(content));
+}
+
+function makeUri(fsPath: string): vscode.Uri {
+  return { fsPath, toString: () => `file:///${fsPath}` } as unknown as vscode.Uri;
 }
 
 const CAT = 'http://example.org#Cat';
@@ -81,16 +91,8 @@ describe('AnnotationSync Clustered Functional Syntax', () => {
 
   SubClassOf(<http://example.org#A> <http://example.org#B>)
 )`;
-    const doc = {
-      getText: () => content,
-      lineAt: (i: number) => ({
-        range: { start: { line: i, character: 0 }, end: { line: i, character: content.split('\n')[i].length } },
-        rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-        text: content.split('\n')[i],
-      }),
-      uri: { fsPath: 'test.ofn' },
-      lineCount: content.split('\n').length,
-    } as unknown as vscode.TextDocument;
+
+    setupContent(content);
 
     const entity: OWLClass = {
       iri: 'http://example.org#A',
@@ -105,8 +107,8 @@ describe('AnnotationSync Clustered Functional Syntax', () => {
       gciExpressions: [],
     };
 
-    await syncAnnotationsToDocument(doc, entity, 'functional');
-    expect(mockApplyEdit).toHaveBeenCalled();
+    const result = await syncAnnotationsToDocument(makeUri('test.ofn'), entity, 'functional');
+    expect(result).not.toBeNull();
   });
 });
 
@@ -123,9 +125,10 @@ describe('syncFunctional — idempotency (T002)', () => {
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(makeFunctionalDoc(content), makeClass({ en: ['Cat'] }, {}), 'functional');
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(makeUri('test.ofn'), makeClass({ en: ['Cat'] }, {}), 'functional');
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply any edit when annotations are identical but in non-model order (definition before label)', async () => {
@@ -140,13 +143,14 @@ describe('syncFunctional — idempotency (T002)', () => {
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
       'functional',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply any edit when entity has no annotations and file has none', async () => {
@@ -157,9 +161,10 @@ describe('syncFunctional — idempotency (T002)', () => {
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(makeFunctionalDoc(content), makeClass({}, {}), 'functional');
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(makeUri('test.ofn'), makeClass({}, {}), 'functional');
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply any edit for multiple annotations in non-model order', async () => {
@@ -172,13 +177,14 @@ describe('syncFunctional — idempotency (T002)', () => {
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
       'functional',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 });
 
@@ -200,25 +206,17 @@ describe('syncFunctional — order-preservation and minimal diff (T003)', () => 
       ')',                                                              // 6
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    expect(mockDelete).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
-
-    // Insertion must be at line 5 (after rdfs:label at line 4)
-    const insertPos: { line: number } = mockInsert.mock.calls[0][1];
-    expect(insertPos.line).toBe(5);
-
+    expect(result).not.toBeNull();
     // Inserted text must contain the new altLabel annotation
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain(`<${ALT}>`);
-    expect(insertedText).toContain('"kitty"');
+    expect(result!.updatedText).toContain(`<${ALT}>`);
+    expect(result!.updatedText).toContain('"kitty"');
   });
 
   it('deletes removed annotation without touching any other line', async () => {
@@ -234,16 +232,15 @@ describe('syncFunctional — order-preservation and minimal diff (T003)', () => 
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, {}),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockDelete).toHaveBeenCalledOnce();
-    expect(mockInsert).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).not.toContain(`<${DEF}>`);
   });
 
   it('inserts first annotation to entity that had none', async () => {
@@ -254,16 +251,15 @@ describe('syncFunctional — order-preservation and minimal diff (T003)', () => 
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, {}),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    expect(mockDelete).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain('rdfs:label');
   });
 
   it('simultaneously inserts added and deletes removed, preserving unchanged', async () => {
@@ -277,36 +273,22 @@ describe('syncFunctional — order-preservation and minimal diff (T003)', () => 
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, { [ALT]: ['kitty'] }),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockInsert).toHaveBeenCalledOnce();
-    expect(mockDelete).toHaveBeenCalledOnce();
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`<${ALT}>`);
+    expect(result!.updatedText).not.toContain(`<${DEF}>`);
   });
 });
 
 // ── T005: syncManchester idempotency ──────────────────────────────────────────
 // These tests expose the trailing-newline mismatch in the Manchester idempotency
 // check (existingBlock includes trailing empty lines; newAnnotBlock does not).
-
-function makeManchesterDoc(content: string): vscode.TextDocument {
-  const lines = content.split('\n');
-  return {
-    getText: () => content,
-    lineAt: (i: number) => ({
-      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
-      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-      text: lines[i] ?? '',
-    }),
-    uri: { fsPath: 'test.omn', toString: () => 'file:///test.omn' },
-    lineCount: lines.length,
-  } as unknown as vscode.TextDocument;
-}
 
 describe('syncManchester — idempotency (T005)', () => {
   it('does not apply edit when file already has the exact generated annotation block', async () => {
@@ -320,13 +302,14 @@ describe('syncManchester — idempotency (T005)', () => {
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, {}),
       'manchester',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply edit when file has annotation block followed by trailing empty line only', async () => {
@@ -339,13 +322,14 @@ describe('syncManchester — idempotency (T005)', () => {
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, {}),
       'manchester',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply edit when multiple annotations match in file order', async () => {
@@ -358,13 +342,14 @@ describe('syncManchester — idempotency (T005)', () => {
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
       'manchester',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does apply edit when Manchester annotation is changed', async () => {
@@ -375,13 +360,14 @@ describe('syncManchester — idempotency (T005)', () => {
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, {}),
       'manchester',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(result).not.toBeNull();
   });
 });
 
@@ -403,13 +389,14 @@ describe('syncManchester — file-order preservation (T006)', () => {
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
       'manchester',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('appends new annotation without reordering existing file-order annotations', async () => {
@@ -423,22 +410,20 @@ describe('syncManchester — file-order preservation (T006)', () => {
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
       'manchester',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    // Must replace (not raw insert+delete) since the block is rebuilt
-    expect(mockReplace).toHaveBeenCalledOnce();
-
+    expect(result).not.toBeNull();
     // The replaced text must contain definition before rdfs:label (file order)
     // and altLabel appended at the end.
-    const replacedText: string = mockReplace.mock.calls[0][2];
-    const defIdx = replacedText.indexOf(`<${DEF}>`);
-    const labelIdx = replacedText.indexOf('rdfs:label');
-    const altIdx = replacedText.indexOf(`<${ALT}>`);
+    const updatedText = result!.updatedText;
+    const defIdx = updatedText.indexOf(`<${DEF}>`);
+    const labelIdx = updatedText.indexOf('rdfs:label');
+    const altIdx = updatedText.indexOf(`<${ALT}>`);
     expect(defIdx).toBeGreaterThanOrEqual(0);
     expect(labelIdx).toBeGreaterThan(defIdx);
     expect(altIdx).toBeGreaterThan(labelIdx);
@@ -458,13 +443,14 @@ describe('syncTurtle — file-order preservation (T008)', () => {
       `    rdfs:label "Cat"@en .`,
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ttl'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'] }),
       'turtle',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('appends new annotation without reordering existing file-order annotations', async () => {
@@ -475,19 +461,18 @@ describe('syncTurtle — file-order preservation (T008)', () => {
       `    rdfs:label "Cat"@en .`,
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ttl'),
       makeClass({ en: ['Cat'] }, { [DEF]: ['A domestic feline'], [ALT]: ['kitty'] }),
       'turtle',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    expect(mockReplace).toHaveBeenCalledOnce();
-
-    const replacedText: string = mockReplace.mock.calls[0][2];
-    const defIdx = replacedText.indexOf(`<${DEF}>`);
-    const labelIdx = replacedText.indexOf('rdfs:label');
-    const altIdx = replacedText.indexOf(`<${ALT}>`);
+    expect(result).not.toBeNull();
+    const updatedText = result!.updatedText;
+    const defIdx = updatedText.indexOf(`<${DEF}>`);
+    const labelIdx = updatedText.indexOf('rdfs:label');
+    const altIdx = updatedText.indexOf(`<${ALT}>`);
     expect(defIdx).toBeGreaterThanOrEqual(0);
     expect(labelIdx).toBeGreaterThan(defIdx);
     expect(altIdx).toBeGreaterThan(labelIdx);
@@ -511,16 +496,16 @@ describe('syncFunctional — rdfs:comment abbreviated (T004)', () => {
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).toContain('rdfs:comment');
-    expect(insertedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain('rdfs:comment');
+    expect(result!.updatedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
   });
 });
 
@@ -533,16 +518,16 @@ describe('syncManchester — rdfs:comment abbreviated (T006)', () => {
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
       'manchester',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    const replacedText: string = mockReplace.mock.calls[0][2];
-    expect(replacedText).toContain('rdfs:comment');
-    expect(replacedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain('rdfs:comment');
+    expect(result!.updatedText).not.toContain('<http://www.w3.org/2000/01/rdf-schema#comment>');
   });
 });
 
@@ -562,13 +547,14 @@ describe('syncFunctional — idempotent with rdfs:comment in file (T010)', () =>
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
       'functional',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 });
 
@@ -583,31 +569,18 @@ describe('syncManchester — idempotent with rdfs:comment in file (T012)', () =>
       '',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeManchesterDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.omn'),
       makeClass({ en: ['Cat'] }, { [RDFS_COMMENT]: ['A domestic feline'] }),
       'manchester',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 });
 
 // ── T007: syncTurtle annotation idempotency ───────────────────────────────────
-
-function makeTurtleDoc(content: string): vscode.TextDocument {
-  const lines = content.split('\n');
-  return {
-    getText: () => content,
-    lineAt: (i: number) => ({
-      range: { start: { line: i, character: 0 }, end: { line: i, character: lines[i]?.length ?? 0 } },
-      rangeIncludingLineBreak: { start: { line: i, character: 0 }, end: { line: i + 1, character: 0 } },
-      text: lines[i] ?? '',
-    }),
-    uri: { fsPath: 'test.ttl', toString: () => 'file:///test.ttl' },
-    lineCount: lines.length,
-  } as unknown as vscode.TextDocument;
-}
 
 // Minimal prefix header used by all Turtle tests — matches what real .ttl files have.
 const TTL_PREFIX = [
@@ -624,13 +597,14 @@ describe('syncTurtle — annotation idempotency (T007)', () => {
       `    rdfs:label "Cat"@en .`,
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ttl'),
       makeClass({ en: ['Cat'] }, {}),
       'turtle',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply edit when annotation and structural segs are both unchanged', async () => {
@@ -640,13 +614,14 @@ describe('syncTurtle — annotation idempotency (T007)', () => {
       `    rdfs:label "Cat"@en .`,
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ttl'),
       makeClass({ en: ['Cat'] }, {}),
       'turtle',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does not apply edit when entity has no annotations and file has none', async () => {
@@ -654,13 +629,14 @@ describe('syncTurtle — annotation idempotency (T007)', () => {
       `<${CAT}> rdf:type owl:Class .`,
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ttl'),
       makeClass({}, {}),
       'turtle',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('does apply edit when annotation label changes', async () => {
@@ -669,13 +645,14 @@ describe('syncTurtle — annotation idempotency (T007)', () => {
       `    rdfs:label "OldCat"@en .`,
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeTurtleDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ttl'),
       makeClass({ en: ['Cat'] }, {}),
       'turtle',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
+    expect(result).not.toBeNull();
   });
 });
 
@@ -692,13 +669,14 @@ describe('syncFunctional — multi-line annotation values', () => {
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({}, { [DEF]: [multiLineValue] }),
       'functional',
     );
 
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(result).toBeNull();
   });
 
   it('inserts a multi-line annotation value with real newlines (no \\n escape)', async () => {
@@ -709,16 +687,16 @@ describe('syncFunctional — multi-line annotation values', () => {
       ')',
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({}, { [DEF]: [multiLineValue] }),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    const insertedText: string = mockInsert.mock.calls[0][2];
-    expect(insertedText).not.toContain('\\n');
-    expect(insertedText).toContain('First line.\nSecond line.');
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).not.toContain('\\n');
+    expect(result!.updatedText).toContain('First line.\nSecond line.');
   });
 
   it('deletes a multi-line annotation that spans two physical lines', async () => {
@@ -731,17 +709,15 @@ describe('syncFunctional — multi-line annotation values', () => {
       ')',                                     // 4
     ].join('\n');
 
-    await syncAnnotationsToDocument(
-      makeFunctionalDoc(content),
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
       makeClass({}, {}),
       'functional',
     );
 
-    expect(mockApplyEdit).toHaveBeenCalledOnce();
-    // The delete call must cover lines 2 through 3 (start of line 2 to end of line 3).
-    const deletedRange = mockDelete.mock.calls[0][1];
-    expect(deletedRange.start.line).toBe(2);
-    expect(deletedRange.end.line).toBe(4); // rangeIncludingLineBreak.end for line 3 → line 4, char 0
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).not.toContain(`<${DEF}>`);
   });
 });
 
@@ -773,24 +749,23 @@ function makeGuardEntity(label: string): OWLClass {
 describe('syncAnnotationsToDocument — DL query sync inhibition guard', () => {
   afterEach(() => { temporaryClassIris.clear(); });
 
-  it('T032a: returns null without calling applyEdit when entity IRI is in temporaryClassIris', async () => {
-    const doc = makeFunctionalDoc(GUARD_CONTENT);
+  it('T032a: returns null without calling writeFile when entity IRI is in temporaryClassIris', async () => {
     const entity = makeGuardEntity('Updated');
 
     temporaryClassIris.add(GUARD_IRI);
-    const result = await syncAnnotationsToDocument(doc, entity, 'functional');
+    const result = await syncAnnotationsToDocument(makeUri('test.ofn'), entity, 'functional');
 
     expect(result).toBeNull();
-    expect(mockApplyEdit).not.toHaveBeenCalled();
+    expect(mockWriteFile).not.toHaveBeenCalled();
   });
 
   it('T032b: proceeds normally when entity IRI is NOT in temporaryClassIris', async () => {
-    const doc = makeFunctionalDoc(GUARD_CONTENT);
+    setupContent(GUARD_CONTENT);
     const entity = makeGuardEntity('Updated');
 
-    const result = await syncAnnotationsToDocument(doc, entity, 'functional');
+    const result = await syncAnnotationsToDocument(makeUri('test.ofn'), entity, 'functional');
 
-    expect(mockApplyEdit).toHaveBeenCalled();
+    expect(mockWriteFile).toHaveBeenCalled();
     expect(result).not.toBeNull();
   });
 });

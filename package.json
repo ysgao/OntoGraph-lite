@@ -1,7 +1,7 @@
 {
   "name": "ontograph-lite",
   "displayName": "OntoGraph Lite: OWL Ontology Editor",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "ysgao",
   "description": "Protégé-like OWL ontology editing, reasoning, and visualization for VS Code",
   "icon": "resources/icons/ontology.png",
@@ -101,12 +101,6 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "ontograph.reloadOntology",
-        "title": "OntoGraph: Reload Ontology",
-        "category": "OntoGraph",
-        "icon": "$(refresh)"
-      },
-      {
         "command": "ontograph.classifyOntology",
         "title": "OntoGraph: Classify Ontology",
         "icon": "$(run)"
@@ -165,6 +159,11 @@
         "command": "ontograph.entityEditor",
         "title": "Entity Editor",
         "icon": "$(edit)"
+      },
+      {
+        "command": "ontograph.loadOntologyFile",
+        "title": "OntoGraph: Load Ontology File…",
+        "icon": "$(folder-opened)"
       }
     ],
     "menus": {
@@ -180,12 +179,6 @@
           "group": "navigation@1"
         },
         {
-          "command": "ontograph.reloadOntology",
-          "when": "view == ontograph.classes",
-          "enablement": "!ontograph.reloading",
-          "group": "navigation@0"
-        },
-        {
           "command": "ontograph.classifyOntology",
           "when": "view == ontograph.classes || view == ontograph.inferredClasses && !ontograph.classificationNeedsUpdate",
           "group": "navigation@0"
@@ -194,6 +187,16 @@
           "command": "ontograph.classifyOntologyStale",
           "when": "view == ontograph.inferredClasses && ontograph.classificationNeedsUpdate",
           "group": "navigation@0"
+        },
+        {
+          "command": "ontograph.loadOntologyFile",
+          "when": "view == ontograph.classes",
+          "group": "navigation@-1"
+        },
+        {
+          "command": "ontograph.loadOntologyFile",
+          "when": "view == ontograph.inferredClasses",
+          "group": "navigation@-1"
         }
       ],
       "view/item/context": [

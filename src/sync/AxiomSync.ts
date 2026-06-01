@@ -2,7 +2,9 @@ import * as vscode from 'vscode';
 import { generateEntityCluster } from '../serializer/FunctionalSerializer';
 import { manchesterToFunctional } from '../utils/ExpressionUtils';
 import { temporaryClassIris } from '../views/DLQueryState.js';
-import { suppressReloadFor } from './reloadGuard';
+import { beginSyncWrite, endSyncWrite } from './reloadGuard';
+import { RawTextDocument, applyWorkspaceEditsToText, countLineDelta, type OffsetEdit } from './RawTextDocument';
+import type { EditSummary } from '../model/SegmentIndex';
 import type {
   OWLEntity,
   OWLClass,
@@ -11,6 +13,7 @@ import type {
   OWLAnnotationProperty,
   OWLIndividual,
   OntologyModel,
+  EntitySegment,
 } from '../model/OntologyModel';
 import { createEmptyModel, BUILTIN_ANNOTATION_PROP_IRIS } from '../model/OntologyModel';
 
@@ -60,10 +63,58 @@ function resolveIri(token: string, prefixes: Map<string, string>): string {
   return token;
 }
 
-function abbreviateIri(iri: string, prefixes: Map<string, string>): string {
+function abbreviateIri(iri: string, prefixes: Map<string, string>, usedPrefixes?: Set<string>): string {
   const token = RDFS_ANN_TO_TOKEN.get(iri);
   if (token !== undefined) { return token; }
+  if (usedPrefixes && usedPrefixes.size > 0 && prefixes.size > 0) {
+    let bestName: string | null = null;
+    let bestExpansion = '';
+    for (const [name, expansion] of prefixes) {
+      if (!usedPrefixes.has(name)) continue;
+      if (expansion.length > bestExpansion.length && iri.startsWith(expansion)) {
+        bestName = name;
+        bestExpansion = expansion;
+      }
+    }
+    if (bestName !== null) {
+      const localName = iri.slice(bestExpansion.length);
+      if (localName.length > 0 && !/[\s<>"\\]/.test(localName)) {
+        return bestName + localName;
+      }
+    }
+  }
   return `<${iri}>`;
+}
+
+// Detect which prefixes appear as CURIEs in sample lines (e.g. an entity's own axiom lines).
+function detectUsedPrefixesFromLines(sampleLines: string[], prefixes: Map<string, string>): Set<string> {
+  const used = new Set<string>();
+  if (prefixes.size === 0 || sampleLines.length === 0) return used;
+  for (const line of sampleLines) {
+    if (used.size === prefixes.size) break;
+    for (const [name] of prefixes) {
+      if (used.has(name)) continue;
+      let idx = line.indexOf(name);
+      while (idx >= 0) {
+        const prevCh = idx > 0 ? line.charCodeAt(idx - 1) : 0;
+        const prevDelim = prevCh === 0 || prevCh === 32 || prevCh === 9
+          || prevCh === 40 || prevCh === 44 || prevCh === 91 || prevCh === 13;
+        if (prevDelim) {
+          const c = line.charCodeAt(idx + name.length);
+          const idChar = (c >= 48 && c <= 57) || (c >= 65 && c <= 90)
+            || (c >= 97 && c <= 122) || c === 95 || c === 45;
+          if (idChar) { used.add(name); break; }
+        }
+        idx = line.indexOf(name, idx + 1);
+      }
+    }
+  }
+  return used;
+}
+
+// Post-process a generated line by replacing each <full-IRI> token with its file-convention form.
+function applyFileIriConvention(line: string, prefixes: Map<string, string>, usedPrefixes: Set<string>): string {
+  return line.replace(/<([^<>"\s]+)>/g, (_, iri) => abbreviateIri(iri, prefixes, usedPrefixes));
 }
 
 // Replace all bare full IRIs in a stored Manchester expression with abbreviated form
@@ -242,64 +293,152 @@ function generateFunctionalAxiomLines(entity: OWLEntity): string[] {
 }
 
 // Match a line to an axiom keyword and verify the entity IRI is in the owned
-// position for that axiom. A parent IRI in SubClassOf(child parent) is not owned
-// by the parent frame and must not be used as that parent's insertion point.
-function isEntityAxiomLine(line: string, entity: OWLEntity, keywords: Set<string>): boolean {
+// Check if `line` starts with `kw(<ws>?form<delim>` — first argument equals form.
+function startsWithFormArg(line: string, kw: string, form: string): boolean {
+  const prefix = `${kw}(`;
+  if (!line.startsWith(prefix)) return false;
+  let i = prefix.length;
+  while (i < line.length && (line.charCodeAt(i) === 32 || line.charCodeAt(i) === 9)) i++;
+  if (!line.startsWith(form, i)) return false;
+  const after = i + form.length;
+  if (after >= line.length) return false;
+  const c = line.charCodeAt(after);
+  return c === 32 || c === 9 || c === 41 || c === 44;
+}
+
+// Check if `line` ends with `form)` at the top-level — last argument equals form.
+function endsWithFormArg(line: string, form: string): boolean {
+  let s = line;
+  while (s.length > 0 && (s.charCodeAt(s.length - 1) === 32 || s.charCodeAt(s.length - 1) === 9)) s = s.slice(0, -1);
+  if (!s.endsWith(')')) return false;
+  let inner = s.slice(0, -1);
+  while (inner.length > 0 && (inner.charCodeAt(inner.length - 1) === 32 || inner.charCodeAt(inner.length - 1) === 9)) inner = inner.slice(0, -1);
+  if (!inner.endsWith(form)) return false;
+  const at = inner.length - form.length;
+  if (at === 0) return false;
+  const prev = inner.charCodeAt(at - 1);
+  return prev === 32 || prev === 9 || prev === 41;
+}
+
+// Check whether the 2nd top-level token of `kw(...)` equals `form`.
+function secondArgIs(line: string, kw: string, form: string): boolean {
+  const prefix = `${kw}(`;
+  if (!line.startsWith(prefix)) return false;
+  let i = prefix.length;
+  let depth = 1;
+  const tokens: string[] = [];
+  let cur = '';
+  while (i < line.length && depth > 0 && tokens.length < 2) {
+    const c = line[i];
+    if (c === '(') { depth++; cur += c; }
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) break;
+      cur += c;
+    } else if (depth === 1 && (c === ' ' || c === '\t')) {
+      if (cur.length > 0) { tokens.push(cur); cur = ''; }
+    } else {
+      cur += c;
+    }
+    i++;
+  }
+  if (cur.length > 0 && tokens.length < 2) tokens.push(cur);
+  return tokens[1] === form;
+}
+
+// Detect whether `line` is a logical axiom owned by `entity`. Accepts entity
+// IRIs in both `<full-IRI>` and prefix:CURIE forms — required because the file
+// may store entity references in either form and `applyFileIriConvention`
+// rewrites generated lines to match the file's form.
+function isEntityAxiomLine(
+  line: string, entity: OWLEntity, keywords: Set<string>, prefixes: Map<string, string>,
+): boolean {
   const trimmed = line.trimStart();
   const kw = trimmed.match(/^([A-Za-z]+)\s*\(/);
   if (!kw || !keywords.has(kw[1])) return false;
-  const tokens = extractIriTokens(trimmed);
-  const entityToken = `<${entity.iri}>`;
-  const first = tokens[0];
-  const second = tokens[1];
-  const last = tokens[tokens.length - 1];
+
+  const forms = entityTokenForms(entity.iri, prefixes);
+  const isFirst = forms.some(f => startsWithFormArg(trimmed, kw[1], f));
+  const isLast = forms.some(f => endsWithFormArg(trimmed, f));
 
   switch (entity.type) {
     case 'class':
       if (kw[1] === 'SubClassOf') {
-        // Named-class subclass axioms are owned by the subclass. GCIs emitted
-        // for this class as superclass have a complex first operand and the
-        // edited class as the final named IRI.
-        return first === entityToken || (!trimmed.startsWith('SubClassOf(<') && last === entityToken);
+        // GCI: entity is the LAST arg and the FIRST arg is a complex expression
+        // (i.e. NOT a form of this entity).
+        return isFirst || (!isFirst && isLast);
       }
-      return first === entityToken;
+      return isFirst;
 
     case 'objectProperty':
       if (kw[1] === 'SubObjectPropertyOf' && trimmed.includes('ObjectPropertyChain(')) {
-        return last === entityToken;
+        return isLast;
       }
-      return first === entityToken;
+      return isFirst;
 
     case 'dataProperty':
     case 'annotationProperty':
-      return first === entityToken;
+      return isFirst;
 
     case 'individual':
       if (kw[1] === 'ClassAssertion' || kw[1] === 'ObjectPropertyAssertion' || kw[1] === 'DataPropertyAssertion') {
-        return second === entityToken;
+        return forms.some(f => secondArgIs(trimmed, kw[1], f));
       }
-      return first === entityToken;
+      return isFirst;
   }
 }
 
-function extractIriTokens(text: string): string[] {
-  return Array.from(text.matchAll(/<[^>]+>/g), match => match[0]);
+// Build all tokens that resolve to this entity in a file: the bracket form
+// `<full-IRI>` plus the CURIE form `prefix:localName` (longest matching
+// prefix). `applyFileIriConvention` rewrites generated lines into CURIE form
+// when the file uses one, so the line-recognition predicate must accept both.
+function entityTokenForms(iri: string, prefixes: Map<string, string>): string[] {
+  const forms: string[] = [`<${iri}>`];
+  const sorted = [...prefixes.entries()].sort((a, b) => b[1].length - a[1].length);
+  for (const [name, expansion] of sorted) {
+    if (expansion.length > 0 && iri.startsWith(expansion)) {
+      forms.push(name + iri.slice(expansion.length));
+      break;
+    }
+  }
+  return forms;
 }
 
 // True only for GCI SubClassOf lines: SubClassOf(complexExpr <entity>)
-// These are distinguished from regular SubClassOf(<entity> ...) by the complex LHS.
-function isGCIAxiomLine(line: string, entity: OWLEntity): boolean {
+// Distinguished from regular SubClassOf(<entity> ...) by the complex LHS.
+// Accepts both <full-IRI> and prefix:CURIE forms for the entity argument.
+function isGCIAxiomLine(line: string, entity: OWLEntity, prefixes: Map<string, string>): boolean {
   if (entity.type !== 'class') return false;
-  const trimmed = line.trimStart();
+  const trimmed = line.trimStart().replace(/\s+$/, '');
   if (!/^SubClassOf\s*\(/.test(trimmed)) return false;
-  const entityToken = `<${entity.iri}>`;
-  const tokens = extractIriTokens(trimmed);
-  return (
-    tokens.length >= 2 &&
-    tokens[0] !== entityToken &&
-    !trimmed.startsWith('SubClassOf(<') &&
-    tokens[tokens.length - 1] === entityToken
-  );
+  if (!trimmed.endsWith(')')) return false;
+
+  // First argument must be a COMPLEX class expression — uppercase-leading
+  // OWL keyword like `ObjectSomeValuesFrom(`, `ObjectIntersectionOf(`, etc.
+  // If it starts with `<`, `:`, or a lowercase prefix it's a NAMED class
+  // (regular SubClassOf), not a GCI. Without this guard,
+  // `SubClassOf(:OtherEntity :ThisEntity)` would be misclassified as a GCI
+  // whenever ThisEntity is the superclass.
+  let firstArgPos = 'SubClassOf('.length;
+  while (firstArgPos < trimmed.length &&
+         (trimmed.charCodeAt(firstArgPos) === 32 || trimmed.charCodeAt(firstArgPos) === 9)) {
+    firstArgPos++;
+  }
+  const firstCh = trimmed.charCodeAt(firstArgPos);
+  const isComplexLhs = firstCh >= 65 && firstCh <= 90; // 'A'..'Z'
+  if (!isComplexLhs) return false;
+
+  // Last argument must be the entity in some form.
+  const forms = entityTokenForms(entity.iri, prefixes);
+  const inner = trimmed.slice('SubClassOf('.length, -1).replace(/\s+$/, '');
+  for (const form of forms) {
+    if (!inner.endsWith(form)) continue;
+    const at = inner.length - form.length;
+    if (at === 0) continue;
+    const prevCh = inner.charCodeAt(at - 1);
+    if (prevCh === 32 || prevCh === 9 || prevCh === 41) return true; // space, tab, ')'
+  }
+  return false;
 }
 
 // Generates only the GCI axiom lines (SubClassOf(complexExpr <entity>)) for functional syntax.
@@ -351,6 +490,10 @@ function findEntityAnchorLine(lines: string[], entity: OWLEntity): number {
 interface SyncResult {
   edit: vscode.WorkspaceEdit;
   changedRanges: vscode.Range[];
+  /** Line numbers (in pre-edit text) where a GCI insert/delete is applied.
+   *  Used by syncAxiomsToDocument to label OffsetEdit entries as 'gci' for
+   *  the incremental segment-index updater. Functional format only. */
+  gciEditLines?: Set<number>;
 }
 
 function changedLineRanges(startLine: number, lines: readonly string[]): vscode.Range[] {
@@ -414,101 +557,269 @@ function findInsertionPointForKeyword(
   return anchor >= 0 ? anchor + 1 : fallbackLine;
 }
 
-function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | null {
+function syncAxiomsFunctional(
+  doc: vscode.TextDocument,
+  entity: OWLEntity,
+  segment?: EntitySegment,
+  gciSegment?: EntitySegment,
+  closingParenLine?: number,
+  gciInsertLine?: number,
+): SyncResult | null {
   const text = doc.getText();
-  const lines = text.split('\n');
   const keywords = entityAxiomKeywords(entity);
+  const filePrefixes = parsePrefixes(text, 'functional');
 
-  // Collect all existing axiom lines for this entity
-  const existingRegIdxs: number[] = [];
-  const existingGciIdxs: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!isEntityAxiomLine(lines[i], entity, keywords)) { continue; }
-    if (isGCIAxiomLine(lines[i], entity)) { existingGciIdxs.push(i); }
-    else { existingRegIdxs.push(i); }
+  // ── Build entity's chunk: per-line list (SNOMED-scale fast path) or contiguous slice ──
+  const useLineList = !!(segment && segment.lineIndices && segment.lineCharStarts);
+  let chunkLines: string[];
+  // chunkAbsLines[k] = absolute file line number for chunkLines[k]
+  let chunkAbsLines: number[];
+  if (useLineList) {
+    const idx = segment!.lineIndices!;
+    const starts = segment!.lineCharStarts!;
+    chunkLines = new Array(idx.length);
+    chunkAbsLines = new Array(idx.length);
+    for (let k = 0; k < idx.length; k++) {
+      const start = starts[k];
+      let end = text.indexOf('\n', start);
+      if (end < 0) end = text.length;
+      chunkLines[k] = text.slice(start, end);
+      chunkAbsLines[k] = idx[k];
+    }
+  } else {
+    const lineOffset = segment?.startLine ?? 0;
+    const chunkText = segment
+      ? text.slice(segment.startChar, Math.min(segment.endChar + 4096, text.length))
+      : text;
+    chunkLines = chunkText.split('\n');
+    chunkAbsLines = new Array(chunkLines.length);
+    for (let i = 0; i < chunkLines.length; i++) chunkAbsLines[i] = lineOffset + i;
   }
 
-  // Detect indentation from existing axiom lines; fall back to file convention.
-  const firstAxiomIdx = existingRegIdxs[0] ?? existingGciIdxs[0] ?? -1;
-  const indent = firstAxiomIdx >= 0
-    ? (lines[firstAxiomIdx].match(/^(\s+)/)?.[1] ?? detectFunctionalIndent(lines))
-    : detectFunctionalIndent(lines);
-
-  // Generate model's desired lines using the detected indentation.
-  const modelRegLines = generateFunctionalAxiomLines(entity).map(l => indent + l.trimStart());
-  const modelGciLines = generateFunctionalGCILines(entity).map(l => indent + l.trimStart());
-
-  // Diff: lines only in file → remove; lines only in model → add.
-  const fileRegMap = new Map<string, number>(existingRegIdxs.map(i => [lines[i].trim(), i]));
-  const modelRegSet = new Set(modelRegLines.map(l => l.trim()));
-  const fileGciMap = new Map<string, number>(existingGciIdxs.map(i => [lines[i].trim(), i]));
-  const modelGciSet = new Set(modelGciLines.map(l => l.trim()));
-
-  const regRemoveIdxs = existingRegIdxs.filter(i => !modelRegSet.has(lines[i].trim()));
-  const regAddLines   = modelRegLines.filter(l => !fileRegMap.has(l.trim()));
-  const gciRemoveIdxs = existingGciIdxs.filter(i => !modelGciSet.has(lines[i].trim()));
-  const gciAddLines   = modelGciLines.filter(l => !fileGciMap.has(l.trim()));
-
-  if (regRemoveIdxs.length === 0 && regAddLines.length === 0 &&
-      gciRemoveIdxs.length === 0 && gciAddLines.length === 0) {
-    return null;
-  }
-
-  const anchor = findEntityAnchorLine(lines, entity);
-
-  // GCI boundary: before Property Chains or before closing paren.
-  let closingParenLine = lines.length > 1 ? lines.length - 1 : lines.length;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].trim() === ')') { closingParenLine = i; break; }
-  }
-  let gciInsertAt = closingParenLine;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().startsWith('SubObjectPropertyOf(ObjectPropertyChain')) {
-      gciInsertAt = i; break;
+  // Chunk-relative indices for regular axiom lines
+  const existingRegChunkIdxs: number[] = [];
+  for (let i = 0; i < chunkLines.length; i++) {
+    if (isEntityAxiomLine(chunkLines[i], entity, keywords, filePrefixes) && !isGCIAxiomLine(chunkLines[i], entity, filePrefixes)) {
+      existingRegChunkIdxs.push(i);
     }
   }
 
-  // Lines that stay in the file (not being removed)
-  const regRemoveSet = new Set(regRemoveIdxs);
-  const keptLineIdxs = existingRegIdxs.filter(i => !regRemoveSet.has(i));
+  // ── GCI axioms: scan gciSegment chunk (GCIs are at end of file, outside cluster) ──
 
-  // Group toAdd lines by their insertion point in the original document.
-  const insertsByLine = new Map<number, string[]>();
+  const existingGciAbsIdxs: number[] = [];
+  const gciLineTrimmed: string[] = [];
+
+  if (gciSegment) {
+    const gciLineOff = gciSegment.startLine;
+    const gciChunk = text.slice(gciSegment.startChar, Math.min(gciSegment.endChar + 4096, text.length));
+    const gciChunkLines = gciChunk.split('\n');
+    for (let i = 0; i < gciChunkLines.length; i++) {
+      if (isGCIAxiomLine(gciChunkLines[i], entity, filePrefixes)) {
+        existingGciAbsIdxs.push(gciLineOff + i);
+        gciLineTrimmed.push(gciChunkLines[i].trim());
+      }
+    }
+  } else if (!segment) {
+    // No segment: full-text scan for GCIs (fallback, same as pre-optimization path)
+    for (let i = 0; i < chunkLines.length; i++) {
+      if (isEntityAxiomLine(chunkLines[i], entity, keywords, filePrefixes) && isGCIAxiomLine(chunkLines[i], entity, filePrefixes)) {
+        existingGciAbsIdxs.push(i);
+        gciLineTrimmed.push(chunkLines[i].trim());
+      }
+    }
+  }
+
+  // ── Indent detection ─────────────────────────────────────────────────────────
+
+  // Prefer entity's own existing axiom line indent; for SNOMED-style files where axiom lines
+  // have no leading whitespace, this yields '' (match file convention exactly).
+  const firstChunkIdx = existingRegChunkIdxs[0] ?? -1;
+  let indent: string;
+  if (firstChunkIdx >= 0) {
+    indent = chunkLines[firstChunkIdx].match(/^(\s+)/)?.[1] ?? (useLineList ? '' : detectFunctionalIndent(chunkLines));
+  } else if (useLineList) {
+    let detected = '';
+    for (const s of chunkLines) {
+      const m = s.match(/^(\s+)/);
+      if (m) { detected = m[1]; break; }
+    }
+    indent = detected;
+  } else {
+    indent = detectFunctionalIndent(chunkLines);
+  }
+
+  // ── Generate model lines ─────────────────────────────────────────────────────
+
+  // Detect IRI-form convention from the entity's own existing axiom lines (CURIE vs full).
+  const usedPrefixes = useLineList ? detectUsedPrefixesFromLines(chunkLines, filePrefixes) : new Set<string>();
+
+  // Dedupe model lines by trimmed text. Required so the multiset diff treats
+  // each distinct axiom as a single intended copy — without this, files that
+  // already contain duplicates (from a pre-fix save) keep their duplicates
+  // forever because parser → model → serializer reproduces them 1:1.
+  const dedupeLines = (lines: string[]): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const l of lines) {
+      const k = l.trim();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(l);
+    }
+    return out;
+  };
+  const modelRegLines = dedupeLines(generateFunctionalAxiomLines(entity)
+    .map(l => applyFileIriConvention(indent + l.trimStart(), filePrefixes, usedPrefixes)));
+  const modelGciLines = dedupeLines(generateFunctionalGCILines(entity)
+    .map(l => applyFileIriConvention(indent + l.trimStart(), filePrefixes, usedPrefixes)));
+
+  // ── Diff regular axioms (chunk-relative) ─────────────────────────────────────
+
+  // Multiset diff: when file has N copies of a line and model has M, remove
+  // max(0, N-M) and add max(0, M-N). Required because parser duplicates carry
+  // through to the file (one save-without-dedup begets another); a set-based
+  // diff would treat both sides as "present" and never clean up the extras.
+  const regRemoveChunkIdxs: number[] = [];
+  const regAddLines: string[] = [];
+  {
+    const fileGroups = new Map<string, number[]>();
+    for (const ci of existingRegChunkIdxs) {
+      const k = chunkLines[ci].trim();
+      const arr = fileGroups.get(k);
+      if (arr) arr.push(ci); else fileGroups.set(k, [ci]);
+    }
+    const modelByKey = new Map<string, string[]>();
+    for (const l of modelRegLines) {
+      const k = l.trim();
+      const arr = modelByKey.get(k);
+      if (arr) arr.push(l); else modelByKey.set(k, [l]);
+    }
+    for (const [k, indices] of fileGroups) {
+      const wanted = modelByKey.get(k)?.length ?? 0;
+      for (let i = wanted; i < indices.length; i++) regRemoveChunkIdxs.push(indices[i]);
+    }
+    for (const [k, lines] of modelByKey) {
+      const have = fileGroups.get(k)?.length ?? 0;
+      for (let i = have; i < lines.length; i++) regAddLines.push(lines[i]);
+    }
+  }
+
+  // ── Diff GCI axioms (absolute) ────────────────────────────────────────────────
+
+  const gciRemoveAbsIdxs: number[] = [];
+  const gciAddLines: string[] = [];
+  {
+    const fileGroups = new Map<string, number[]>();
+    for (let j = 0; j < gciLineTrimmed.length; j++) {
+      const k = gciLineTrimmed[j];
+      const arr = fileGroups.get(k);
+      if (arr) arr.push(existingGciAbsIdxs[j]); else fileGroups.set(k, [existingGciAbsIdxs[j]]);
+    }
+    const modelByKey = new Map<string, string[]>();
+    for (const l of modelGciLines) {
+      const k = l.trim();
+      const arr = modelByKey.get(k);
+      if (arr) arr.push(l); else modelByKey.set(k, [l]);
+    }
+    for (const [k, indices] of fileGroups) {
+      const wanted = modelByKey.get(k)?.length ?? 0;
+      for (let i = wanted; i < indices.length; i++) gciRemoveAbsIdxs.push(indices[i]);
+    }
+    for (const [k, lines] of modelByKey) {
+      const have = fileGroups.get(k)?.length ?? 0;
+      for (let i = have; i < lines.length; i++) gciAddLines.push(lines[i]);
+    }
+  }
+
+  if (regRemoveChunkIdxs.length === 0 && regAddLines.length === 0 &&
+      gciRemoveAbsIdxs.length === 0 && gciAddLines.length === 0) {
+    return null;
+  }
+
+  // ── Anchor (chunk-relative) ───────────────────────────────────────────────────
+
+  const anchorChunk = findEntityAnchorLine(chunkLines, entity);
+
+  // ── Precomputed global positions (absolute) ───────────────────────────────────
+
+  const absClosingParenLine = closingParenLine ?? (() => {
+    const allLines = text.split('\n');
+    let cp = allLines.length > 1 ? allLines.length - 1 : allLines.length;
+    for (let i = allLines.length - 1; i >= 0; i--) {
+      if (allLines[i].trim() === ')') { cp = i; break; }
+    }
+    return cp;
+  })();
+
+  const absGciInsertAt = gciInsertLine ?? (() => {
+    const allLines = text.split('\n');
+    let gi = absClosingParenLine;
+    for (let i = 0; i < allLines.length; i++) {
+      if (allLines[i].trim().startsWith('SubObjectPropertyOf(ObjectPropertyChain')) { gi = i; break; }
+    }
+    return gi;
+  })();
+
+  // ── Insertion points (chunk-relative for regular, absolute for GCIs) ──────────
+
+  const regRemoveChunkSet = new Set(regRemoveChunkIdxs);
+  const keptChunkIdxs = existingRegChunkIdxs.filter(ci => !regRemoveChunkSet.has(ci));
+  const chunkFallback = anchorChunk >= 0 ? anchorChunk + 1 : chunkLines.length - 1;
+
+  const insertsByChunkLine = new Map<number, string[]>();
   for (const line of regAddLines) {
     const kw = getAxiomKeyword(line) ?? '';
-    const at = findInsertionPointForKeyword(kw, keptLineIdxs, regRemoveIdxs, lines, anchor, gciInsertAt);
-    if (!insertsByLine.has(at)) { insertsByLine.set(at, []); }
-    insertsByLine.get(at)!.push(line);
+    const atChunk = findInsertionPointForKeyword(
+      kw, keptChunkIdxs, regRemoveChunkIdxs, chunkLines, anchorChunk, chunkFallback,
+    );
+    if (!insertsByChunkLine.has(atChunk)) insertsByChunkLine.set(atChunk, []);
+    insertsByChunkLine.get(atChunk)!.push(line);
   }
+
+  // ── Build WorkspaceEdit (absolute positions) ──────────────────────────────────
 
   const edit = new vscode.WorkspaceEdit();
 
-  // Deletions (reverse order so line indices stay valid within the WorkspaceEdit)
-  for (const i of [...regRemoveIdxs, ...gciRemoveIdxs].sort((a, b) => b - a)) {
-    edit.delete(doc.uri, doc.lineAt(i).rangeIncludingLineBreak);
+  // Map chunk index → absolute file line. Past-end inserts go right after last entity line.
+  const chunkToAbs = (ci: number): number => {
+    if (ci < chunkAbsLines.length) return chunkAbsLines[ci];
+    return chunkAbsLines.length > 0 ? chunkAbsLines[chunkAbsLines.length - 1] + 1 : ci;
+  };
+
+  // Track which pre-edit line numbers are GCI-related so syncAxiomsToDocument
+  // can label the corresponding OffsetEdit entries for the incremental
+  // segment-index update.
+  const gciEditLines = new Set<number>(gciRemoveAbsIdxs);
+
+  const allRemovesAbs = [
+    ...regRemoveChunkIdxs.map(ci => chunkAbsLines[ci]),
+    ...gciRemoveAbsIdxs,
+  ].sort((a, b) => b - a);
+
+  for (const absI of allRemovesAbs) {
+    edit.delete(doc.uri, new vscode.Range(absI, 0, absI + 1, 0));
   }
 
-  // Regular insertions
-  for (const [lineIdx, insertLines] of insertsByLine) {
-    edit.insert(doc.uri, new vscode.Position(lineIdx, 0), insertLines.join('\n') + '\n');
+  for (const [chunkAt, insertLines] of insertsByChunkLine) {
+    edit.insert(doc.uri, new vscode.Position(chunkToAbs(chunkAt), 0), insertLines.join('\n') + '\n');
   }
 
-  // GCI insertions
   if (gciAddLines.length > 0) {
-    edit.insert(doc.uri, new vscode.Position(gciInsertAt, 0), gciAddLines.join('\n') + '\n');
+    edit.insert(doc.uri, new vscode.Position(absGciInsertAt, 0), gciAddLines.join('\n') + '\n');
+    gciEditLines.add(absGciInsertAt);
   }
 
-  // Compute changedRanges in post-edit coordinates.
-  // Post-edit line = orig_line − deleted_before + inserted_before.
+  // ── changedRanges in post-edit coordinates ────────────────────────────────────
+
   const changedRanges: vscode.Range[] = [];
-  const allRemovesSorted = [...regRemoveIdxs, ...gciRemoveIdxs].sort((a, b) => a - b);
+  const allRemovesSorted = [...allRemovesAbs].sort((a, b) => a - b);
   const allInsertions: Array<[number, string[]]> = [
-    ...[...insertsByLine.entries()],
-    ...(gciAddLines.length > 0 ? [[gciInsertAt, gciAddLines] as [number, string[]]] : []),
+    ...[...insertsByChunkLine.entries()].map(([ci, ls]) => [chunkToAbs(ci), ls] as [number, string[]]),
+    ...(gciAddLines.length > 0 ? [[absGciInsertAt, gciAddLines] as [number, string[]]] : []),
   ].sort((a, b) => a[0] - b[0]);
 
   for (const [origLine, insertedLines] of allInsertions) {
-    const deletedBefore  = allRemovesSorted.filter(d => d < origLine).length;
+    const deletedBefore = allRemovesSorted.filter(d => d < origLine).length;
     const insertedBefore = allInsertions
       .filter(([pos]) => pos < origLine)
       .reduce((sum, [, ls]) => sum + ls.length, 0);
@@ -518,7 +829,7 @@ function syncAxiomsFunctional(doc: vscode.TextDocument, entity: OWLEntity): Sync
     }
   }
 
-  return { edit, changedRanges };
+  return { edit, changedRanges, gciEditLines };
 }
 
 // ── Manchester Syntax (.omn) ───────────────────────────────────────────────────
@@ -926,29 +1237,78 @@ function syncAxiomsTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResu
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export async function syncAxiomsToDocument(
-  doc: vscode.TextDocument,
+  uri: vscode.Uri,
   entity: OWLEntity,
   sourceFormat?: string,
-): Promise<vscode.Range[] | null> {
+  rawContent?: string,
+  segment?: EntitySegment,
+  gciSegment?: EntitySegment,
+  closingParenLine?: number,
+  gciInsertLine?: number,
+  skipWrite = false,
+): Promise<{ changedRanges: vscode.Range[]; updatedText: string; lineDelta: number; editSummaries: EditSummary[] } | null> {
   if (temporaryClassIris.has(entity.iri)) { return null; }
-  const fsPath = doc.uri.fsPath.toLowerCase();
-  const fmt = sourceFormat ?? extensionFormat(fsPath);
-  let result: SyncResult | null = null;
+  const fmt = sourceFormat ?? extensionFormat(uri.fsPath.toLowerCase());
+  if (!fmt) { return null; }
 
+  let text: string;
+  if (rawContent !== undefined) {
+    text = rawContent;
+  } else {
+    let bytes: Uint8Array;
+    try {
+      bytes = await vscode.workspace.fs.readFile(uri);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+      void vscode.window.showErrorMessage(`OntoGraph: cannot read '${fname}' — ${msg}.`);
+      return null;
+    }
+    text = new TextDecoder().decode(bytes);
+  }
+  const doc = new RawTextDocument(uri, text) as unknown as vscode.TextDocument;
+
+  let result: SyncResult | null = null;
   if (fmt === 'functional') {
-    result = syncAxiomsFunctional(doc, entity);
+    result = syncAxiomsFunctional(doc, entity, segment, gciSegment, closingParenLine, gciInsertLine);
   } else if (fmt === 'manchester') {
     result = syncAxiomsManchester(doc, entity);
   } else if (fmt === 'turtle') {
     result = syncAxiomsTurtle(doc, entity);
-  } else {
-    return null;
   }
 
-  if (!result) return null;
-  suppressReloadFor(3000);
-  const ok = await vscode.workspace.applyEdit(result.edit);
-  return ok ? result.changedRanges : null;
+  if (!result) { return null; }
+
+  const hint = segment ? { startLine: segment.startLine, startChar: segment.startChar } : undefined;
+  const offsetEdits: OffsetEdit[] = [];
+  const updatedText = applyWorkspaceEditsToText(text, result.edit, hint, offsetEdits);
+  const gciLines = result.gciEditLines ?? new Set<number>();
+  const editSummaries: EditSummary[] = offsetEdits.map(o => ({
+    ...o,
+    segmentMap: gciLines.has(o.oldStartLine) ? ('gci' as const) : ('entity' as const),
+  }));
+  if (!skipWrite) {
+    const uriKey = uri.toString();
+    beginSyncWrite(uriKey);
+    try {
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updatedText));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const fname = uri.fsPath.split(/[\\/]/).pop() ?? '';
+      console.error(`[OntoGraph syncAxioms] writeFile FAILED: ${msg}`);
+      void vscode.window.showErrorMessage(`OntoGraph: cannot write '${fname}' — ${msg}.`);
+      return null;
+    } finally {
+      endSyncWrite(uriKey);
+    }
+  }
+
+  return {
+    changedRanges: result.changedRanges,
+    updatedText,
+    lineDelta: countLineDelta(result.edit),
+    editSummaries,
+  };
 }
 
 function extensionFormat(fsPath: string): string | undefined {

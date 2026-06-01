@@ -8,13 +8,21 @@ import type {
   OWLAnnotationProperty,
   OWLIndividual,
 } from '../model/OntologyModel';
-import { getLabel } from '../model/OntologyModel';
+import { createEmptyModel, getLabel } from '../model/OntologyModel';
 import { OntologyIndex } from '../model/OntologyIndex';
 import { collectLogicalLines } from '../utils/ManchesterFormatting';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge';
 import { normalizeExpression, renderExpressionWithEntityRefs, type AxiomDisplayStyle } from '../model/AxiomDisplay';
 import { syncAnnotationsToDocument } from '../sync/AnnotationSync';
 import { syncAxiomsToDocument } from '../sync/AxiomSync';
+import { queueSyncWrite } from '../sync/reloadGuard';
+import { writeTextStreamed } from '../sync/streamWrite';
+import type { EntitySegment } from '../model/OntologyModel';
+import {
+  buildModelSegmentIndexAsync,
+  applyIncrementalSegmentUpdate,
+  type EditSummary,
+} from '../model/SegmentIndex';
 import type {
   EntityEditorExtToWebview,
   EntityEditorWebviewToExt,
@@ -23,7 +31,6 @@ import type {
   ValidationResultMessage,
   SaveDraftErrorMessage,
 } from './EntityEditorMessages';
-import { parsedDocVersions } from '../extension';
 
 // ── Singleton panel ───────────────────────────────────────────────────────────
 
@@ -64,6 +71,12 @@ const draftAxioms = new Map<string, DraftExpression[]>();
 // Used by refreshEntityEditorIfOpen to decide whether to trust savedEntityState.
 let _annotationSyncActive = false;
 
+// Counter: number of incremental segment updates applied since the last full
+// rebuild. Every Nth save we run a full `buildModelSegmentIndexAsync` as a
+// safety anchor against any drift accumulated by the incremental updater.
+let _incrementalSavesSinceRebuild = 0;
+const FULL_REBUILD_EVERY_N_SAVES = 10;
+
 let _cachedIndexModel: OntologyModel | undefined;
 let _cachedIndex: OntologyIndex | undefined;
 
@@ -85,6 +98,62 @@ function getIndex(model: OntologyModel): OntologyIndex {
     _cachedIndex = new OntologyIndex(model);
   }
   return _cachedIndex;
+}
+
+function cloneSegment(segment: EntitySegment | undefined): EntitySegment | undefined {
+  if (segment === undefined) { return undefined; }
+  return {
+    startLine: segment.startLine,
+    endLine: segment.endLine,
+    startChar: segment.startChar,
+    endChar: segment.endChar,
+    lineIndices: segment.lineIndices ? new Int32Array(segment.lineIndices) : undefined,
+    lineCharStarts: segment.lineCharStarts ? new Int32Array(segment.lineCharStarts) : undefined,
+  };
+}
+
+function updateFunctionalSyncHints(
+  entityIri: string,
+  updatedText: string,
+  segment: EntitySegment | undefined,
+  gciSegment: EntitySegment | undefined,
+  closingParenLine: number | undefined,
+  gciInsertLine: number | undefined,
+  editSummaries: EditSummary[],
+): {
+  segment: EntitySegment | undefined;
+  gciSegment: EntitySegment | undefined;
+  closingParenLine: number | undefined;
+  gciInsertLine: number | undefined;
+} {
+  if (editSummaries.length === 0) {
+    return { segment, gciSegment, closingParenLine, gciInsertLine };
+  }
+
+  const tempModel = createEmptyModel('sync-hints.ofn');
+  tempModel.rawContent = updatedText;
+  tempModel.sourceFormat = 'functional';
+  tempModel.closingParenLine = closingParenLine;
+  tempModel.gciInsertLine = gciInsertLine;
+
+  const clonedSegment = cloneSegment(segment);
+  if (clonedSegment) {
+    tempModel.entitySegments = new Map([[entityIri, clonedSegment]]);
+  }
+
+  const clonedGciSegment = cloneSegment(gciSegment);
+  if (clonedGciSegment) {
+    tempModel.gciSegments = new Map([[entityIri, clonedGciSegment]]);
+  }
+
+  applyIncrementalSegmentUpdate(tempModel, entityIri, editSummaries);
+
+  return {
+    segment: tempModel.entitySegments?.get(entityIri),
+    gciSegment: tempModel.gciSegments?.get(entityIri),
+    closingParenLine: tempModel.closingParenLine,
+    gciInsertLine: tempModel.gciInsertLine,
+  };
 }
 
 export function registerEntityEditorRefreshCallback(cb: () => void): void {
@@ -199,6 +268,90 @@ export function showEntityInfo(
     undefined,
     context.subscriptions,
   );
+}
+
+// ── Persistence helper ───────────────────────────────────────────────────────
+
+/**
+ * Run the annotation + axiom sync phases and return ONLY the final text plus
+ * combined ranges and lineDelta.
+ *
+ * Scoping the sync calls inside a helper lets V8 release the intermediate
+ * `annot.updatedText` (~200MB for SNOMED) when the helper returns — only the
+ * winning `text` survives. Caller still drops `baseContent` before the write,
+ * so memory peak at write time is one final-text copy + the stream's 1MB
+ * chunk buffer (not three copies + a 200MB encode buffer).
+ */
+export async function computeUpdatedText(
+  uri: vscode.Uri,
+  entity: OWLEntity,
+  fmt: string,
+  baseContent: string | undefined,
+  seg: EntitySegment | undefined,
+  gciSeg: EntitySegment | undefined,
+  cpLine: number | undefined,
+  giLine: number | undefined,
+): Promise<{
+  text?: string;
+  ranges: vscode.Range[];
+  lineDelta: number;
+  /** Edit summaries from AnnotationSync (positions in baseContent frame). */
+  annotEditSummaries: EditSummary[];
+  /** Edit summaries from AxiomSync. Positions are in `annot?.updatedText`
+   *  frame when annot ran; in baseContent frame otherwise. Callers should
+   *  apply annotEditSummaries FIRST then axiomEditSummaries to keep the
+   *  coordinate frame consistent. */
+  axiomEditSummaries: EditSummary[];
+}> {
+  const ranges: vscode.Range[] = [];
+  let lineDelta = 0;
+
+  if (fmt === 'turtle') {
+    const r = await syncAxiomsToDocument(
+      uri, entity, fmt, baseContent,
+      undefined, undefined, undefined, undefined, true,
+    );
+    if (!r) { return { ranges, lineDelta, annotEditSummaries: [], axiomEditSummaries: [] }; }
+    ranges.push(...r.changedRanges);
+    lineDelta += r.lineDelta;
+    return {
+      text: r.updatedText, ranges, lineDelta,
+      annotEditSummaries: [],
+      axiomEditSummaries: r.editSummaries,
+    };
+  }
+
+  const annot = await syncAnnotationsToDocument(uri, entity, fmt, baseContent, seg, true);
+  if (annot) { ranges.push(...annot.changedRanges); lineDelta += annot.lineDelta; }
+
+  const axiomHints = fmt === 'functional' && annot?.updatedText
+    ? updateFunctionalSyncHints(
+      entity.iri,
+      annot.updatedText,
+      seg,
+      gciSeg,
+      cpLine,
+      giLine,
+      annot.editSummaries,
+    )
+    : { segment: seg, gciSegment: gciSeg, closingParenLine: cpLine, gciInsertLine: giLine };
+
+  const axiom = await syncAxiomsToDocument(
+    uri, entity, fmt, annot?.updatedText ?? baseContent,
+    axiomHints.segment,
+    axiomHints.gciSegment,
+    axiomHints.closingParenLine,
+    axiomHints.gciInsertLine,
+    true,
+  );
+  if (axiom) { ranges.push(...axiom.changedRanges); lineDelta += axiom.lineDelta; }
+
+  return {
+    text: axiom?.updatedText ?? annot?.updatedText,
+    ranges, lineDelta,
+    annotEditSummaries: annot?.editSummaries ?? [],
+    axiomEditSummaries: axiom?.editSummaries ?? [],
+  };
 }
 
 // ── Message handler ───────────────────────────────────────────────────────────
@@ -364,69 +517,112 @@ function handleMessage(
       _cachedIndex = undefined;
       if (classificationAffectingChange && model.isClassified && hasInferredHierarchy(model)) {
         model.classificationNeedsUpdate = true;
+        // Flip the `classificationNeedsUpdate` context so the toolbar button
+        // switches from "Classify" to the stale variant. Cheap setContext —
+        // no tree-view refresh, no model re-scan.
+        void vscode.commands.executeCommand('setContext', 'ontograph.classificationNeedsUpdate', true);
       }
 
       // Cache the saved state so sendLoadEntity always serves correct data
       // even if activeModel is re-parsed before applyEdit completes (race condition).
       savedEntityState.set(msg.iri, { labels: entity.labels, annotations: entity.annotations });
 
-      // Sync to the source OWL document if it's open.
-      // _annotationSyncActive guards refreshEntityEditorIfOpen so it knows not to
-      // clear savedEntityState during the in-flight applyEdit window.
-      //
-      // For Turtle: axiom sync is a single combined operation that writes both
-      // structural axioms and annotations atomically, producing one version
-      // increment and one parsedDocVersions update.
-      //
-      // For Manchester and Functional: annotation sync and axiom sync touch
-      // non-overlapping regions of the document (Annotations: section vs. other
-      // sections / AnnotationAssertion lines vs. other axiom lines), so two
-      // sequential edits are safe. parsedDocVersions is updated once at the end.
+      // Persistence pipeline:
+      //   1. queueSyncWrite serializes saves per URI so concurrent saves never
+      //      race on baseContent or segment positions.
+      //   2. Inside the queued task: compute updatedText (skipWrite=true on both
+      //      sync funcs), update model.rawContent and segment offsets
+      //      synchronously, then write to disk.
+      //   3. While the queue task runs, isReloadSuppressed(uri) is true so the
+      //      file watcher and handleDocument both skip re-parse — protects the
+      //      in-memory model regardless of how long the write takes.
       _annotationSyncActive = true;
-      void (async () => {
+      const uri = vscode.Uri.parse(model.sourceUri);
+      const fmt = model.sourceFormat;
+      void queueSyncWrite(uri.toString(), async () => {
         try {
-          const wasSourceDocOpen = vscode.window.visibleTextEditors.some(e => e.document.uri.toString() === model.sourceUri);
-          const doc = await getSourceDocument(model);
-          if (doc) {
-            const fmt = model.sourceFormat;
-            const changedRanges: vscode.Range[] = [];
-            if (fmt === 'turtle') {
-              // Single combined operation: axiom sync handles both annotations and axioms
-              changedRanges.push(...(await syncAxiomsToDocument(doc, entity, fmt) ?? []));
-            } else {
-              // Two-pass for non-overlapping regions: annotation first, then axioms
-              changedRanges.push(...(await syncAnnotationsToDocument(doc, entity, fmt) ?? []));
-              // Re-fetch so axiom sync reads the annotation-updated content
-              const updatedDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-              if (updatedDoc) {
-                changedRanges.push(...(await syncAxiomsToDocument(updatedDoc, entity, fmt) ?? []));
-              }
-            }
-            highlightSyncedRanges(doc.uri, changedRanges);
-            // Single parsedDocVersions update after all edits are applied, so the
-            // final doc.version is stored and no intermediate version triggers a reload.
-            const finalDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-            if (finalDoc) {
-              // Update tracking BEFORE save to prevent race with onDidSaveTextDocument
-              parsedDocVersions.set(finalDoc.uri.toString(), finalDoc.version);
-              model.rawContent = finalDoc.getText();
+          // baseContent is a `let` so we can release the alias before the
+          // disk write — once `model.rawContent` is overwritten with the new
+          // text and this local reference is cleared, the ~200MB old string
+          // is unreachable and can be reclaimed during the streamed write.
+          let baseContent: string | undefined = model.rawContent || undefined;
 
-              if (!wasSourceDocOpen) {
-                await finalDoc.save();
-              }
+          // Segment hints: scan only the entity's cluster (O(cluster) vs O(N)).
+          const seg = model.entitySegments?.get(entity.iri);
+          const gciSeg = entity.type === 'class' ? model.gciSegments?.get(entity.iri) : undefined;
+          const cpLine = model.closingParenLine;
+          const giLine = model.gciInsertLine;
+
+          const {
+            text: updatedText,
+            ranges: changedRanges,
+            lineDelta,
+            annotEditSummaries,
+            axiomEditSummaries,
+          } = await computeUpdatedText(uri, entity, fmt, baseContent, seg, gciSeg, cpLine, giLine);
+
+          if (updatedText !== undefined) {
+            // Update model state SYNCHRONOUSLY before the writeFile await.
+            model.rawContent = updatedText;
+            baseContent = undefined;
+
+            // Incremental segment-index update. Apply annot summaries first
+            // (positions in original baseContent frame), then axiom summaries
+            // (positions in annot's post-edit frame). Each is O(N entities +
+            // sum of lineIndices); typical save = ~50-200ms total vs ~2s for
+            // a full rebuild.
+            if (annotEditSummaries.length > 0) {
+              applyIncrementalSegmentUpdate(model, entity.iri, annotEditSummaries);
+            }
+            if (axiomEditSummaries.length > 0) {
+              applyIncrementalSegmentUpdate(model, entity.iri, axiomEditSummaries);
+            }
+            _incrementalSavesSinceRebuild++;
+
+            let writeOk = false;
+            try {
+              await writeTextStreamed(uri, updatedText);
+              writeOk = true;
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              console.error(`[OntoGraph save] writeFile FAILED: ${errMsg}`);
+              void vscode.window.showErrorMessage(`OntoGraph: cannot write file — ${errMsg}.`);
+            }
+
+            // Refresh fingerprint only if the write succeeded — otherwise the
+            // file on disk no longer matches the in-memory model and we don't
+            // want reload to skip a re-parse.
+            if (writeOk) {
+              try {
+                const stat = await vscode.workspace.fs.stat(uri);
+                model.sourceMtimeMs = stat.mtime;
+                model.sourceSize = stat.size;
+              } catch { /* non-fatal */ }
+            }
+
+            // Periodic safety-anchor: every N incremental saves, do a full
+            // segment rebuild from rawContent. Catches any drift accumulated
+            // by the incremental updater (off-by-one shifts, missed edges,
+            // etc). Runs AFTER writeFile + status messages so the user-visible
+            // save latency is unaffected.
+            if (_incrementalSavesSinceRebuild >= FULL_REBUILD_EVERY_N_SAVES) {
+              _incrementalSavesSinceRebuild = 0;
+              await buildModelSegmentIndexAsync(model);
             }
           }
+          highlightSyncedRanges(uri, changedRanges);
         } finally {
           _annotationSyncActive = false;
-          // Safe to clear now: the file buffer has updated data, so the next
-          // model re-parse (triggered by onDidSaveTextDocument) will have correct data.
           savedEntityState.delete(msg.iri);
         }
-      })();
+      });
 
-      fireRefresh();
-      void vscode.commands.executeCommand('ontograph.refresh');
-      // Refresh the webview from the updated model to confirm the save
+      // No tree-view refresh after save. Tree providers cache hierarchy and
+      // labels; rebuilding the index on every save is O(N) per provider × 6
+      // providers (~2-3s on SNOMED-scale) and would freeze the UI for a
+      // single-entity edit. Tree stays as a navigation cache — when the user
+      // clicks an entity, sendLoadEntity reads fresh data from the runtime
+      // model. Full refresh happens only on explicit reload of the ontology.
       sendLoadEntity(p, model, msg.iri);
       vscode.window.setStatusBarMessage(`$(check) OntoGraph: Saved ${getLabel(entity)}`, 4000);
       break;
@@ -652,17 +848,6 @@ function clearSyncHighlight(): void {
   }
 }
 
-async function getSourceDocument(model: OntologyModel): Promise<vscode.TextDocument | undefined> {
-  const openDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
-  if (openDoc) { return openDoc; }
-  try {
-    return await vscode.workspace.openTextDocument(vscode.Uri.parse(model.sourceUri));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    void vscode.window.showWarningMessage(`OntoGraph: Could not open source ontology for sync: ${msg}`);
-    return undefined;
-  }
-}
 
 function hasInferredHierarchy(model: OntologyModel): boolean {
   for (const children of model.inferredSubClasses.values()) {

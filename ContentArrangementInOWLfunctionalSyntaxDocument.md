@@ -59,6 +59,6 @@ SubClassOf(<URI> ObjectIntersectionOf(...))
 | **Header** | Prefixes & Ontology declaration | 1–10 |
 | **Declarations** | Global list of Classes & Properties | 10 – 35,974 |
 | **Object Properties** | Property definitions & characteristics | 35,975 – 36,042 |
-| **Classes** | Entity-grouped annotations & logic | 36,043 – 302,135 |
-| **Complex Logic** | Property chains & GCI axioms | 302,136 – 302,143 |
+| **Classes** | Entity-grouped annotations & logic axioms: EquivalentClasses, SubClassOf | 36,043 – 302,135 |
+| **Complex Logic** | GCI axiomsProperty chains | 302,136 – 302,143 |
 | **Footer** | Closing parenthesis | 302,144 |
