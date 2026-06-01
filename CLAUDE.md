@@ -172,10 +172,8 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-classes-only.ofn` — minimal BFO classes
 
 ## Recent Changes
+- 013-entity-search-partial-match: Cross-field token matching across `rdfs:label`/`skos:prefLabel`/`skos:altLabel` (tokens may span multiple fields); entity-name exact match via `localNameToIri` index (score 200, ranks first); local name removed from substring search (prevents partial SNOMED ID matches); anatomy.owl benchmark added
 - 012-load-large-ontology: `loadOntologyFile` command + toolbar button (`$(folder-opened)`) loads any-sized ontology via `vscode.workspace.fs.readFile`; `createLargeFileListener` shows notification for VS Code large-file conditions; `reloadOntology` refactored from `openTextDocument` to `workspace.fs.readFile`; `setupFileWatcher` extracted from `handleDocument` to shared helper
 - 011-autodetect-owl-syntax: Added TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (no new runtime deps)
-- 010-reload-ontology: Added TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API (`vscode.FileSystemWatcher`, `vscode.workspace.openTextDocument`), `ParserRegistry.parseAsync` (existing)
 
 ## Active Technologies
-- TypeScript 5 (strict mode), Node.js 20 + VS Code Extension API, `vscode.workspace.fs` (raw file I/O), existing `ParserRegistry.parseAsync`, existing `AnnotationSync` / `AxiomSync` (012-load-large-ontology)
-- File system (read via `vscode.workspace.fs.readFile`; write via `WorkspaceEdit` + `workspace.applyEdit`) (012-load-large-ontology)

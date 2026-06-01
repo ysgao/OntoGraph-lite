@@ -222,14 +222,16 @@ async function manchesterCompletionSource(context: CompletionContext): Promise<C
 
   return {
     from: word.from,
-    validFor: /^'[^']*'?$|^[\w:_-]+$/,
+    // Never reuse previous result — always call source fresh so results track
+    // the current prefix exactly (avoids stale completions with filter:false).
+    validFor: () => false,
     options: items.map(item => {
       const needsQuotes = userQuoted || /\s/.test(item.label);
       const applyStr = needsQuotes ? `'${item.label}'` : item.label;
       return {
         label: applyStr,
         displayLabel: item.label,
-        info: item.iri,
+        filter: false,
       };
     }),
   };
