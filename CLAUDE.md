@@ -17,6 +17,10 @@ npm run compile:webview # Type-check webview bundles (separate tsconfig)
 npm run build:parser    # Regenerate Manchester syntax parser from Peggy grammar
 npm run package         # Create .vsix for VS Code marketplace
 ```
+or 
+```bash
+npm run build && npm run build:watch && npm run compile && npm run compile:webview && npm run build:parser && npm run package
+```
 
 ### Java Reasoner Server
 ```bash
