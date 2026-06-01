@@ -340,6 +340,7 @@ export function activate(context: vscode.ExtensionContext): void {
           description: e.type,
           iri: e.iri,
           entityType: e.type,
+          alwaysShow: true,
         }));
       });
       qp.onDidAccept(() => {

@@ -133,11 +133,11 @@ async function manchesterCompletionSource(context: CompletionContext): Promise<C
   const userQuoted = word.text.startsWith("'");
   return {
     from: word.from,
-    validFor: /^'[^']*'?$|^[\w:_-]+$/,
+    validFor: () => false,
     options: items.map(item => {
       const needsQuotes = userQuoted || /\s/.test(item.label);
       const applyStr = needsQuotes ? `'${item.label}'` : item.label;
-      return { label: applyStr, displayLabel: item.label, info: item.iri };
+      return { label: applyStr, displayLabel: item.label, filter: false };
     }),
   };
 }
