@@ -494,6 +494,8 @@ interface SyncResult {
    *  Used by syncAxiomsToDocument to label OffsetEdit entries as 'gci' for
    *  the incremental segment-index updater. Functional format only. */
   gciEditLines?: Set<number>;
+  deletedGciPositions?: Map<string, number>;
+  deletedRegAxiomPositions?: Map<string, number>;
 }
 
 function changedLineRanges(startLine: number, lines: readonly string[]): vscode.Range[] {
@@ -564,6 +566,7 @@ function syncAxiomsFunctional(
   gciSegment?: EntitySegment,
   closingParenLine?: number,
   gciInsertLine?: number,
+  positionHints?: { gcis: Map<string, number>; regAxioms: Map<string, number> },
 ): SyncResult | null {
   const text = doc.getText();
   const keywords = entityAxiomKeywords(entity);
@@ -772,13 +775,22 @@ function syncAxiomsFunctional(
   const chunkFallback = anchorChunk >= 0 ? anchorChunk + 1 : chunkLines.length - 1;
 
   const insertsByChunkLine = new Map<number, string[]>();
+  const regHintInsertsMap = new Map<number, string[]>();
+
   for (const line of regAddLines) {
-    const kw = getAxiomKeyword(line) ?? '';
-    const atChunk = findInsertionPointForKeyword(
-      kw, keptChunkIdxs, regRemoveChunkIdxs, chunkLines, anchorChunk, chunkFallback,
-    );
-    if (!insertsByChunkLine.has(atChunk)) insertsByChunkLine.set(atChunk, []);
-    insertsByChunkLine.get(atChunk)!.push(line);
+    const trimmed = line.trim();
+    const hintLine = positionHints?.regAxioms.get(trimmed);
+    if (hintLine !== undefined) {
+      if (!regHintInsertsMap.has(hintLine)) regHintInsertsMap.set(hintLine, []);
+      regHintInsertsMap.get(hintLine)!.push(line);
+    } else {
+      const kw = getAxiomKeyword(line) ?? '';
+      const atChunk = findInsertionPointForKeyword(
+        kw, keptChunkIdxs, regRemoveChunkIdxs, chunkLines, anchorChunk, chunkFallback,
+      );
+      if (!insertsByChunkLine.has(atChunk)) insertsByChunkLine.set(atChunk, []);
+      insertsByChunkLine.get(atChunk)!.push(line);
+    }
   }
 
   // ── Build WorkspaceEdit (absolute positions) ──────────────────────────────────
@@ -801,6 +813,23 @@ function syncAxiomsFunctional(
     ...gciRemoveAbsIdxs,
   ].sort((a, b) => b - a);
 
+  const allRemovedAbsSorted = [...allRemovesAbs].sort((a, b) => a - b);
+  const postDeleteLine = (preLine: number): number =>
+    preLine - allRemovedAbsSorted.filter(l => l < preLine).length;
+
+  const gciRemoveSet = new Set(gciRemoveAbsIdxs);
+  const deletedGciPositions = new Map<string, number>();
+  for (let j = 0; j < existingGciAbsIdxs.length; j++) {
+    if (gciRemoveSet.has(existingGciAbsIdxs[j])) {
+      deletedGciPositions.set(gciLineTrimmed[j], postDeleteLine(existingGciAbsIdxs[j]));
+    }
+  }
+  const deletedRegAxiomPositions = new Map<string, number>();
+  for (const ci of regRemoveChunkIdxs) {
+    const preLine = chunkAbsLines[ci];
+    deletedRegAxiomPositions.set(chunkLines[ci].trim(), postDeleteLine(preLine));
+  }
+
   for (const absI of allRemovesAbs) {
     edit.delete(doc.uri, new vscode.Range(absI, 0, absI + 1, 0));
   }
@@ -809,9 +838,20 @@ function syncAxiomsFunctional(
     edit.insert(doc.uri, new vscode.Position(chunkToAbs(chunkAt), 0), insertLines.join('\n') + '\n');
   }
 
-  if (gciAddLines.length > 0) {
-    edit.insert(doc.uri, new vscode.Position(absGciInsertAt, 0), gciAddLines.join('\n') + '\n');
-    gciEditLines.add(absGciInsertAt);
+  const gciInsertsMap = new Map<number, string[]>();
+  for (const addLine of gciAddLines) {
+    const trimmed = addLine.trim();
+    const hintLine = positionHints?.gcis.get(trimmed);
+    const absPos = hintLine ?? absGciInsertAt;
+    if (!gciInsertsMap.has(absPos)) gciInsertsMap.set(absPos, []);
+    gciInsertsMap.get(absPos)!.push(addLine);
+  }
+  for (const [absPos, insertLines] of gciInsertsMap) {
+    edit.insert(doc.uri, new vscode.Position(absPos, 0), insertLines.join('\n') + '\n');
+    gciEditLines.add(absPos);
+  }
+  for (const [absPos, insertLines] of regHintInsertsMap) {
+    edit.insert(doc.uri, new vscode.Position(absPos, 0), insertLines.join('\n') + '\n');
   }
 
   // ── changedRanges in post-edit coordinates ────────────────────────────────────
@@ -820,7 +860,8 @@ function syncAxiomsFunctional(
   const allRemovesSorted = [...allRemovesAbs].sort((a, b) => a - b);
   const allInsertions: Array<[number, string[]]> = [
     ...[...insertsByChunkLine.entries()].map(([ci, ls]) => [chunkToAbs(ci), ls] as [number, string[]]),
-    ...(gciAddLines.length > 0 ? [[absGciInsertAt, gciAddLines] as [number, string[]]] : []),
+    ...[...gciInsertsMap.entries()].map(([absPos, ls]) => [absPos, ls] as [number, string[]]),
+    ...[...regHintInsertsMap.entries()].map(([absPos, ls]) => [absPos, ls] as [number, string[]]),
   ].sort((a, b) => a[0] - b[0]);
 
   for (const [origLine, insertedLines] of allInsertions) {
@@ -834,7 +875,7 @@ function syncAxiomsFunctional(
     }
   }
 
-  return { edit, changedRanges, gciEditLines };
+  return { edit, changedRanges, gciEditLines, deletedGciPositions, deletedRegAxiomPositions };
 }
 
 // ── Manchester Syntax (.omn) ───────────────────────────────────────────────────
@@ -1251,7 +1292,8 @@ export async function syncAxiomsToDocument(
   closingParenLine?: number,
   gciInsertLine?: number,
   skipWrite = false,
-): Promise<{ changedRanges: vscode.Range[]; updatedText: string; lineDelta: number; editSummaries: EditSummary[] } | null> {
+  positionHints?: { gcis: Map<string, number>; regAxioms: Map<string, number> },
+): Promise<{ changedRanges: vscode.Range[]; updatedText: string; lineDelta: number; editSummaries: EditSummary[]; deletedGciPositions?: Map<string, number>; deletedRegAxiomPositions?: Map<string, number> } | null> {
   if (temporaryClassIris.has(entity.iri)) { return null; }
   const fmt = sourceFormat ?? extensionFormat(uri.fsPath.toLowerCase());
   if (!fmt) { return null; }
@@ -1275,7 +1317,7 @@ export async function syncAxiomsToDocument(
 
   let result: SyncResult | null = null;
   if (fmt === 'functional') {
-    result = syncAxiomsFunctional(doc, entity, segment, gciSegment, closingParenLine, gciInsertLine);
+    result = syncAxiomsFunctional(doc, entity, segment, gciSegment, closingParenLine, gciInsertLine, positionHints);
   } else if (fmt === 'manchester') {
     result = syncAxiomsManchester(doc, entity);
   } else if (fmt === 'turtle') {
@@ -1313,6 +1355,8 @@ export async function syncAxiomsToDocument(
     updatedText,
     lineDelta: countLineDelta(result.edit),
     editSummaries,
+    deletedGciPositions: result.deletedGciPositions,
+    deletedRegAxiomPositions: result.deletedRegAxiomPositions,
   };
 }
 

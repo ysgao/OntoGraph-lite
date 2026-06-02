@@ -29,6 +29,7 @@ import type {
   EntityEditorWebviewToExt,
   LoadEntityMessage,
   EntitySnapshot,
+  PositionHints,
   UndoRedoStateMessage,
   CompletionResultMessage,
   ValidationResultMessage,
@@ -79,6 +80,9 @@ let _annotationSyncActive = false;
 // True when save is triggered automatically after an undo/redo. Tells the save
 // handler to skip recordSave so the checkpoint history is not disturbed.
 let _autoSaveInProgress = false;
+// Position hints captured at deletion-save time; consumed by the next undo auto-save
+// so items are re-inserted at their original file positions.
+let _pendingRestoreHints: PositionHints | undefined;
 
 // Counter: number of incremental segment updates applied since the last full
 // rebuild. Every Nth save we run a full `buildModelSegmentIndexAsync` as a
@@ -328,6 +332,7 @@ export async function computeUpdatedText(
   gciSeg: EntitySegment | undefined,
   cpLine: number | undefined,
   giLine: number | undefined,
+  restoreHints?: PositionHints,
 ): Promise<{
   text?: string;
   ranges: vscode.Range[];
@@ -339,6 +344,7 @@ export async function computeUpdatedText(
    *  apply annotEditSummaries FIRST then axiomEditSummaries to keep the
    *  coordinate frame consistent. */
   axiomEditSummaries: EditSummary[];
+  deletedPositions?: PositionHints;
 }> {
   const ranges: vscode.Range[] = [];
   let lineDelta = 0;
@@ -348,17 +354,18 @@ export async function computeUpdatedText(
       uri, entity, fmt, baseContent,
       undefined, undefined, undefined, undefined, true,
     );
-    if (!r) { return { ranges, lineDelta, annotEditSummaries: [], axiomEditSummaries: [] }; }
+    if (!r) { return { ranges, lineDelta, annotEditSummaries: [], axiomEditSummaries: [], deletedPositions: undefined }; }
     ranges.push(...r.changedRanges);
     lineDelta += r.lineDelta;
     return {
       text: r.updatedText, ranges, lineDelta,
       annotEditSummaries: [],
       axiomEditSummaries: r.editSummaries,
+      deletedPositions: undefined,
     };
   }
 
-  const annot = await syncAnnotationsToDocument(uri, entity, fmt, baseContent, seg, true);
+  const annot = await syncAnnotationsToDocument(uri, entity, fmt, baseContent, seg, true, restoreHints?.annotations);
   if (annot) { ranges.push(...annot.changedRanges); lineDelta += annot.lineDelta; }
 
   const axiomHints = fmt === 'functional' && annot?.updatedText
@@ -380,14 +387,24 @@ export async function computeUpdatedText(
     axiomHints.closingParenLine,
     axiomHints.gciInsertLine,
     true,
+    restoreHints ? { gcis: restoreHints.gcis, regAxioms: restoreHints.regAxioms } : undefined,
   );
   if (axiom) { ranges.push(...axiom.changedRanges); lineDelta += axiom.lineDelta; }
+
+  const annotDeleted = annot?.deletedAnnotPositions;
+  const gciDeleted = axiom?.deletedGciPositions;
+  const regDeleted = axiom?.deletedRegAxiomPositions;
+  const deletedPositions: PositionHints | undefined =
+    ((annotDeleted?.size ?? 0) > 0 || (gciDeleted?.size ?? 0) > 0 || (regDeleted?.size ?? 0) > 0)
+    ? { annotations: annotDeleted ?? new Map(), gcis: gciDeleted ?? new Map(), regAxioms: regDeleted ?? new Map() }
+    : undefined;
 
   return {
     text: axiom?.updatedText ?? annot?.updatedText,
     ranges, lineDelta,
     annotEditSummaries: annot?.editSummaries ?? [],
     axiomEditSummaries: axiom?.editSummaries ?? [],
+    deletedPositions,
   };
 }
 
@@ -415,9 +432,10 @@ function handleMessage(
     case 'undoRequest': {
       const undoHistory = entityHistoryMap.get(lastIri);
       if (!undoHistory?.canUndo) { break; }
-      const undoSnapshot = undoHistory.undo();
-      if (undoSnapshot) {
-        void p.webview.postMessage({ type: 'loadEntity', ...undoSnapshot } as EntityEditorExtToWebview);
+      const entry = undoHistory.undo();
+      if (entry) {
+        _pendingRestoreHints = entry.restoreHints;
+        void p.webview.postMessage({ type: 'loadEntity', ...entry.snapshot } as EntityEditorExtToWebview);
         postUndoRedoState(p, undoHistory.canUndo, undoHistory.canRedo);
         _autoSaveInProgress = true;
         void p.webview.postMessage({ type: 'autoSave' } as EntityEditorExtToWebview);
@@ -428,9 +446,10 @@ function handleMessage(
     case 'redoRequest': {
       const redoHistory = entityHistoryMap.get(lastIri);
       if (!redoHistory?.canRedo) { break; }
-      const redoSnapshot = redoHistory.redo();
-      if (redoSnapshot) {
-        void p.webview.postMessage({ type: 'loadEntity', ...redoSnapshot } as EntityEditorExtToWebview);
+      const entry = redoHistory.redo();
+      if (entry) {
+        _pendingRestoreHints = entry.restoreHints;
+        void p.webview.postMessage({ type: 'loadEntity', ...entry.snapshot } as EntityEditorExtToWebview);
         postUndoRedoState(p, redoHistory.canUndo, redoHistory.canRedo);
         _autoSaveInProgress = true;
         void p.webview.postMessage({ type: 'autoSave' } as EntityEditorExtToWebview);
@@ -645,10 +664,11 @@ function handleMessage(
           const {
             text: updatedText,
             ranges: changedRanges,
-            lineDelta,
             annotEditSummaries,
             axiomEditSummaries,
-          } = await computeUpdatedText(uri, entity, fmt, baseContent, seg, gciSeg, cpLine, giLine);
+            deletedPositions,
+          } = await computeUpdatedText(uri, entity, fmt, baseContent, seg, gciSeg, cpLine, giLine, _pendingRestoreHints);
+          _pendingRestoreHints = undefined;
 
           if (updatedText !== undefined) {
             // Update model state SYNCHRONOUSLY before the writeFile await.
@@ -700,24 +720,22 @@ function handleMessage(
             }
           }
           highlightSyncedRanges(uri, changedRanges);
+
+          if (saveHistory && !isAutoSave) {
+            const newSnapshot = buildEntityPayload(model, msg.iri);
+            if (newSnapshot) {
+              saveHistory.recordSave(newSnapshot, deletedPositions);
+              postUndoRedoState(p, saveHistory.canUndo, saveHistory.canRedo);
+            }
+          } else if (saveHistory && isAutoSave) {
+            const newSnapshot = buildEntityPayload(model, msg.iri);
+            if (newSnapshot) { saveHistory.updateCurrentSnapshot(newSnapshot); }
+          }
         } finally {
           _annotationSyncActive = false;
           savedEntityState.delete(msg.iri);
         }
       });
-
-      if (saveHistory && !isAutoSave) {
-        // User-initiated save: record a new checkpoint. recordSave must run
-        // before sendLoadEntity so history.currentSnapshot reflects post-save
-        // state when sendLoadEntity reads it.
-        const newSnapshot = buildEntityPayload(model, msg.iri);
-        if (newSnapshot) { saveHistory.recordSave(newSnapshot); }
-      } else if (saveHistory && isAutoSave) {
-        // Auto-save after undo/redo: disk write only — history already updated
-        // by the undo/redo handler; do not push a new checkpoint.
-        const newSnapshot = buildEntityPayload(model, msg.iri);
-        if (newSnapshot) { saveHistory.updateCurrentSnapshot(newSnapshot); }
-      }
 
       // No tree-view refresh after save. Tree providers cache hierarchy and
       // labels; rebuilding the index on every save is O(N) per provider × 6
@@ -1046,7 +1064,6 @@ function localName(iri: string): string {
   return pos >= 0 ? iri.slice(pos + 1) : iri;
 }
 
-type ValidationError = { from: number; to: number; severity: 'error' | 'warning'; message: string };
 
 // Wraps bare HTTP(S) IRIs with angle brackets so the Manchester parser sees
 // the <IRI> token form it expects.  Mirrors the helper in DLQueryPanel.ts.

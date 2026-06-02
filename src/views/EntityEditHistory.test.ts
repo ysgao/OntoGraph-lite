@@ -60,7 +60,7 @@ describe('EntityEditHistory – undo', () => {
   it('returns the state before the last save', () => {
     const h = new EntityEditHistory(snap('S0'));
     h.recordSave(snap('S1'));
-    expect(h.undo()?.label).toBe('S0');
+    expect(h.undo()?.snapshot.label).toBe('S0');
   });
 
   it('makes canUndo=false after undoing past all saves', () => {
@@ -83,7 +83,7 @@ describe('EntityEditHistory – redo', () => {
     const h = new EntityEditHistory(snap('S0'));
     h.recordSave(snap('S1'));
     h.undo();
-    expect(h.redo()?.label).toBe('S1');
+    expect(h.redo()?.snapshot.label).toBe('S1');
   });
 
   it('makes canRedo=false after redoing all forward states', () => {
@@ -109,9 +109,9 @@ describe('EntityEditHistory – multi-step traversal', () => {
     h.recordSave(snap('S1'));
     h.recordSave(snap('S2'));
     h.recordSave(snap('S3'));
-    expect(h.undo()?.label).toBe('S2');
-    expect(h.undo()?.label).toBe('S1');
-    expect(h.undo()?.label).toBe('S0');
+    expect(h.undo()?.snapshot.label).toBe('S2');
+    expect(h.undo()?.snapshot.label).toBe('S1');
+    expect(h.undo()?.snapshot.label).toBe('S0');
     expect(h.canUndo).toBe(false);
   });
 
@@ -121,9 +121,9 @@ describe('EntityEditHistory – multi-step traversal', () => {
     h.recordSave(snap('S2'));
     h.recordSave(snap('S3'));
     h.undo(); h.undo(); h.undo();
-    expect(h.redo()?.label).toBe('S1');
-    expect(h.redo()?.label).toBe('S2');
-    expect(h.redo()?.label).toBe('S3');
+    expect(h.redo()?.snapshot.label).toBe('S1');
+    expect(h.redo()?.snapshot.label).toBe('S2');
+    expect(h.redo()?.snapshot.label).toBe('S3');
     expect(h.canRedo).toBe(false);
   });
 });
@@ -135,9 +135,9 @@ describe('EntityEditHistory – maxSize enforcement', () => {
     h.recordSave(snap('S2'));
     h.recordSave(snap('S3')); // undoStack=[S0,S1,S2], current=S3
     h.recordSave(snap('S4')); // shift S0 → undoStack=[S1,S2,S3], current=S4
-    expect(h.undo()?.label).toBe('S3');
-    expect(h.undo()?.label).toBe('S2');
-    expect(h.undo()?.label).toBe('S1');
+    expect(h.undo()?.snapshot.label).toBe('S3');
+    expect(h.undo()?.snapshot.label).toBe('S2');
+    expect(h.undo()?.snapshot.label).toBe('S1');
     expect(h.canUndo).toBe(false); // S0 was dropped
   });
 
@@ -171,6 +171,6 @@ describe('EntityEditHistory – clear', () => {
     h.recordSave(snap('S1'));
     h.clear(snap('fresh'));
     h.recordSave(snap('S2'));
-    expect(h.undo()?.label).toBe('fresh');
+    expect(h.undo()?.snapshot.label).toBe('fresh');
   });
 });

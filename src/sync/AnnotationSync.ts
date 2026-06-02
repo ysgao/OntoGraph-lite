@@ -220,6 +220,7 @@ function syncFunctional(
   doc: vscode.TextDocument,
   entity: OWLEntity,
   segment?: EntitySegment,
+  positionHints?: Map<string, number>,
 ): SyncResult | null {
   const text = doc.getText();
   const prefixes = parsePrefixes(text, 'functional');
@@ -356,27 +357,39 @@ function syncFunctional(
     }
   }
 
+  const allAnnotRemoveSorted = toRemove.map(r => r.lineIdx).sort((a, b) => a - b);
+  const deletedAnnotPositions = new Map<string, number>();
+  for (const item of toRemove) {
+    const postLine = item.lineIdx - allAnnotRemoveSorted.filter(l => l < item.lineIdx).length;
+    deletedAnnotPositions.set(item.key, postLine);
+  }
+
+  const annotInsertsMap = new Map<number, string[]>();
+  for (const addItem of toAdd) {
+    const hintLine = positionHints?.get(addItem.key);
+    const pos = hintLine ?? insertAt;
+    if (!annotInsertsMap.has(pos)) annotInsertsMap.set(pos, []);
+    annotInsertsMap.get(pos)!.push(addItem.line);
+  }
+
   const edit = new vscode.WorkspaceEdit();
-
   for (const item of [...toRemove].sort((a, b) => b.lineIdx - a.lineIdx)) {
-    edit.delete(doc.uri, new vscode.Range(
-      item.lineIdx, 0,
-      item.lineIdx + item.lineCount, 0,
-    ));
+    edit.delete(doc.uri, new vscode.Range(item.lineIdx, 0, item.lineIdx + item.lineCount, 0));
+  }
+  for (const [pos, insertLines] of annotInsertsMap) {
+    edit.insert(doc.uri, new vscode.Position(pos, 0), insertLines.join('\n') + '\n');
   }
 
-  if (toAdd.length > 0) {
-    edit.insert(doc.uri, new vscode.Position(insertAt, 0), toAdd.map(m => m.line).join('\n') + '\n');
-  }
-
-  let currentLine = insertAt;
   const addedRanges: vscode.Range[] = [];
-  for (const m of toAdd) {
-    const mLines = m.line.split('\n');
-    addedRanges.push(new vscode.Range(currentLine, 0, currentLine + mLines.length - 1, mLines[mLines.length - 1].length));
-    currentLine += mLines.length;
+  for (const [pos, insertLines] of annotInsertsMap) {
+    let ln = pos;
+    for (const l of insertLines) {
+      const mLines = l.split('\n');
+      addedRanges.push(new vscode.Range(ln, 0, ln + mLines.length - 1, mLines[mLines.length - 1].length));
+      ln += mLines.length;
+    }
   }
-  return { edit, addedRanges };
+  return { edit, addedRanges, deletedAnnotPositions };
 }
 
 // ── Manchester Syntax (.omn) ───────────────────────────────────────────────────
@@ -673,6 +686,7 @@ function syncTurtle(doc: vscode.TextDocument, entity: OWLEntity): SyncResult | n
 interface SyncResult {
   edit: vscode.WorkspaceEdit;
   addedRanges: vscode.Range[];
+  deletedAnnotPositions?: Map<string, number>;
 }
 
 export async function syncAnnotationsToDocument(
@@ -682,7 +696,8 @@ export async function syncAnnotationsToDocument(
   rawContent?: string,
   segment?: EntitySegment,
   skipWrite = false,
-): Promise<{ changedRanges: vscode.Range[]; updatedText: string; lineDelta: number; editSummaries: EditSummary[] } | null> {
+  positionHints?: Map<string, number>,
+): Promise<{ changedRanges: vscode.Range[]; updatedText: string; lineDelta: number; editSummaries: EditSummary[]; deletedAnnotPositions?: Map<string, number> } | null> {
   if (temporaryClassIris.has(entity.iri)) { return null; }
 
   // Resolve format: prefer the caller-supplied sourceFormat (derived from parse-time detection),
@@ -715,7 +730,7 @@ export async function syncAnnotationsToDocument(
 
   let result: SyncResult | null = null;
   if (fmt === 'functional') {
-    result = syncFunctional(doc, entity, segment);
+    result = syncFunctional(doc, entity, segment, positionHints);
   } else if (fmt === 'manchester') {
     result = syncManchester(doc, entity);
   } else if (fmt === 'turtle') {
@@ -755,6 +770,7 @@ export async function syncAnnotationsToDocument(
     updatedText,
     lineDelta: countLineDelta(result.edit),
     editSummaries,
+    deletedAnnotPositions: result.deletedAnnotPositions,
   };
 }
 

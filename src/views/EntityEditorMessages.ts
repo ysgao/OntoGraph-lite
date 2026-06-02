@@ -125,6 +125,16 @@ export interface SaveDraftErrorMessage {
 /** Snapshot of all entity editor fields at a point in time — stored by EntityEditHistory. */
 export type EntitySnapshot = Omit<LoadEntityMessage, 'type' | 'draftExpressions'>;
 
+/** Post-delete file line numbers for items removed during a save — used by undo to restore to the original file location. */
+export interface PositionHints {
+  /** annotation key (propIri|text|lang) → post-delete line */
+  annotations: Map<string, number>;
+  /** trimmed GCI axiom line text → post-delete line */
+  gcis: Map<string, number>;
+  /** trimmed regular axiom line text → post-delete line */
+  regAxioms: Map<string, number>;
+}
+
 export interface UndoRequestMessage { type: 'undoRequest' }
 export interface RedoRequestMessage { type: 'redoRequest' }
 export interface UndoRedoStateMessage { type: 'undoRedoState'; canUndo: boolean; canRedo: boolean }

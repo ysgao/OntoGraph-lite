@@ -458,7 +458,7 @@ describe('entityHistoryMap isolation (T016)', () => {
     histA.recordSave(makeSnap('A1', 'http://example.org/A'));
     histB.recordSave(makeSnap('B1', 'http://example.org/B'));
     histB.recordSave(makeSnap('B2', 'http://example.org/B'));
-    expect(histA.undo()?.label).toBe('A0');
+    expect(histA.undo()?.snapshot.label).toBe('A0');
     expect(histA.canUndo).toBe(false);
   });
 
@@ -478,7 +478,7 @@ describe('entityHistoryMap isolation (T016)', () => {
     hist.recordSave(makeSnap('A2'));
     hist.clear(makeSnap('A0_fresh'));
     hist.recordSave(makeSnap('A1_new'));
-    expect(hist.undo()?.label).toBe('A0_fresh');
+    expect(hist.undo()?.snapshot.label).toBe('A0_fresh');
     expect(hist.canUndo).toBe(false);
   });
 });
