@@ -650,8 +650,13 @@ function syncAxiomsFunctional(
 
   // ── Generate model lines ─────────────────────────────────────────────────────
 
-  // Detect IRI-form convention from the entity's own existing axiom lines (CURIE vs full).
-  const usedPrefixes = useLineList ? detectUsedPrefixesFromLines(chunkLines, filePrefixes) : new Set<string>();
+  // Detect IRI-form convention from the entity's own existing AXIOM lines only (CURIE vs full).
+  // Annotation lines are excluded: in SNOMED-scale files, annotations use base-prefix CURIEs
+  // while axioms use full IRIs — mixing them would cause false positive prefix detection.
+  const axiomOnlyChunkLines = useLineList
+    ? chunkLines.filter(l => !l.trimStart().startsWith('AnnotationAssertion('))
+    : chunkLines;
+  const usedPrefixes = useLineList ? detectUsedPrefixesFromLines(axiomOnlyChunkLines, filePrefixes) : new Set<string>();
 
   // Dedupe model lines by trimmed text. Required so the multiset diff treats
   // each distinct axiom as a single intended copy — without this, files that

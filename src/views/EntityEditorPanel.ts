@@ -23,10 +23,13 @@ import {
   applyIncrementalSegmentUpdate,
   type EditSummary,
 } from '../model/SegmentIndex';
+import { EntityEditHistory } from './EntityEditHistory';
 import type {
   EntityEditorExtToWebview,
   EntityEditorWebviewToExt,
   LoadEntityMessage,
+  EntitySnapshot,
+  UndoRedoStateMessage,
   CompletionResultMessage,
   ValidationResultMessage,
   SaveDraftErrorMessage,
@@ -67,9 +70,15 @@ interface DraftExpression {
 // Cleared when the user chooses "Discard and proceed" before a model reload.
 const draftAxioms = new Map<string, DraftExpression[]>();
 
+// Per-entity save-checkpoint history. Session-scoped; cleared on panel dispose.
+const entityHistoryMap = new Map<string, EntityEditHistory>();
+
 // True while syncAnnotationsToDocument's applyEdit is still in flight.
 // Used by refreshEntityEditorIfOpen to decide whether to trust savedEntityState.
 let _annotationSyncActive = false;
+// True when save is triggered automatically after an undo/redo. Tells the save
+// handler to skip recordSave so the checkpoint history is not disturbed.
+let _autoSaveInProgress = false;
 
 // Counter: number of incremental segment updates applied since the last full
 // rebuild. Every Nth save we run a full `buildModelSegmentIndexAsync` as a
@@ -164,6 +173,11 @@ function fireRefresh(): void {
   for (const cb of refreshCallbacks) { cb(); }
 }
 
+function postUndoRedoState(p: vscode.WebviewPanel, canUndo: boolean, canRedo: boolean): void {
+  const msg: UndoRedoStateMessage = { type: 'undoRedoState', canUndo, canRedo };
+  void p.webview.postMessage(msg as EntityEditorExtToWebview);
+}
+
 export function hasDraftAxioms(): boolean { return draftAxioms.size > 0; }
 
 function discardAllDrafts(): void { draftAxioms.clear(); }
@@ -222,13 +236,23 @@ export async function refreshEntityEditorIfOpen(
     if (decision === 'cancel') { return; }
   }
 
+  const newOntology = currentPanelModel?.sourceUri !== model.sourceUri;
   currentPanelModel = model;
+
   if (!_annotationSyncActive) {
-    // External model refresh (e.g. user edited the file directly) — drop any
-    // stale save cache so the panel shows what the file actually contains now.
     savedEntityState.delete(lastIri);
   }
   sendLoadEntity(panel, model, lastIri);
+
+  if (newOntology) {
+    // Different ontology opened — wipe all per-entity checkpoint history.
+    entityHistoryMap.clear();
+    postUndoRedoState(panel, false, false);
+  } else {
+    // Same file (classify, reload, incremental update) — preserve history.
+    const h = entityHistoryMap.get(lastIri);
+    postUndoRedoState(panel, h?.canUndo ?? false, h?.canRedo ?? false);
+  }
 }
 
 export function showEntityInfo(
@@ -236,6 +260,7 @@ export function showEntityInfo(
   model: OntologyModel,
   iri: string,
 ): void {
+  const needsHistoryInit = !entityHistoryMap.has(iri);
   if (lastIri !== iri) { clearSyncHighlight(); }
   currentPanelModel = model;
   lastIri = iri;
@@ -243,6 +268,14 @@ export function showEntityInfo(
   if (panel) {
     panel.reveal(vscode.ViewColumn.Beside);
     sendLoadEntity(panel, model, iri);
+    if (needsHistoryInit) {
+      const payload = buildEntityPayload(model, iri);
+      if (payload) { entityHistoryMap.set(iri, new EntityEditHistory(payload)); }
+      postUndoRedoState(panel, false, false);
+    } else {
+      const h = entityHistoryMap.get(iri);
+      postUndoRedoState(panel, h?.canUndo ?? false, h?.canRedo ?? false);
+    }
     return;
   }
 
@@ -258,7 +291,11 @@ export function showEntityInfo(
   );
 
   panel.webview.html = buildHtml(panel.webview, context.extensionUri);
-  panel.onDidDispose(() => { panel = undefined; clearSyncHighlight(); }, null, context.subscriptions);
+  panel.onDidDispose(() => {
+    panel = undefined;
+    clearSyncHighlight();
+    entityHistoryMap.clear();
+  }, null, context.subscriptions);
 
   panel.webview.onDidReceiveMessage(
     (msg: EntityEditorWebviewToExt) => {
@@ -365,7 +402,41 @@ function handleMessage(
   switch (msg.type) {
     case 'ready':
       sendLoadEntity(p, model, lastIri);
+      if (lastIri && !entityHistoryMap.has(lastIri)) {
+        const payload = buildEntityPayload(model, lastIri);
+        if (payload) { entityHistoryMap.set(lastIri, new EntityEditHistory(payload)); }
+      }
+      {
+        const h = entityHistoryMap.get(lastIri);
+        postUndoRedoState(p, h?.canUndo ?? false, h?.canRedo ?? false);
+      }
       break;
+
+    case 'undoRequest': {
+      const undoHistory = entityHistoryMap.get(lastIri);
+      if (!undoHistory?.canUndo) { break; }
+      const undoSnapshot = undoHistory.undo();
+      if (undoSnapshot) {
+        void p.webview.postMessage({ type: 'loadEntity', ...undoSnapshot } as EntityEditorExtToWebview);
+        postUndoRedoState(p, undoHistory.canUndo, undoHistory.canRedo);
+        _autoSaveInProgress = true;
+        void p.webview.postMessage({ type: 'autoSave' } as EntityEditorExtToWebview);
+      }
+      break;
+    }
+
+    case 'redoRequest': {
+      const redoHistory = entityHistoryMap.get(lastIri);
+      if (!redoHistory?.canRedo) { break; }
+      const redoSnapshot = redoHistory.redo();
+      if (redoSnapshot) {
+        void p.webview.postMessage({ type: 'loadEntity', ...redoSnapshot } as EntityEditorExtToWebview);
+        postUndoRedoState(p, redoHistory.canUndo, redoHistory.canRedo);
+        _autoSaveInProgress = true;
+        void p.webview.postMessage({ type: 'autoSave' } as EntityEditorExtToWebview);
+      }
+      break;
+    }
 
     case 'navigate':
       showEntityInfo(context, model, msg.iri);
@@ -414,6 +485,9 @@ function handleMessage(
       }
       const classificationAffectingChange = hasClassificationAffectingChange(entity, msg);
       const index = getIndex(model);
+      const isAutoSave = _autoSaveInProgress;
+      _autoSaveInProgress = false;
+      const saveHistory = entityHistoryMap.get(msg.iri);
 
       // Collect draft expressions that failed validation (either flagged by the
       // webview linter OR rejected by server-side parse at save time).  Server-side
@@ -438,17 +512,32 @@ function handleMessage(
       switch (msg.entityType) {
         case 'class': {
           const cls = entity as OWLClass;
-          const validSuper = filterSection(msg.superClassExpressions, 'superClassExpressions');
-          const splitSuper = splitNormalizedExpressions(validSuper.map(e => normalizeExpression(e, model, index)));
-          cls.superClassIris = splitSuper.namedClassIris;
-          cls.superClassExpressions = splitSuper.complexExpressions;
-          const validEquiv = filterSection(msg.equivalentClassExpressions, 'equivalentClassExpressions');
-          const splitEquiv = splitNormalizedExpressions(validEquiv.map(e => normalizeExpression(e, model, index)));
-          cls.equivalentClassIris = splitEquiv.namedClassIris;
-          cls.equivalentClassExpressions = splitEquiv.complexExpressions;
-          const validGci = filterSection(msg.gciExpressions, 'gciExpressions');
-          cls.gciExpressions = validGci.map(e => normalizeExpression(e, model, index));
-          cls.disjointClassIris = msg.disjointClassIris ?? [];
+          if (isAutoSave && saveHistory?.currentSnapshot?.entityType === 'class') {
+            // Auto-save: apply snapshot IRI arrays directly (full IRIs, no label round-trip).
+            const snap = saveHistory.currentSnapshot;
+            cls.superClassIris = snap.superClassIris ?? [];
+            cls.equivalentClassIris = snap.equivalentClassIris ?? [];
+            cls.disjointClassIris = snap.disjointClassIris ?? [];
+            // Complex expressions: normalize from snapshot's rendered form
+            cls.superClassExpressions = (snap.superClassExpressions ?? [])
+              .map(e => normalizeExpression(e, model, index)).filter(e => e.length > 0);
+            cls.equivalentClassExpressions = (snap.equivalentClassExpressions ?? [])
+              .map(e => normalizeExpression(e, model, index)).filter(e => e.length > 0);
+            cls.gciExpressions = (snap.gciExpressions ?? [])
+              .map(e => normalizeExpression(e, model, index)).filter(e => e.length > 0);
+          } else {
+            const validSuper = filterSection(msg.superClassExpressions, 'superClassExpressions');
+            const splitSuper = splitNormalizedExpressions(validSuper.map(e => normalizeExpression(e, model, index)));
+            cls.superClassIris = splitSuper.namedClassIris;
+            cls.superClassExpressions = splitSuper.complexExpressions;
+            const validEquiv = filterSection(msg.equivalentClassExpressions, 'equivalentClassExpressions');
+            const splitEquiv = splitNormalizedExpressions(validEquiv.map(e => normalizeExpression(e, model, index)));
+            cls.equivalentClassIris = splitEquiv.namedClassIris;
+            cls.equivalentClassExpressions = splitEquiv.complexExpressions;
+            const validGci = filterSection(msg.gciExpressions, 'gciExpressions');
+            cls.gciExpressions = validGci.map(e => normalizeExpression(e, model, index));
+            cls.disjointClassIris = msg.disjointClassIris ?? [];
+          }
           break;
         }
         case 'objectProperty': {
@@ -617,6 +706,19 @@ function handleMessage(
         }
       });
 
+      if (saveHistory && !isAutoSave) {
+        // User-initiated save: record a new checkpoint. recordSave must run
+        // before sendLoadEntity so history.currentSnapshot reflects post-save
+        // state when sendLoadEntity reads it.
+        const newSnapshot = buildEntityPayload(model, msg.iri);
+        if (newSnapshot) { saveHistory.recordSave(newSnapshot); }
+      } else if (saveHistory && isAutoSave) {
+        // Auto-save after undo/redo: disk write only — history already updated
+        // by the undo/redo handler; do not push a new checkpoint.
+        const newSnapshot = buildEntityPayload(model, msg.iri);
+        if (newSnapshot) { saveHistory.updateCurrentSnapshot(newSnapshot); }
+      }
+
       // No tree-view refresh after save. Tree providers cache hierarchy and
       // labels; rebuilding the index on every save is O(N) per provider × 6
       // providers (~2-3s on SNOMED-scale) and would freeze the UI for a
@@ -624,6 +726,11 @@ function handleMessage(
       // clicks an entity, sendLoadEntity reads fresh data from the runtime
       // model. Full refresh happens only on explicit reload of the ontology.
       sendLoadEntity(p, model, msg.iri);
+
+      if (saveHistory) {
+        postUndoRedoState(p, saveHistory.canUndo, saveHistory.canRedo);
+      }
+
       vscode.window.setStatusBarMessage(`$(check) OntoGraph: Saved ${getLabel(entity)}`, 4000);
       break;
     }
@@ -632,9 +739,10 @@ function handleMessage(
 
 // ── Load entity message builder ───────────────────────────────────────────────
 
-function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: string): void {
+/** Builds the entity snapshot payload from the current model state. Returns undefined if the IRI is unknown. */
+export function buildEntityPayload(model: OntologyModel, iri: string): EntitySnapshot | undefined {
   const entity = findEntity(model, iri);
-  if (!entity) { return; }
+  if (!entity) { return undefined; }
 
   const cfg = vscode.workspace.getConfiguration('ontograph');
   const lang = cfg.get<string>('display.preferredLabelLanguage') ?? 'en';
@@ -686,8 +794,7 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
   const effectiveLabels = saved?.labels ?? entity.labels;
   const effectiveAnnotations = saved?.annotations ?? entity.annotations;
 
-  const msg: LoadEntityMessage = {
-    type: 'loadEntity',
+  const payload: EntitySnapshot = {
     entityType: entity.type,
     iri: entity.iri,
     label: getLabel({ ...entity, labels: effectiveLabels }, lang),
@@ -700,72 +807,82 @@ function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: strin
 
   if (entity.type === 'class') {
     const cls = entity as OWLClass;
-    msg.superClassIris = cls.superClassIris;
-    msg.superClassExpressions = renderExpressionsWithRefs(
+    payload.superClassIris = cls.superClassIris;
+    payload.superClassExpressions = renderExpressionsWithRefs(
       'superClassExpressions',
       cls.superClassExpressions ?? [],
-      msg.expressionEntityRefs!,
+      payload.expressionEntityRefs!,
       model,
       style,
       lang,
     );
-    msg.equivalentClassIris = cls.equivalentClassIris;
-    msg.equivalentClassExpressions = renderExpressionsWithRefs(
+    payload.equivalentClassIris = cls.equivalentClassIris;
+    payload.equivalentClassExpressions = renderExpressionsWithRefs(
       'equivalentClassExpressions',
       cls.equivalentClassExpressions ?? [],
-      msg.expressionEntityRefs!,
+      payload.expressionEntityRefs!,
       model,
       style,
       lang,
     );
-    msg.gciExpressions = renderExpressionsWithRefs(
+    payload.gciExpressions = renderExpressionsWithRefs(
       'gciExpressions',
       cls.gciExpressions ?? [],
-      msg.expressionEntityRefs!,
+      payload.expressionEntityRefs!,
       model,
       style,
       lang,
     );
-    msg.disjointClassIris = cls.disjointClassIris;
+    payload.disjointClassIris = cls.disjointClassIris;
   } else if (entity.type === 'objectProperty') {
     const prop = entity as OWLObjectProperty;
-    msg.superPropertyIris = prop.superPropertyIris;
-    msg.domainIris = prop.domainIris;
-    msg.rangeIris = prop.rangeIris;
-    msg.isTransitive = prop.isTransitive;
-    msg.isSymmetric = prop.isSymmetric;
-    msg.isFunctional = prop.isFunctional;
-    msg.isInverseFunctional = prop.isInverseFunctional;
-    msg.isReflexive = prop.isReflexive;
-    msg.isIrreflexive = prop.isIrreflexive;
-    msg.isAsymmetric = prop.isAsymmetric;
-    msg.inverseOfIri = prop.inverseOfIri;
-    msg.equivalentPropertyIris = prop.equivalentPropertyIris ?? [];
-    msg.disjointPropertyIris = prop.disjointPropertyIris ?? [];
-    msg.propertyChains = prop.propertyChains ?? [];
+    payload.superPropertyIris = prop.superPropertyIris;
+    payload.domainIris = prop.domainIris;
+    payload.rangeIris = prop.rangeIris;
+    payload.isTransitive = prop.isTransitive;
+    payload.isSymmetric = prop.isSymmetric;
+    payload.isFunctional = prop.isFunctional;
+    payload.isInverseFunctional = prop.isInverseFunctional;
+    payload.isReflexive = prop.isReflexive;
+    payload.isIrreflexive = prop.isIrreflexive;
+    payload.isAsymmetric = prop.isAsymmetric;
+    payload.inverseOfIri = prop.inverseOfIri;
+    payload.equivalentPropertyIris = prop.equivalentPropertyIris ?? [];
+    payload.disjointPropertyIris = prop.disjointPropertyIris ?? [];
+    payload.propertyChains = prop.propertyChains ?? [];
   } else if (entity.type === 'dataProperty') {
     const prop = entity as OWLDataProperty;
-    msg.superPropertyIris = prop.superPropertyIris;
-    msg.domainIris = prop.domainIris;
-    msg.rangeIris = prop.rangeIris;
-    msg.isFunctional = prop.isFunctional;
+    payload.superPropertyIris = prop.superPropertyIris;
+    payload.domainIris = prop.domainIris;
+    payload.rangeIris = prop.rangeIris;
+    payload.isFunctional = prop.isFunctional;
   } else if (entity.type === 'annotationProperty') {
     const prop = entity as OWLAnnotationProperty;
-    msg.superPropertyIris = prop.superPropertyIris;
-    msg.domainIris = prop.domainIris;
-    msg.rangeIris = prop.rangeIris;
+    payload.superPropertyIris = prop.superPropertyIris;
+    payload.domainIris = prop.domainIris;
+    payload.rangeIris = prop.rangeIris;
   } else if (entity.type === 'individual') {
     const ind = entity as OWLIndividual;
-    msg.classIris = ind.classIris;
-    msg.objectPropertyAssertions = ind.objectPropertyAssertions;
-    msg.dataPropertyAssertions = ind.dataPropertyAssertions;
+    payload.classIris = ind.classIris;
+    payload.objectPropertyAssertions = ind.objectPropertyAssertions;
+    payload.dataPropertyAssertions = ind.dataPropertyAssertions;
   }
 
+  return payload;
+}
+
+function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: string): void {
+  // Use the history's current snapshot when available so that undo/redo state
+  // is preserved across navigations and same-file refreshes.  Fall back to a
+  // fresh buildEntityPayload when no history exists yet (initial load).
+  const historySnapshot = entityHistoryMap.get(iri)?.currentSnapshot;
+  const payload = historySnapshot ?? buildEntityPayload(model, iri);
+  if (!payload) { return; }
+  const msg: LoadEntityMessage = { type: 'loadEntity', ...payload };
   const drafts = draftAxioms.get(iri);
-  if (drafts && drafts.length > 0) {
+  if (drafts?.length) {
     msg.draftExpressions = drafts.map(d => ({ sectionKey: d.sectionKey, text: d.text }));
   }
-
   void p.webview.postMessage(msg as EntityEditorExtToWebview);
 }
 
