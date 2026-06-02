@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('vscode', () => ({
   window: {
@@ -58,7 +58,10 @@ import {
   validateManchesterText,
   renderExpressionsWithRefs,
   splitNormalizedExpressions,
+  buildEntityPayload,
 } from './EntityEditorPanel.js';
+import { EntityEditHistory } from './EntityEditHistory.js';
+import type { EntitySnapshot } from './EntityEditorMessages.js';
 import { createEmptyModel } from '../model/OntologyModel.js';
 import type { EntitySegment, OWLClass, OWLObjectProperty } from '../model/OntologyModel.js';
 import { OntologyIndex } from '../model/OntologyIndex.js';
@@ -372,5 +375,110 @@ describe('validateManchesterText – entity existence checking (with model + ind
     const result = validateManchesterText("'All or part of' some", model, index);
     expect(result).toHaveLength(1);
     expect(result[0].message).toMatch(/incomplete/i);
+  });
+});
+
+describe('buildEntityPayload', () => {
+  function makeClassModel() {
+    const model = createEmptyModel('http://example.org/test');
+    const cls: OWLClass = {
+      iri: 'http://example.org/test#Animal',
+      type: 'class',
+      labels: { en: ['Animal'] },
+      annotations: {},
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+    model.classes.set(cls.iri, cls);
+    return { model, cls };
+  }
+
+  beforeEach(() => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn().mockReturnValue(undefined),
+    } as unknown as ReturnType<typeof vscode.workspace.getConfiguration>);
+  });
+
+  it('returns undefined for an unknown IRI', () => {
+    const { model } = makeClassModel();
+    expect(buildEntityPayload(model, 'http://example.org/missing')).toBeUndefined();
+  });
+
+  it('returns a snapshot with the entity IRI and type', () => {
+    const { model, cls } = makeClassModel();
+    const snap = buildEntityPayload(model, cls.iri);
+    expect(snap).toBeDefined();
+    expect(snap?.iri).toBe(cls.iri);
+    expect(snap?.entityType).toBe('class');
+  });
+
+  it('snapshot labels match the entity labels', () => {
+    const { model, cls } = makeClassModel();
+    const snap = buildEntityPayload(model, cls.iri);
+    expect(snap?.labels).toEqual({ en: ['Animal'] });
+  });
+
+  it('snapshot includes class axiom fields', () => {
+    const { model, cls } = makeClassModel();
+    cls.superClassIris = ['http://example.org/test#Thing'];
+    const snap = buildEntityPayload(model, cls.iri);
+    expect(snap?.superClassIris).toEqual(['http://example.org/test#Thing']);
+  });
+});
+
+function makeSnap(label: string, iri = 'http://example.org/A'): EntitySnapshot {
+  return {
+    entityType: 'class',
+    iri,
+    label,
+    labels: { en: [label] },
+    annotations: {},
+    displayStyle: 'label',
+    iriLabels: {},
+    expressionEntityRefs: {},
+  };
+}
+
+describe('entityHistoryMap isolation (T016)', () => {
+  it('entity A and entity B histories are independent', () => {
+    const histA = new EntityEditHistory(makeSnap('A0', 'http://example.org/A'));
+    const histB = new EntityEditHistory(makeSnap('B0', 'http://example.org/B'));
+    histA.recordSave(makeSnap('A1', 'http://example.org/A'));
+    expect(histA.canUndo).toBe(true);
+    expect(histB.canUndo).toBe(false);
+  });
+
+  it('saving on entity B does not affect entity A undo stack', () => {
+    const histA = new EntityEditHistory(makeSnap('A0', 'http://example.org/A'));
+    const histB = new EntityEditHistory(makeSnap('B0', 'http://example.org/B'));
+    histA.recordSave(makeSnap('A1', 'http://example.org/A'));
+    histB.recordSave(makeSnap('B1', 'http://example.org/B'));
+    histB.recordSave(makeSnap('B2', 'http://example.org/B'));
+    expect(histA.undo()?.label).toBe('A0');
+    expect(histA.canUndo).toBe(false);
+  });
+
+  it('reloading entity A clears its prior history (canUndo=false, canRedo=false)', () => {
+    const hist = new EntityEditHistory(makeSnap('A0'));
+    hist.recordSave(makeSnap('A1'));
+    hist.undo();
+    expect(hist.canRedo).toBe(true);
+    hist.clear(makeSnap('A0_fresh'));
+    expect(hist.canUndo).toBe(false);
+    expect(hist.canRedo).toBe(false);
+  });
+
+  it('after reload, new saves create fresh history independent of prior checkpoints', () => {
+    const hist = new EntityEditHistory(makeSnap('A0'));
+    hist.recordSave(makeSnap('A1'));
+    hist.recordSave(makeSnap('A2'));
+    hist.clear(makeSnap('A0_fresh'));
+    hist.recordSave(makeSnap('A1_new'));
+    expect(hist.undo()?.label).toBe('A0_fresh');
+    expect(hist.canUndo).toBe(false);
   });
 });

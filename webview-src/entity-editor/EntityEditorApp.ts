@@ -97,6 +97,16 @@ interface ValidationResultMessage {
   errors: { from: number; to: number; severity: 'error' | 'warning'; message: string }[];
 }
 
+interface UndoRedoStateMessage {
+  type: 'undoRedoState';
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+interface AutoSaveMessage {
+  type: 'autoSave';
+}
+
 // ── Global state ──────────────────────────────────────────────────────────────
 
 let currentIri = '';
@@ -1319,6 +1329,20 @@ function buildToolbar(): void {
   const spacer = document.createElement('div');
   spacer.style.cssText = 'margin-left: auto; display: flex; gap: 8px; align-items: center;';
 
+  const undoBtn = document.createElement('button');
+  undoBtn.id = 'btn-undo';
+  undoBtn.title = 'Undo last save (Ctrl+Z / ⌘Z)';
+  undoBtn.textContent = '↩ Undo';
+  undoBtn.disabled = true;
+  undoBtn.addEventListener('click', () => { vscode.postMessage({ type: 'undoRequest' }); });
+
+  const redoBtn = document.createElement('button');
+  redoBtn.id = 'btn-redo';
+  redoBtn.title = 'Redo (Ctrl+Shift+Z / ⌘⇧Z)';
+  redoBtn.textContent = '↪ Redo';
+  redoBtn.style.display = 'none';
+  redoBtn.addEventListener('click', () => { vscode.postMessage({ type: 'redoRequest' }); });
+
   const saveBtn = document.createElement('button');
   saveBtn.id = 'btn-save';
   saveBtn.textContent = 'Save';
@@ -1327,6 +1351,8 @@ function buildToolbar(): void {
   const status = document.createElement('span');
   status.id = 'status';
 
+  spacer.appendChild(undoBtn);
+  spacer.appendChild(redoBtn);
   spacer.appendChild(saveBtn);
   spacer.appendChild(status);
   toolbar.appendChild(badge);
@@ -1699,6 +1725,7 @@ function injectStyles(): void {
     }
     button:hover { background: rgba(128, 128, 128, 0.25); border-color: rgba(128, 128, 128, 0.4); }
     button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
     
     .ghost-btn { background: transparent; border: 1px dashed var(--border); opacity: 0.7; }
     .ghost-btn:hover { opacity: 1; border-style: solid; }
@@ -1945,8 +1972,25 @@ document.body.appendChild(contentEl);
 
 // ── Message handler ───────────────────────────────────────────────────────────
 
+function updateUndoRedoState(canUndo: boolean, canRedo: boolean): void {
+  const undoBtn = document.getElementById('btn-undo') as HTMLButtonElement | null;
+  const redoBtn = document.getElementById('btn-redo') as HTMLButtonElement | null;
+  if (undoBtn) { undoBtn.disabled = !canUndo; }
+  if (redoBtn) { redoBtn.style.display = canRedo ? '' : 'none'; }
+}
+
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
+  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | UndoRedoStateMessage | AutoSaveMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
+
+  if (msg.type === 'autoSave') {
+    handleSave();
+    return;
+  }
+
+  if (msg.type === 'undoRedoState') {
+    updateUndoRedoState(msg.canUndo, msg.canRedo);
+    return;
+  }
 
   if (msg.type === 'completionResult') {
     pendingCompletions.get(msg.requestId)?.(msg.items);
@@ -1994,6 +2038,26 @@ window.addEventListener('message', (event: MessageEvent) => {
     }
     lastSavedStateString = JSON.stringify(getCurrentState());
     checkForChanges();
+  }
+});
+
+// Keyboard shortcuts for undo/redo. Skip when focus is inside a CodeMirror editor
+// so that CodeMirror's own Ctrl+Z (expression-level undo) is not overridden.
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (document.activeElement?.closest('.cm-editor')) { return; }
+  if ((!e.ctrlKey && !e.metaKey) || e.altKey) { return; }
+  if (e.key === 'z' && !e.shiftKey) {
+    const undoBtn = document.getElementById('btn-undo') as HTMLButtonElement | null;
+    if (undoBtn && !undoBtn.disabled) {
+      e.preventDefault();
+      vscode.postMessage({ type: 'undoRequest' });
+    }
+  } else if (e.key === 'z' && e.shiftKey) {
+    const redoBtn = document.getElementById('btn-redo') as HTMLButtonElement | null;
+    if (redoBtn && !redoBtn.disabled) {
+      e.preventDefault();
+      vscode.postMessage({ type: 'redoRequest' });
+    }
   }
 });
 

@@ -122,7 +122,21 @@ export interface SaveDraftErrorMessage {
   invalidExpressions: Array<{ sectionKey: string; index: number; text: string }>;
 }
 
-export type EntityEditorExtToWebview = LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | SaveDraftErrorMessage;
+/** Snapshot of all entity editor fields at a point in time — stored by EntityEditHistory. */
+export type EntitySnapshot = Omit<LoadEntityMessage, 'type' | 'draftExpressions'>;
+
+export interface UndoRequestMessage { type: 'undoRequest' }
+export interface RedoRequestMessage { type: 'redoRequest' }
+export interface UndoRedoStateMessage { type: 'undoRedoState'; canUndo: boolean; canRedo: boolean }
+export interface AutoSaveMessage { type: 'autoSave' }
+
+export type EntityEditorExtToWebview =
+  | LoadEntityMessage
+  | CompletionResultMessage
+  | ValidationResultMessage
+  | SaveDraftErrorMessage
+  | UndoRedoStateMessage
+  | AutoSaveMessage;
 export type EntityEditorWebviewToExt =
   | EntityEditorReadyMessage
   | RequestCompletionMessage
@@ -130,4 +144,6 @@ export type EntityEditorWebviewToExt =
   | NavigateMessage
   | FocusEntityMessage
   | OpenExternalMessage
-  | SaveEntityMessage;
+  | SaveEntityMessage
+  | UndoRequestMessage
+  | RedoRequestMessage;
