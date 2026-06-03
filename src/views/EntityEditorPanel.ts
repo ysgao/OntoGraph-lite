@@ -272,7 +272,7 @@ export function showEntityInfo(
 
   if (panel) {
     // When preserveFocus, update the webview content silently without revealing.
-    if (!preserveFocus) { panel.reveal(vscode.ViewColumn.Beside); }
+    if (!preserveFocus) { panel.reveal(vscode.ViewColumn.Active); }
     sendLoadEntity(panel, model, iri);
     if (needsHistoryInit) {
       const payload = buildEntityPayload(model, iri);
@@ -291,7 +291,7 @@ export function showEntityInfo(
   panel = vscode.window.createWebviewPanel(
     'ontograph.entityInfo',
     'Entity Editor',
-    vscode.ViewColumn.Beside,
+    vscode.ViewColumn.Active,
     {
       enableScripts: true,
       retainContextWhenHidden: true,
