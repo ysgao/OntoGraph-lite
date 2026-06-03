@@ -263,6 +263,7 @@ export function showEntityInfo(
   context: vscode.ExtensionContext,
   model: OntologyModel,
   iri: string,
+  preserveFocus = false,
 ): void {
   const needsHistoryInit = !entityHistoryMap.has(iri);
   if (lastIri !== iri) { clearSyncHighlight(); }
@@ -270,7 +271,8 @@ export function showEntityInfo(
   lastIri = iri;
 
   if (panel) {
-    panel.reveal(vscode.ViewColumn.Beside);
+    // When preserveFocus, update the webview content silently without revealing.
+    if (!preserveFocus) { panel.reveal(vscode.ViewColumn.Beside); }
     sendLoadEntity(panel, model, iri);
     if (needsHistoryInit) {
       const payload = buildEntityPayload(model, iri);
@@ -282,6 +284,9 @@ export function showEntityInfo(
     }
     return;
   }
+
+  // When preserveFocus, don't create the panel — user hasn't opened the entity editor yet.
+  if (preserveFocus) { return; }
 
   panel = vscode.window.createWebviewPanel(
     'ontograph.entityInfo',

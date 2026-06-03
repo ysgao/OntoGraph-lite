@@ -288,7 +288,7 @@ export function activate(context: vscode.ExtensionContext): void {
     return false;
   }
 
-  function revealInTreeView(iri: string, entityType: EntityType): void {
+  function revealInTreeView(iri: string, entityType: EntityType, fromIpc = false): void {
     const opts = { select: true, focus: false, expand: false };
     try {
       switch (entityType) {
@@ -298,33 +298,34 @@ export function activate(context: vscode.ExtensionContext): void {
           if (hasInferredHierarchy(activeModel)) {
             const inferredItem = inferredProvider.makeItem(iri);
             if (inferredItem) {
-              void vscode.commands.executeCommand('ontograph.inferredClasses.focus');
-              void inferredView.reveal(inferredItem, opts);
+              // Skip the focus command when called from IPC — it brings the sidebar to front.
+              if (!fromIpc) { void vscode.commands.executeCommand('ontograph.inferredClasses.focus'); }
+              if (!fromIpc || inferredView.visible) { void inferredView.reveal(inferredItem, opts); }
               break;
             }
           }
           const item = classProvider.makeItem(iri);
-          if (item) { void classView.reveal(item, opts); }
+          if (item && (!fromIpc || classView.visible)) { void classView.reveal(item, opts); }
           break;
         }
         case 'objectProperty': {
           const item = objectPropProvider.makeItem(iri);
-          if (item) { void objectPropView.reveal(item, opts); }
+          if (item && (!fromIpc || objectPropView.visible)) { void objectPropView.reveal(item, opts); }
           break;
         }
         case 'dataProperty': {
           const item = dataPropProvider.makeItem(iri);
-          if (item) { void dataPropView.reveal(item, opts); }
+          if (item && (!fromIpc || dataPropView.visible)) { void dataPropView.reveal(item, opts); }
           break;
         }
         case 'annotationProperty': {
           const item = annotationPropProvider.makeItem(iri);
-          if (item) { void annotationPropView.reveal(item, opts); }
+          if (item && (!fromIpc || annotationPropView.visible)) { void annotationPropView.reveal(item, opts); }
           break;
         }
         case 'individual': {
           const item = individualProvider.makeItem(iri);
-          if (item) { void individualView.reveal(item, opts); }
+          if (item && (!fromIpc || individualView.visible)) { void individualView.reveal(item, opts); }
           break;
         }
       }
@@ -383,11 +384,10 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage(`OntoGraph: Entity not found: ${iri}`);
         return;
       }
-      showEntityInfo(context, activeModel, iri);
-      if (item?.fromIpc) {
-        suppressNextSelection = true;
-      }
-      revealInTreeView(iri, entityType);
+      const fromIpc = item?.fromIpc ?? false;
+      if (fromIpc) { suppressNextSelection = true; }
+      showEntityInfo(context, activeModel, iri, fromIpc);
+      revealInTreeView(iri, entityType, fromIpc);
       updateGraphPanel(activeModel, iri, preferredLang);
     }),
 
