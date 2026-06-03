@@ -55,7 +55,12 @@ export function openGraphView(
       if (msg.type === 'ready') {
         sendGraph(panel!, model, focusIri, defaultDepth, { showInferred: true, showDisjoint: false }, preferredLang);
       } else if (msg.type === 'nodeClicked') {
-        // Nothing for now — could reveal in tree
+        const sctid = /\/id\/(\d+)$/.exec(msg.iri)?.[1];
+        const id = sctid ?? msg.iri;
+        vscode.commands.executeCommand(
+          'ontographEditor.ipcRoute',
+          { command: 'GRAPH_NODE_SELECT', payload: { id } }
+        ).then(undefined, () => {});
       } else if (msg.type === 'requestNeighborhood') {
         const r = msg as RequestNeighborhoodMessage;
         sendGraph(panel!, model, r.iri, r.depth, { showInferred: r.showInferred, showDisjoint: r.showDisjoint }, preferredLang);

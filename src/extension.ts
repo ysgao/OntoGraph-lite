@@ -11,7 +11,7 @@ import { classifyOntology } from './commands/classifyOntology';
 import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity } from './commands/addEntity';
-import { openGraphView } from './commands/openVisualization';
+import { openGraphView, updateGraphPanel } from './commands/openVisualization';
 import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
@@ -48,14 +48,29 @@ export function activate(context: vscode.ExtensionContext): void {
   const annotationPropProvider = new AnnotationPropertyProvider();
   const individualProvider = new IndividualBrowserProvider();
 
+  let suppressNextSelection = false;
+
+  function extractSctid(iri: string): string | undefined {
+    return /\/id\/(\d+)$/.exec(iri)?.[1];
+  }
+
   function onEntitySelected(item: unknown): void {
     const iri = (item as { iri?: string } | undefined)?.iri;
     if (!iri || !activeModel) { return; }
+    if (suppressNextSelection) {
+      suppressNextSelection = false;
+      return;
+    }
     showEntityInfo(context, activeModel, iri);
     if (activeModel.classes.has(iri)) {
       classProvider.setFocus(iri);
       inferredProvider.setFocus(iri);
     }
+    const id = extractSctid(iri) ?? iri;
+    vscode.commands.executeCommand(
+      'ontographEditor.ipcRoute',
+      { command: 'GRAPH_NODE_SELECT', payload: { id } }
+    ).then(undefined, () => {});
   }
 
   function entityTypeForIri(iri: string): EntityType | undefined {
@@ -360,7 +375,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (activeModel) { void executeReload(); }
     }),
 
-    vscode.commands.registerCommand('ontograph.focusEntity', (item?: { iri?: string }) => {
+    vscode.commands.registerCommand('ontograph.focusEntity', (item?: { iri?: string; fromIpc?: boolean }) => {
       const iri = item?.iri;
       if (!iri || !activeModel) { return; }
       const entityType = entityTypeForIri(iri);
@@ -369,7 +384,11 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       showEntityInfo(context, activeModel, iri);
+      if (item?.fromIpc) {
+        suppressNextSelection = true;
+      }
       revealInTreeView(iri, entityType);
+      updateGraphPanel(activeModel, iri, preferredLang);
     }),
 
     vscode.commands.registerCommand('ontograph.loadOntologyFile', (prefillUri?: vscode.Uri) => {
