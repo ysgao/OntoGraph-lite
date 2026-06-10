@@ -55,7 +55,7 @@ export function openGraphView(
       if (msg.type === 'ready') {
         sendGraph(panel!, model, focusIri, defaultDepth, { showInferred: true, showDisjoint: false }, preferredLang);
       } else if (msg.type === 'nodeClicked') {
-        // Nothing for now — could reveal in tree
+        // intentional no-op
       } else if (msg.type === 'requestNeighborhood') {
         const r = msg as RequestNeighborhoodMessage;
         sendGraph(panel!, model, r.iri, r.depth, { showInferred: r.showInferred, showDisjoint: r.showDisjoint }, preferredLang);
@@ -64,16 +64,6 @@ export function openGraphView(
     undefined,
     context.subscriptions,
   );
-}
-
-/** Update the graph panel when the model changes (called from extension.ts) */
-export function updateGraphPanel(
-  model: OntologyModel,
-  focusIri?: string,
-  preferredLang = 'en',
-): void {
-  if (!panel) { return; }
-  sendGraph(panel, model, focusIri, 2, { showInferred: true, showDisjoint: false }, preferredLang);
 }
 
 // ── Graph data extraction ─────────────────────────────────────────────────────
