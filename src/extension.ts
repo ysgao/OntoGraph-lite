@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { ClassHierarchyProvider } from './views/ClassHierarchyProvider';
 import { InferredHierarchyProvider } from './views/InferredHierarchyProvider';
@@ -372,8 +373,11 @@ export function activate(context: vscode.ExtensionContext): void {
       revealInTreeView(iri, entityType);
     }),
 
-    vscode.commands.registerCommand('ontograph.loadOntologyFile', (prefillUri?: vscode.Uri) => {
-      void loadOntologyFile(onLoadedCallback, prefillUri);
+    vscode.commands.registerCommand('ontograph.loadOntologyFile', async (prefillUri?: vscode.Uri) => {
+      const loadedUri = await loadOntologyFile(onLoadedCallback, prefillUri, openWorkspaceFolderOnUriResolved);
+      if (loadedUri) {
+        openWorkspaceFolderAfterLoad(loadedUri);
+      }
     }),
 
     vscode.commands.registerCommand('ontograph.classifyOntology', async () => {
@@ -519,6 +523,61 @@ export function activate(context: vscode.ExtensionContext): void {
     statsBar.tooltip = `OntoGraph: ${classes.size} classes · ${objectProperties.size} object properties · ${dataProperties.size} data properties · ${individuals.size} individuals\nClick for details`;
     statsBar.show();
   };
+
+  /**
+   * Phase 1 — called immediately when the file URI is resolved (before read/parse).
+   * If no workspace folder exists, saves the URI to globalState and opens the
+   * parent folder as workspace. This causes the extension host to restart; the
+   * read/parse below that point is abandoned. On re-activation, activate() finds
+   * pendingLoadUri and auto-reloads the file into the now-established workspace.
+   * If workspace folders already exist, this is a no-op (Phase 2 handles that case).
+   */
+  async function openWorkspaceFolderOnUriResolved(fileUri: vscode.Uri): Promise<void> {
+    try {
+      if (!fileUri.path || !fileUri.fsPath) return;
+      if (vscode.workspace.workspaceFolders?.length) return; // workspace exists — Phase 2 handles it
+      await context.globalState.update('ontograph.pendingLoadUri', fileUri.toString());
+      const folderUri = vscode.Uri.joinPath(fileUri, '..');
+      vscode.workspace.updateWorkspaceFolders(0, 0, { uri: folderUri });
+      // Extension host restarts here; loadOntologyFile is abandoned.
+      // activate() auto-reloads from pendingLoadUri.
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  /**
+   * Phase 2 — called after a successful load. Adds the file's parent folder to
+   * an existing multi-root workspace if not already contained. This is safe (no
+   * restart) because adding to an existing workspace never triggers a host reload.
+   */
+  function openWorkspaceFolderAfterLoad(fileUri: vscode.Uri): void {
+    try {
+      if (!fileUri.path || !fileUri.fsPath) return;
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders || folders.length === 0) return; // Phase 1 handles the no-workspace case
+      const fsPath = fileUri.fsPath;
+      const contained = folders.some(
+        f => fsPath.startsWith(f.uri.fsPath + path.sep) || fsPath === f.uri.fsPath,
+      );
+      if (!contained) {
+        const folderUri = vscode.Uri.joinPath(fileUri, '..');
+        vscode.workspace.updateWorkspaceFolders(folders.length, 0, { uri: folderUri });
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  // If a previous "Open Folder" click triggered a workspace restart,
+  // auto-reload the ontology that was being viewed before the restart.
+  const pendingLoadUri = context.globalState.get<string>('ontograph.pendingLoadUri');
+  if (pendingLoadUri) {
+    void context.globalState.update('ontograph.pendingLoadUri', undefined);
+    setTimeout(() => {
+      void loadOntologyFile(onLoadedCallback, vscode.Uri.parse(pendingLoadUri));
+    }, 1500);
+  }
 
   // Start LSP eagerly so completions/diagnostics work in any ontology file the
   // user opens via VS Code's native document path — independent of whether
