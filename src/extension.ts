@@ -635,7 +635,7 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       for (const [parent, child] of result.hierarchy) {
         if (!nodeMap.has(parent)) { nodeMap.set(parent, { iri: parent, label: getLabel(parent), children: [] }); }
         if (!nodeMap.has(child)) { nodeMap.set(child, { iri: child, label: getLabel(child), children: [] }); }
-        nodeMap.get(parent)!.children.push(nodeMap.get(child)!);
+        nodeMap.get(parent)!.children.push(child);
         childSet.add(child);
       }
       const roots = [...nodeMap.values()].filter(n => !childSet.has(n.iri));

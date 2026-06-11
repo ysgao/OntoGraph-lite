@@ -12,7 +12,7 @@ export interface ClassificationResult {
 export interface ClassHierarchyNode {
   iri: string;
   label: string | null;
-  children: ClassHierarchyNode[];
+  children: string[];
 }
 
 export interface ConsistencyResult {
