@@ -1,0 +1,35 @@
+{
+  "name": "@ysgao/ontograph-cli",
+  "version": "0.1.0",
+  "description": "CLI for OntoGraph OWL ontology operations — for AI tools (Claude Code, Codex) and developers",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "dist/main.js",
+  "bin": {
+    "ontograph": "dist/main.js"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "audit": "npm audit --omit=dev"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

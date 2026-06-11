@@ -15,11 +15,18 @@ npm run build:watch     # Watch mode
 npm run compile         # Type-check extension (no emit)
 npm run compile:webview # Type-check webview bundles (separate tsconfig)
 npm run build:parser    # Regenerate Manchester syntax parser from Peggy grammar
-npm run package         # Create .vsix for VS Code marketplace
+npm run package         # Create .vsix for VS Code marketplace (--no-dependencies)
 ```
 or 
 ```bash
 npm run build && npm run build:watch && npm run compile && npm run compile:webview && npm run build:parser && npm run package
+```
+
+### CLI Package (`cli/`)
+```bash
+pnpm --filter ontograph-cli build   # Bundle cli/dist/main.js via esbuild
+pnpm --filter ontograph-cli test    # Run CLI unit + integration tests (Vitest)
+node cli/dist/main.js --help        # Try the CLI locally
 ```
 
 ### Java Reasoner Server
@@ -171,6 +178,28 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `pizza.owl` — OWL/XML format example (~163 KB)
 - `bfo-classes-only.ofn` — minimal BFO classes
 
+## OWL File Operations — Use the CLI
+
+When working with `.ofn`, `.omn`, `.ttl`, `.owl`, `.owx` files, use `ontograph` rather than reading raw text:
+
+```bash
+ontograph parse <file>                    # entity counts, format, ontology IRI
+ontograph search <file> <query>           # find entities by label or IRI substring
+ontograph validate <file>                 # structural error check
+ontograph convert <file> --to functional  # normalize to OWL Functional Syntax
+```
+
+All output is JSON on stdout. Parse it directly. Exit 0 = success, non-zero = error (`errorCode` field identifies type).
+
+Bridge commands (require OntoGraph active in VS Code):
+```bash
+ontograph classify             # run reasoner classification
+ontograph check-consistency    # OWL 2 DL consistency check
+ontograph dl-query "<expr>"    # Manchester Syntax DL query
+```
+
+Install: `npm install -g @ysgao/ontograph-cli`
+
 ## Recent Changes
 - 014-entity-editor-undo-redo: Added TypeScript 5 (strict mode), Node.js (extension host), Browser (webview iframe) + VS Code Extension API (existing), existing webview message bus (`postMessage`)
 - 013-entity-search-partial-match: Cross-field token matching across `rdfs:label`/`skos:prefLabel`/`skos:altLabel` (tokens may span multiple fields); entity-name exact match via `localNameToIri` index (score 200, ranks first); local name removed from substring search (prevents partial SNOMED ID matches); anatomy.owl benchmark added
@@ -179,3 +208,8 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 ## Active Technologies
 - TypeScript 5 (strict mode), Node.js (extension host), Browser (webview iframe) + VS Code Extension API (existing), existing webview message bus (`postMessage`) (014-entity-editor-undo-redo)
 - In-memory only — `Map<entityIri, EntityEditHistory>` on the extension host; no persistence (014-entity-editor-undo-redo)
+
+<!-- SPECKIT START -->
+## Active Feature Plan
+- **018-ontograph-cli**: [Implementation Plan](specs/018-ontograph-cli/plan.md) — Standalone CLI package (`cli/`) for AI tools; pnpm workspace; core commands + extension bridge server
+<!-- SPECKIT END -->

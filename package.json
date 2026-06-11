@@ -360,7 +360,7 @@
     "compile:webview": "tsc --noEmit -p tsconfig.webview.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package": "npx @vscode/vsce package"
+    "package": "npx @vscode/vsce package --no-dependencies"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.2",

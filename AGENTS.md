@@ -15,7 +15,15 @@ npm run build:watch     # Watch mode
 npm run compile         # Type-check extension (no emit)
 npm run compile:webview # Type-check webview bundles (separate tsconfig)
 npm run build:parser    # Regenerate Manchester syntax parser from Peggy grammar
-npm run package         # Create .vsix for VS Code marketplace
+npm run package         # Create .vsix for VS Code marketplace (--no-dependencies)
+```
+
+### CLI Package (`cli/`)
+```bash
+pnpm --filter ontograph-cli build   # Bundle cli/dist/main.js
+pnpm --filter ontograph-cli test    # Run CLI tests
+node cli/dist/main.js --help        # Try CLI locally
+node cli/dist/main.js parse <file>  # Core command example
 ```
 
 ### Java Reasoner Server
@@ -39,6 +47,12 @@ Test files: `src/parser/*.test.ts`, `src/parser/__tests__/*.test.ts`, and `src/s
 ## Architecture
 
 Three-tier design: TypeScript extension → Java reasoning server (JSON-RPC on stdin/stdout).
+
+**CLI Package** (`cli/`): Standalone npm package `ontograph-cli` for AI tools. Two categories of commands:
+- **Core** (no VS Code): parse, search, validate, convert — imports directly from `src/parser/`, `src/model/`, `src/serializer/` via `@core` alias.
+- **Bridge** (requires running extension): classify, check-consistency, dl-query — connects to `src/bridge/BridgeServer.ts` via a Unix domain socket (path in `~/.ontograph-lite/bridge.json`).
+
+`src/api.ts` defines `OntoGraphApi` — returned by `activate()` and used by `BridgeServer` as its dispatch target.
 
 **1. Extension Layer** (`src/extension.ts`)
 Activates the extension, registers commands and tree views (Classes, Properties, Individuals, Inferred Hierarchy), and holds the in-memory `OntologyModel` and `OntologyIndex` as module-level globals.
@@ -166,6 +180,28 @@ OWL Functional Syntax (`.ofn`), Manchester Syntax (`.omn`), OWL/XML (`.owl`/`.ow
 - `bfo-core.ofn` — large (~94 KB) BFO ontology for performance testing
 - `pizza.owl` — OWL/XML format example (~163 KB)
 - `bfo-classes-only.ofn` — minimal BFO classes
+
+## OWL File Operations — Use the CLI
+
+When working with `.ofn`, `.omn`, `.ttl`, `.owl`, `.owx` files, use `ontograph` rather than reading raw text:
+
+```bash
+ontograph parse <file>                    # entity counts, format, ontology IRI
+ontograph search <file> <query>           # find entities by label or IRI substring
+ontograph validate <file>                 # structural error check
+ontograph convert <file> --to functional  # normalize to OWL Functional Syntax
+```
+
+All output is JSON on stdout. Exit 0 = success, non-zero = error (`errorCode` in JSON identifies type).
+
+Bridge commands (require OntoGraph active in VS Code or compatible fork):
+```bash
+ontograph classify             # run reasoner classification
+ontograph check-consistency    # OWL 2 DL consistency check
+ontograph dl-query "<expr>"    # Manchester Syntax DL query
+```
+
+Install: `npm install -g @ysgao/ontograph-cli`
 
 ## Recent Changes
 - 012-load-large-ontology: `loadOntologyFile` command + toolbar button (`$(folder-opened)`) loads any-sized ontology via `vscode.workspace.fs.readFile`; `createLargeFileListener` shows notification for VS Code large-file conditions; `reloadOntology` refactored from `openTextDocument` to `workspace.fs.readFile`; `setupFileWatcher` extracted from `handleDocument` to shared helper

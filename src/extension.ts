@@ -26,6 +26,8 @@ import { applyIncrementalReload } from './sync/incrementalReload';
 import { buildModelSegmentIndexAsync } from './model/SegmentIndex';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
+import type { OntoGraphApi } from './api';
+import { BridgeServer } from './bridge/BridgeServer';
 import { ParserRegistry } from './parser/ParserRegistry';
 import { buildModelSegmentIndex } from './model/SegmentIndex';
 
@@ -36,7 +38,7 @@ let activeIndex: OntologyIndex | undefined;
 let activeFileWatcher: vscode.FileSystemWatcher | undefined;
 let reloadDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): OntoGraphApi {
   outputChannel = vscode.window.createOutputChannel('OntoGraph');
   context.subscriptions.push(outputChannel);
   outputChannel.appendLine('OntoGraph activating…');
@@ -610,6 +612,93 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   outputChannel.appendLine('OntoGraph ready. Open an .ofn, .omn, or .owl file to begin.');
+
+  const api: OntoGraphApi = {
+    getActiveModel: () => activeModel ?? null,
+    getActiveIndex: () => activeIndex ?? null,
+
+    async classify() {
+      const model = activeModel;
+      if (!model) { throw new Error('No ontology loaded'); }
+      const engine = vscode.workspace.getConfiguration('ontograph').get<string>('reasoner.engine', 'auto');
+      const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
+      const result = await reasonerBridge.classify('functional', serializeToFunctional(model), engine);
+      const index = activeIndex;
+      const getLabel = (iri: string): string | null => {
+        const entity = index?.getByIri(iri);
+        if (!entity) { return null; }
+        const labels = entity.labels['en'] ?? entity.labels[''] ?? Object.values(entity.labels)[0];
+        return labels?.[0] ?? null;
+      };
+      const nodeMap = new Map<string, import('./api').ClassHierarchyNode>();
+      const childSet = new Set<string>();
+      for (const [parent, child] of result.hierarchy) {
+        if (!nodeMap.has(parent)) { nodeMap.set(parent, { iri: parent, label: getLabel(parent), children: [] }); }
+        if (!nodeMap.has(child)) { nodeMap.set(child, { iri: child, label: getLabel(child), children: [] }); }
+        nodeMap.get(parent)!.children.push(nodeMap.get(child)!);
+        childSet.add(child);
+      }
+      const roots = [...nodeMap.values()].filter(n => !childSet.has(n.iri));
+      return {
+        ontologyIri: model.metadata.iri ?? null,
+        classCount: model.classes.size,
+        inferredSubclassRelations: result.hierarchy.length,
+        reasoner: 'elk',
+        hierarchy: roots,
+      };
+    },
+
+    async checkConsistency() {
+      const model = activeModel;
+      if (!model) { throw new Error('No ontology loaded'); }
+      const engine = vscode.workspace.getConfiguration('ontograph').get<string>('reasoner.engine', 'auto');
+      const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
+      const result = await reasonerBridge.checkConsistency('functional', serializeToFunctional(model));
+      return {
+        ontologyIri: model.metadata.iri ?? null,
+        consistent: result.consistent,
+        reasoner: 'elk',
+        explanation: result.explanation ? result.explanation.join('\n') : null,
+      };
+    },
+
+    async dlQuery(expression: string) {
+      const model = activeModel;
+      if (!model) { throw new Error('No ontology loaded'); }
+      const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
+      const result = await reasonerBridge.dlQuery(
+        'functional',
+        serializeToFunctional(model),
+        null,
+        expression,
+        ['superClasses', 'equivalentClasses', 'subClasses', 'instances'],
+      );
+      const index = activeIndex;
+      const toRef = (iri: string) => {
+        const entity = index?.getByIri(iri);
+        const labels = entity?.labels['en'] ?? entity?.labels[''] ?? (entity ? Object.values(entity.labels)[0] : undefined);
+        return { iri, label: labels?.[0] ?? null };
+      };
+      return {
+        expression,
+        superClasses: result.superClasses.map(toRef),
+        equivalentClasses: result.equivalentClasses.map(toRef),
+        subClasses: result.subClasses.map(toRef),
+        instances: result.instances.map(toRef),
+      };
+    },
+  };
+
+  const bridgeServer = new BridgeServer();
+  bridgeServer.start(api).catch(err => {
+    outputChannel.appendLine(`[BridgeServer] Failed to start: ${err}`);
+  });
+
+  context.subscriptions.push({
+    dispose: () => { bridgeServer.stop().catch(() => {}); },
+  });
+
+  return api;
 }
 
 export function deactivate(): void {

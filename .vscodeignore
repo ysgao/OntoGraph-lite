@@ -19,6 +19,8 @@ esbuild.mjs
 .eslintrc*
 vitest.config*
 **/*.test.ts
+# CLI package — published separately, excluded from VSIX
+cli/**
 # Internal project docs and tooling
 .claude/**
 .specify/**
