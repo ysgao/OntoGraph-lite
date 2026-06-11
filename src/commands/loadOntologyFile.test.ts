@@ -10,6 +10,8 @@ const {
   mockShowInformationMessage,
   mockShowErrorMessage,
   mockParseAsync,
+  mockUpdateWorkspaceFolders,
+  workspaceState,
 } = vi.hoisted(() => ({
   mockShowOpenDialog: vi.fn(),
   mockReadFile: vi.fn(),
@@ -18,6 +20,8 @@ const {
   mockShowInformationMessage: vi.fn(),
   mockShowErrorMessage: vi.fn(),
   mockParseAsync: vi.fn(),
+  mockUpdateWorkspaceFolders: vi.fn(),
+  workspaceState: { folders: undefined as unknown as Array<{ uri: { fsPath: string } }> | undefined },
 }));
 
 vi.mock('../parser/ParserRegistry', () => ({
@@ -32,18 +36,31 @@ vi.mock('vscode', () => ({
     withProgress: mockWithProgress,
   },
   workspace: {
+    get workspaceFolders() { return workspaceState.folders; },
+    updateWorkspaceFolders: mockUpdateWorkspaceFolders,
     fs: { readFile: mockReadFile, stat: mockStat },
+  },
+  Uri: {
+    joinPath(base: { path: string; fsPath: string }, ...segs: string[]) {
+      if (!base.path) throw new Error('[UriError]: cannot call joinPath on URI without path');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pathMod = require('path') as typeof import('path');
+      const resolved = pathMod.resolve(base.path, ...segs);
+      return { path: resolved, fsPath: resolved, toString: () => `file://${resolved}` };
+    },
   },
   ProgressLocation: { Notification: 15 },
 }));
 
-const fakeUri = { fsPath: '/test/animals.ofn', toString: () => 'file:///test/animals.ofn' };
+const fakeUri = { fsPath: '/test/animals.ofn', path: '/test/animals.ofn', toString: () => 'file:///test/animals.ofn' };
 const fakeBytes = new TextEncoder().encode('Ontology(<http://example.org/animals>)');
 const fakeModel = { sourceUri: 'file:///test/animals.ofn' } as unknown as OntologyModel;
 
 describe('loadOntologyFile', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    workspaceState.folders = undefined;
+    mockShowInformationMessage.mockResolvedValue(undefined);
     mockShowOpenDialog.mockResolvedValue([fakeUri]);
     mockReadFile.mockResolvedValue(fakeBytes);
     mockStat.mockResolvedValue({ mtime: 1000, size: fakeBytes.length, type: 1, ctime: 0 });
@@ -163,10 +180,22 @@ describe('loadOntologyFile', () => {
   });
 
   it('skips file picker and uses prefillUri directly', async () => {
-    const prefillUri = { fsPath: '/test/large.owl', toString: () => 'file:///test/large.owl' };
+    const prefillUri = { fsPath: '/test/large.owl', path: '/test/large.owl', toString: () => 'file:///test/large.owl' };
     await loadOntologyFile(vi.fn(), prefillUri as never);
     expect(mockShowOpenDialog).not.toHaveBeenCalled();
     expect(mockReadFile).toHaveBeenCalledWith(prefillUri);
+  });
+
+  it('ignores prefillUri and opens dialog when prefillUri has no fsPath', async () => {
+    const badUri = { path: '/some/path', toString: () => 'file:///some/path' };
+    await loadOntologyFile(vi.fn(), badUri as never);
+    expect(mockShowOpenDialog).toHaveBeenCalled();
+  });
+
+  it('ignores prefillUri and opens dialog when prefillUri is a directory (no ontology extension)', async () => {
+    const dirUri = { fsPath: '/Users/foo/ontologies/', path: '/Users/foo/ontologies/', toString: () => 'file:///Users/foo/ontologies/' };
+    await loadOntologyFile(vi.fn(), dirUri as never);
+    expect(mockShowOpenDialog).toHaveBeenCalled();
   });
 
   it('does not call onLoaded when read fails', async () => {
@@ -203,6 +232,53 @@ describe('loadOntologyFile', () => {
       expect.objectContaining({ title: expect.stringContaining('snomed.owl') }),
       expect.any(Function),
     );
+  });
+
+  describe('return value', () => {
+    it('T002: returns loaded URI on success', async () => {
+      const result = await loadOntologyFile(vi.fn());
+      expect(result).toEqual(fakeUri);
+    });
+
+    it('onUriResolved called with resolved URI before load starts', async () => {
+      const onUriResolved = vi.fn();
+      await loadOntologyFile(vi.fn(), undefined, onUriResolved);
+      expect(onUriResolved).toHaveBeenCalledOnce();
+      expect(onUriResolved).toHaveBeenCalledWith(fakeUri);
+      // Must be called before readFile
+      expect(onUriResolved.mock.invocationCallOrder[0]).toBeLessThan(
+        mockReadFile.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('T003: returns undefined when picker is cancelled', async () => {
+      mockShowOpenDialog.mockResolvedValueOnce(undefined);
+      const result = await loadOntologyFile(vi.fn());
+      expect(result).toBeUndefined();
+    });
+
+    it('T004: returns undefined when read fails', async () => {
+      mockReadFile.mockRejectedValueOnce(new Error('permission denied'));
+      const result = await loadOntologyFile(vi.fn());
+      expect(result).toBeUndefined();
+    });
+
+    it('T005: returns undefined when parse fails', async () => {
+      mockParseAsync.mockRejectedValueOnce(new Error('parse failure'));
+      const result = await loadOntologyFile(vi.fn());
+      expect(result).toBeUndefined();
+    });
+
+    it('T006-guard: falls through to open dialog when prefillUri has empty fsPath', async () => {
+      const noPathUri = { fsPath: '', path: '', toString: () => '' };
+      await loadOntologyFile(vi.fn(), noPathUri as never);
+      expect(mockShowOpenDialog).toHaveBeenCalled();
+    });
+
+    it('does not call updateWorkspaceFolders (workspace management delegated to extension.ts)', async () => {
+      await loadOntologyFile(vi.fn());
+      expect(mockUpdateWorkspaceFolders).not.toHaveBeenCalled();
+    });
   });
 });
 
