@@ -19,3 +19,12 @@ esbuild.mjs
 .eslintrc*
 vitest.config*
 **/*.test.ts
+# Internal project docs and tooling
+.claude/**
+.specify/**
+conductor/**
+specs/**
+*.md
+.gitignore
+scratch_test.ts
+test-regex.js

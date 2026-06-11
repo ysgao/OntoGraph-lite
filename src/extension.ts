@@ -12,7 +12,7 @@ import { classifyOntology } from './commands/classifyOntology';
 import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity } from './commands/addEntity';
-import { openGraphView } from './commands/openVisualization';
+import { openGraphView, updateGraphPanel } from './commands/openVisualization';
 import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
@@ -49,14 +49,29 @@ export function activate(context: vscode.ExtensionContext): void {
   const annotationPropProvider = new AnnotationPropertyProvider();
   const individualProvider = new IndividualBrowserProvider();
 
+  let suppressNextSelection = false;
+
+  function extractSctid(iri: string): string | undefined {
+    return /\/id\/(\d+)$/.exec(iri)?.[1];
+  }
+
   function onEntitySelected(item: unknown): void {
     const iri = (item as { iri?: string } | undefined)?.iri;
     if (!iri || !activeModel) { return; }
+    if (suppressNextSelection) {
+      suppressNextSelection = false;
+      return;
+    }
     showEntityInfo(context, activeModel, iri);
     if (activeModel.classes.has(iri)) {
       classProvider.setFocus(iri);
       inferredProvider.setFocus(iri);
     }
+    const id = extractSctid(iri) ?? iri;
+    vscode.commands.executeCommand(
+      'ontographEditor.ipcRoute',
+      { command: 'GRAPH_NODE_SELECT', payload: { id } }
+    ).then(undefined, () => {});
   }
 
   function entityTypeForIri(iri: string): EntityType | undefined {
@@ -274,7 +289,7 @@ export function activate(context: vscode.ExtensionContext): void {
     return false;
   }
 
-  function revealInTreeView(iri: string, entityType: EntityType): void {
+  function revealInTreeView(iri: string, entityType: EntityType, fromIpc = false): void {
     const opts = { select: true, focus: false, expand: false };
     try {
       switch (entityType) {
@@ -284,33 +299,34 @@ export function activate(context: vscode.ExtensionContext): void {
           if (hasInferredHierarchy(activeModel)) {
             const inferredItem = inferredProvider.makeItem(iri);
             if (inferredItem) {
-              void vscode.commands.executeCommand('ontograph.inferredClasses.focus');
-              void inferredView.reveal(inferredItem, opts);
+              // Skip the focus command when called from IPC — it brings the sidebar to front.
+              if (!fromIpc) { void vscode.commands.executeCommand('ontograph.inferredClasses.focus'); }
+              if (!fromIpc || inferredView.visible) { void inferredView.reveal(inferredItem, opts); }
               break;
             }
           }
           const item = classProvider.makeItem(iri);
-          if (item) { void classView.reveal(item, opts); }
+          if (item && (!fromIpc || classView.visible)) { void classView.reveal(item, opts); }
           break;
         }
         case 'objectProperty': {
           const item = objectPropProvider.makeItem(iri);
-          if (item) { void objectPropView.reveal(item, opts); }
+          if (item && (!fromIpc || objectPropView.visible)) { void objectPropView.reveal(item, opts); }
           break;
         }
         case 'dataProperty': {
           const item = dataPropProvider.makeItem(iri);
-          if (item) { void dataPropView.reveal(item, opts); }
+          if (item && (!fromIpc || dataPropView.visible)) { void dataPropView.reveal(item, opts); }
           break;
         }
         case 'annotationProperty': {
           const item = annotationPropProvider.makeItem(iri);
-          if (item) { void annotationPropView.reveal(item, opts); }
+          if (item && (!fromIpc || annotationPropView.visible)) { void annotationPropView.reveal(item, opts); }
           break;
         }
         case 'individual': {
           const item = individualProvider.makeItem(iri);
-          if (item) { void individualView.reveal(item, opts); }
+          if (item && (!fromIpc || individualView.visible)) { void individualView.reveal(item, opts); }
           break;
         }
       }
@@ -361,7 +377,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (activeModel) { void executeReload(); }
     }),
 
-    vscode.commands.registerCommand('ontograph.focusEntity', (item?: { iri?: string }) => {
+    vscode.commands.registerCommand('ontograph.focusEntity', (item?: { iri?: string; fromIpc?: boolean }) => {
       const iri = item?.iri;
       if (!iri || !activeModel) { return; }
       const entityType = entityTypeForIri(iri);
@@ -369,8 +385,11 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage(`OntoGraph: Entity not found: ${iri}`);
         return;
       }
-      showEntityInfo(context, activeModel, iri);
-      revealInTreeView(iri, entityType);
+      const fromIpc = item?.fromIpc ?? false;
+      if (fromIpc) { suppressNextSelection = true; }
+      showEntityInfo(context, activeModel, iri, fromIpc);
+      revealInTreeView(iri, entityType, fromIpc);
+      updateGraphPanel(activeModel, iri, preferredLang);
     }),
 
     vscode.commands.registerCommand('ontograph.loadOntologyFile', async (prefillUri?: vscode.Uri) => {

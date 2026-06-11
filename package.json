@@ -164,6 +164,10 @@
         "command": "ontograph.loadOntologyFile",
         "title": "OntoGraph: Load Ontology File…",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "ontograph.focusEntity",
+        "title": "OntoGraph: Focus Entity by IRI"
       }
     ],
     "menus": {
