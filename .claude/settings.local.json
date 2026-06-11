@@ -44,7 +44,16 @@
       "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline origin/main..HEAD)",
       "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline main..HEAD)",
       "Bash(git merge *)",
-      "Read(//Users/yoga/**)"
+      "Read(//Users/yoga/**)",
+      "Bash(pnpm --version)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm --filter ontograph-cli install)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm exec *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(pnpm *)",
+      "Bash(awk '{print $5}')",
+      "Bash(unzip -l /Users/yoga/JavaApp/OntoGraph-lite/ontograph-lite-0.1.11.vsix)"
     ]
   }
 }

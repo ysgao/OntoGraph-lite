@@ -21,6 +21,8 @@ vitest.config*
 **/*.test.ts
 # CLI package — published separately, excluded from VSIX
 cli/**
+pnpm-lock.yaml
+pnpm-workspace.yaml
 # Internal project docs and tooling
 .claude/**
 .specify/**
