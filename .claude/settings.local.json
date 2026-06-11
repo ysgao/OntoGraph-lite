@@ -43,7 +43,8 @@
       "Skill(speckit.specify)",
       "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline origin/main..HEAD)",
       "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite log --oneline main..HEAD)",
-      "Bash(git merge *)"
+      "Bash(git merge *)",
+      "Read(//Users/yoga/**)"
     ]
   }
 }
