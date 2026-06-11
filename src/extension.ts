@@ -12,7 +12,7 @@ import { classifyOntology } from './commands/classifyOntology';
 import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity } from './commands/addEntity';
-import { openGraphView, updateGraphPanel } from './commands/openVisualization';
+import { openGraphView } from './commands/openVisualization';
 import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
@@ -389,7 +389,6 @@ export function activate(context: vscode.ExtensionContext): void {
       if (fromIpc) { suppressNextSelection = true; }
       showEntityInfo(context, activeModel, iri, fromIpc);
       revealInTreeView(iri, entityType, fromIpc);
-      updateGraphPanel(activeModel, iri, preferredLang);
     }),
 
     vscode.commands.registerCommand('ontograph.loadOntologyFile', async (prefillUri?: vscode.Uri) => {
