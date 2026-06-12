@@ -19,12 +19,26 @@ npx @ysgao/ontograph-cli parse ./ontology.ofn
 
 **Requirements**: Node.js 18+. No VS Code required for core commands.
 
+**Claude Code**: installing globally automatically registers the `/ontograph` skill in `~/.claude/skills/ontograph/`. Restart Claude Code after install to activate it.
+
+**Codex**: add to your `AGENTS.md` or `~/.codex/instructions.md`:
+
+```markdown
+## OWL Ontology Operations
+Use the `ontograph` CLI when working with OWL files (.ofn, .omn, .ttl, .owl, .owx):
+  ontograph parse <file>                    # entity counts, format, ontology IRI
+  ontograph search <file> <query>           # find entities by label or IRI substring
+  ontograph validate <file>                 # structural error check
+  ontograph convert <file> --to functional  # normalize to OWL Functional Syntax
+All output is JSON on stdout. Exit 0 = success, non-zero = error (errorCode field identifies type).
+```
+
 ## Quick start
 
 ```bash
 ontograph --help
 ontograph parse ./ontology.ofn
-ontograph search ./snomed.owl "Finding site" --limit 5
+ontograph search ./snomed.owl "Liver structure" --limit 5
 ```
 
 ---

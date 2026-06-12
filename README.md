@@ -64,7 +64,7 @@ npx @ysgao/ontograph-cli parse ./ontology.ofn
 
 Verify install:
 ```bash
-ontograph --version   # 0.1.0
+ontograph --version   # 0.1.11
 ontograph --help
 ```
 

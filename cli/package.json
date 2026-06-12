@@ -1,6 +1,6 @@
 {
   "name": "@ysgao/ontograph-cli",
-  "version": "0.1.0",
+  "version": "0.1.12",
   "description": "CLI for OntoGraph OWL ontology operations — for AI tools (Claude Code, Codex) and developers",
   "license": "Apache-2.0",
   "engines": {
@@ -12,12 +12,16 @@
   },
   "files": [
     "dist/",
-    "README.md"
+    "README.md",
+    "SKILL.md",
+    "detail.py",
+    "postinstall.js"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
+    "postinstall": "node postinstall.js",
     "build": "node esbuild.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
