@@ -187,4 +187,16 @@ describe('applyWorkspaceEditsToText (hint/fast path)', () => {
     expect(out[0].oldEndChar).toBe(12);
     expect(out[0].newText).toBe('ZZZ\n');
   });
+
+  it('falls back safely when an edit starts before the hint line', () => {
+    const text = 'header\nGCI\ncluster\nclose\n';
+    const uri = makeUri('/a.ofn');
+    const edits = [
+      makeEdit(1, 0, 1, 0, 'new GCI\n'),
+      makeEdit(2, 0, 3, 0, 'updated cluster\n'),
+    ];
+    const edit = makeWorkspaceEdit([[uri, edits]]);
+    const result = applyWorkspaceEditsToText(text, edit, { startLine: 2, startChar: 11 });
+    expect(result).toBe('header\nnew GCI\nGCI\nupdated cluster\nclose\n');
+  });
 });

@@ -94,7 +94,8 @@ export function applyWorkspaceEditsToText(
     }
   };
 
-  if (hint) {
+  const canUseHint = hint && allEdits.every(e => e.range.start.line >= hint.startLine);
+  if (canUseHint) {
     // Fast path: scan only from hint.startLine to the highest edit end-line.
     // Requires all edit ranges to use numeric line numbers (guaranteed for functional sync).
     const maxLine = allEdits.reduce((m, e) => Math.max(m, e.range.end.line ?? 0), hint.startLine);

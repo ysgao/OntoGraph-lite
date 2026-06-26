@@ -107,6 +107,13 @@ interface AutoSaveMessage {
   type: 'autoSave';
 }
 
+interface IriRenameResultMessage {
+  type: 'iriRenameResult';
+  success: boolean;
+  newIri?: string;
+  error?: string;
+}
+
 // ── Global state ──────────────────────────────────────────────────────────────
 
 let currentIri = '';
@@ -1322,8 +1329,29 @@ function buildToolbar(): void {
   badge.id = 'type-badge';
   badge.className = 'type-badge';
 
-  const iriEl = document.createElement('span');
+  const iriEl = document.createElement('input');
   iriEl.id = 'entity-iri';
+  iriEl.type = 'text';
+  iriEl.className = 'iri-input';
+  iriEl.setAttribute('aria-label', 'Entity IRI');
+  iriEl.setAttribute('spellcheck', 'false');
+
+  // IRI error display
+  const iriError = document.createElement('span');
+  iriError.id = 'iri-error';
+  iriError.style.cssText = 'display:none; color: var(--vscode-errorForeground, red); font-size: 0.8em; margin-left: 4px;';
+
+  function commitIriChange(): void {
+    const newIri = iriEl.value.trim();
+    if (newIri === currentIri) { return; }
+    vscode.postMessage({ type: 'renameIri', currentIri, newIri });
+  }
+
+  iriEl.addEventListener('blur', () => { commitIriChange(); });
+  iriEl.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') { iriEl.blur(); }
+    if (e.key === 'Escape') { iriEl.value = currentIri; iriError.style.display = 'none'; iriEl.blur(); }
+  });
 
 
   const spacer = document.createElement('div');
@@ -1357,6 +1385,7 @@ function buildToolbar(): void {
   spacer.appendChild(status);
   toolbar.appendChild(badge);
   toolbar.appendChild(iriEl);
+  toolbar.appendChild(iriError);
   toolbar.appendChild(spacer);
   document.body.appendChild(toolbar);
 }
@@ -1372,7 +1401,9 @@ function renderEntity(msg: LoadEntityMessage): void {
   const badge = document.getElementById('type-badge')!;
   badge.textContent = typeLabel(msg.entityType);
   badge.className = `type-badge ${msg.entityType}`;
-  document.getElementById('entity-iri')!.textContent = msg.iri;
+  (document.getElementById('entity-iri') as HTMLInputElement).value = msg.iri;
+  const iriErrEl = document.getElementById('iri-error');
+  if (iriErrEl) { iriErrEl.style.display = 'none'; }
 
   // Clear old editors and entity sections
   Object.keys(editorMap).forEach(k => destroySection(k));
@@ -1693,7 +1724,9 @@ function injectStyles(): void {
       z-index: 10;
     }
     #entity-label { font-weight: 600; font-size: 1.1em; }
-    #entity-iri { opacity: 0.45; font-size: 0.85em; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 350px; font-family: var(--vscode-editor-font-family, monospace); }
+    #entity-iri { opacity: 0.7; font-size: 0.85em; margin-left: 4px; min-width: 80px; max-width: 350px; font-family: var(--vscode-editor-font-family, monospace); background: transparent; border: 1px solid transparent; color: inherit; border-radius: 2px; padding: 0 2px; }
+    #entity-iri:hover { border-color: var(--vscode-input-border, rgba(128,128,128,0.4)); opacity: 0.9; }
+    #entity-iri:focus { outline: none; border-color: var(--vscode-focusBorder, #007fd4); opacity: 1; background: var(--vscode-input-background, rgba(0,0,0,0.1)); }
     #status { font-size: 11px; opacity: 0.7; font-style: italic; }
 
     #content {
@@ -1980,7 +2013,7 @@ function updateUndoRedoState(canUndo: boolean, canRedo: boolean): void {
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | UndoRedoStateMessage | AutoSaveMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
+  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | UndoRedoStateMessage | AutoSaveMessage | IriRenameResultMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
 
   if (msg.type === 'autoSave') {
     handleSave();
@@ -2008,6 +2041,21 @@ window.addEventListener('message', (event: MessageEvent) => {
     showDraftErrorBanner(msg.invalidExpressions);
     for (const e of msg.invalidExpressions) {
       applyDraftInvalidClass(e.sectionKey, e.index);
+    }
+    return;
+  }
+
+  if (msg.type === 'iriRenameResult') {
+    const result = msg as IriRenameResultMessage;
+    const iriInput = document.getElementById('entity-iri') as HTMLInputElement | null;
+    const iriErrEl = document.getElementById('iri-error');
+    if (result.success && result.newIri) {
+      currentIri = result.newIri;
+      if (iriInput) { iriInput.value = result.newIri; }
+      if (iriErrEl) { iriErrEl.style.display = 'none'; iriErrEl.textContent = ''; }
+    } else {
+      if (iriInput) { iriInput.value = currentIri; }
+      if (iriErrEl) { iriErrEl.textContent = result.error ?? 'IRI rename failed'; iriErrEl.style.display = 'inline'; }
     }
     return;
   }

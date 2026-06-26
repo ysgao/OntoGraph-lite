@@ -28,7 +28,7 @@ git pull --rebase origin master
 
 ---
 
-## Recommendation for this project
+## Recommendation for anatomy project
 
 **Option B (rebase) is the better default**, for three reasons:
 

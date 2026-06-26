@@ -27,7 +27,6 @@ describe('FunctionalSerializer Clustering', () => {
       '# Class: <http://example.org#A> (Class A)',
       'AnnotationAssertion(rdfs:label <http://example.org#A> "Class A"@en)',
       'AnnotationAssertion(rdfs:comment <http://example.org#A> "A comment"@en)',
-      '',
       'EquivalentClasses(<http://example.org#A> <http://example.org#C>)',
       'SubClassOf(<http://example.org#A> <http://example.org#B>)'
     ]);
@@ -52,7 +51,6 @@ describe('FunctionalSerializer Clustering', () => {
     expect(cluster).toEqual([
       '# ObjectProperty: <http://example.org#partOf> (part of)',
       'AnnotationAssertion(rdfs:label <http://example.org#partOf> "part of"@en)',
-      '',
       'InverseObjectProperties(<http://example.org#partOf> <http://example.org#hasPart>)',
       'SubObjectPropertyOf(<http://example.org#partOf> <http://example.org#componentOf>)',
       'ObjectPropertyDomain(<http://example.org#partOf> <http://example.org#A>)',
@@ -78,7 +76,6 @@ describe('FunctionalSerializer Clustering', () => {
     expect(cluster).toEqual([
       '# Individual: <http://example.org#myInd> (My Individual)',
       'AnnotationAssertion(rdfs:label <http://example.org#myInd> "My Individual"@en)',
-      '',
       'ClassAssertion(<http://example.org#A> <http://example.org#myInd>)',
       'ObjectPropertyAssertion(<http://example.org#partOf> <http://example.org#myInd> <http://example.org#otherInd>)',
       'DataPropertyAssertion(<http://example.org#hasAge> <http://example.org#myInd> "25"^^<http://www.w3.org/2001/XMLSchema#integer>)'

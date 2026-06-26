@@ -61,7 +61,7 @@ Activates the extension, registers commands and tree views (Classes, Properties,
 `OntologyModel.ts` defines core types (OWLClass, ObjectProperty, DataProperty, Individual, axioms). `OntologyIndex.ts` provides fast lookup structures built post-parse. `AxiomDisplay.ts` handles how axioms are rendered in the UI.
 
 **4. Serializer Layer** (`src/serializer/`)
-`FunctionalSerializer.ts` round-trips the in-memory model back to OWL Functional Syntax. It uses a Protégé-style entity-cluster arrangement (see `ContentArrangementInOWLfunctionalSyntaxDocument.md`):
+`FunctionalSerializer.ts` round-trips the in-memory model back to OWL Functional Syntax. It uses a Protégé-style entity-cluster arrangement defined by the normative write spec [`ContentArrangementInOWLfunctionalSyntaxDocument.md`](ContentArrangementInOWLfunctionalSyntaxDocument.md):
 
 ```
 Declarations → Object Property clusters → Data Property clusters →
@@ -77,6 +77,16 @@ Within each class cluster: annotations first (labels, then other), then `Equival
 - For `.ttl`: `AxiomSync` handles both structural and annotation segments in a **single atomic edit** to avoid VS Code document-version conflicts from two concurrent `applyEdit` calls.
 
 **IRI abbreviation rule:** The four RDFS built-in annotation property IRIs are written as abbreviated tokens: `rdfs:label`, `rdfs:comment`, `rdfs:seeAlso`, `rdfs:isDefinedBy`. All other IRIs — including entity IRIs, other annotation property IRIs, and class expression IRIs — use the full `<IRI>` bracket form. This matches Protégé output.
+
+> **⚠️ OWL write format is normative — always consult the format spec.**
+> Any code that writes or modifies OWL Functional Syntax — the serializer
+> (`FunctionalSerializer.ts`), the in-place sync writers (`AnnotationSync.ts`,
+> `AxiomSync.ts`), and entity creation (`EntityCreationSync.ts`) — **MUST**
+> conform to [`ContentArrangementInOWLfunctionalSyntaxDocument.md`](ContentArrangementInOWLfunctionalSyntaxDocument.md),
+> the authoritative write specification (section & cluster ordering, blank-line
+> separation, indentation matching, IRI abbreviation). **Before changing how OWL
+> files are produced or edited, read that document; if the behaviour must change,
+> update the document in the same commit so spec and code stay in lock-step.**
 
 **6. Commands Layer** (`src/commands/`)
 One file per VS Code command: `classifyOntology`, `checkConsistency`, `exportOntology`, `addEntity`, `openVisualization`, `openSparqlEditor`, `openDLQuery`. Commands read the shared `activeModel`/`activeIndex` from `extension.ts`.
@@ -123,7 +133,7 @@ A Language Server Protocol server (`server/server.ts`) provides completions and 
 | `java-server/.../ReasonerServer.java` | Java entry point |
 | `java-server/.../OntologyService.java` | OWLAPI 5 wrapper |
 | `esbuild.mjs` | Build config — 7 output bundles |
-| `ContentArrangementInOWLfunctionalSyntaxDocument.md` | Reference for OWL Functional Syntax ordering conventions |
+| `ContentArrangementInOWLfunctionalSyntaxDocument.md` | **Normative** write spec for OWL Functional Syntax (ordering, blank lines, indentation, IRI abbreviation) — consult before any OWL-file write change |
 
 ## Code Style
 
@@ -201,15 +211,17 @@ ontograph dl-query "<expr>"    # Manchester Syntax DL query
 Install: `npm install -g @ysgao/ontograph-cli`
 
 ## Recent Changes
+- 019-create-entity: Per-panel toolbar buttons create new OWL entities (Class/ObjectProperty/DataProperty/AnnotationProperty/Individual); focused entity becomes parent via SubClassOf/SubObjectPropertyOf/SubDataPropertyOf/SubAnnotationPropertyOf; `ontograph.entity.defaultNamespace` setting controls IRI prefix; `src/utils/namespaceUtils.ts` + `src/sync/EntityCreationSync.ts` + `src/sync/IriRenameSync.ts` added; IRI field in Entity Editor upgraded from read-only span to editable input with rename-propagation; `FunctionalSerializer.generateEntityCluster` extended to emit SubAnnotationPropertyOf axioms; `EntityEditorPanel` wires `renameIri` message → `IriRenameSync` → file write → tree refresh
 - 014-entity-editor-undo-redo: Added TypeScript 5 (strict mode), Node.js (extension host), Browser (webview iframe) + VS Code Extension API (existing), existing webview message bus (`postMessage`)
 - 013-entity-search-partial-match: Cross-field token matching across `rdfs:label`/`skos:prefLabel`/`skos:altLabel` (tokens may span multiple fields); entity-name exact match via `localNameToIri` index (score 200, ranks first); local name removed from substring search (prevents partial SNOMED ID matches); anatomy.owl benchmark added
 - 012-load-large-ontology: `loadOntologyFile` command + toolbar button (`$(folder-opened)`) loads any-sized ontology via `vscode.workspace.fs.readFile`; `createLargeFileListener` shows notification for VS Code large-file conditions; `reloadOntology` refactored from `openTextDocument` to `workspace.fs.readFile`; `setupFileWatcher` extracted from `handleDocument` to shared helper
 
 ## Active Technologies
-- TypeScript 5 (strict mode), Node.js (extension host), Browser (webview iframe) + VS Code Extension API (existing), existing webview message bus (`postMessage`) (014-entity-editor-undo-redo)
+- TypeScript 5 (strict mode), Node.js (extension host), Browser (webview iframe) + VS Code Extension API (existing), existing webview message bus (`postMessage`) (019-create-entity)
+- `queueSyncWrite` + `writeTextStreamed` for all file mutations; `OntologyIndex.getByIri` for duplicate-IRI guard; `buildModelSegmentIndex` forced after entity insert/rename; `setRefreshAllViews` callback registered from `activate()` so EntityEditorPanel can trigger tree-view refresh (019-create-entity)
 - In-memory only — `Map<entityIri, EntityEditHistory>` on the extension host; no persistence (014-entity-editor-undo-redo)
 
 <!-- SPECKIT START -->
 ## Active Feature Plan
-- **018-ontograph-cli**: [Implementation Plan](specs/018-ontograph-cli/plan.md) — Standalone CLI package (`cli/`) for AI tools; pnpm workspace; core commands + extension bridge server
+- **019-create-entity**: [Implementation Plan](specs/019-create-entity/plan.md) — Create new OWL entities via command palette; namespace configuration; IRI editing in Entity Editor
 <!-- SPECKIT END -->

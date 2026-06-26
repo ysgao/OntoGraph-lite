@@ -120,7 +120,7 @@ describe('syncFunctional — idempotency (T002)', () => {
     const content = [
       'Ontology(<http://example.org/ont>',
       `  Declaration(Class(<${CAT}>))`,
-      `  # Class: <${CAT}>`,
+      `  # Class: <${CAT}> (Cat)`,
       `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
       ')',
     ].join('\n');
@@ -137,7 +137,7 @@ describe('syncFunctional — idempotency (T002)', () => {
     const content = [
       'Ontology(<http://example.org/ont>',
       `  Declaration(Class(<${CAT}>))`,
-      `  # Class: <${CAT}>`,
+      `  # Class: <${CAT}> (Cat)`,
       `  AnnotationAssertion(<${DEF}> <${CAT}> "A domestic feline")`,
       `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
       ')',
@@ -541,7 +541,7 @@ describe('syncFunctional — idempotent with rdfs:comment in file (T010)', () =>
     const content = [
       'Ontology(<http://example.org/ont>',
       `  Declaration(Class(<${CAT}>))`,
-      `  # Class: <${CAT}>`,
+      `  # Class: <${CAT}> (Cat)`,
       `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
       `  AnnotationAssertion(rdfs:comment <${CAT}> "A domestic feline")`,
       ')',
@@ -745,6 +745,145 @@ function makeGuardEntity(label: string): OWLClass {
     gciExpressions: [],
   };
 }
+
+// ── Cluster header bracket update ─────────────────────────────────────────────
+
+describe('syncFunctional — cluster header bracket update', () => {
+  it('updates the header bracket when rdfs:label changes', async () => {
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}> (Cat)`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
+      makeClass({ en: ['Felix'] }, {}),
+      'functional',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`# Class: <${CAT}> (Felix)`);
+    expect(result!.updatedText).not.toContain(`# Class: <${CAT}> (Cat)`);
+  });
+
+  it('updates header bracket even when annotations are already in sync', async () => {
+    // Stale bracket from creation time; AnnotationAssertion already updated separately.
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}> (OldLocalName)`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
+      makeClass({ en: ['Cat'] }, {}),
+      'functional',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`# Class: <${CAT}> (Cat)`);
+    expect(result!.updatedText).not.toContain('OldLocalName');
+  });
+
+  it('is idempotent when header bracket already matches the label', async () => {
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}> (Cat)`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
+      makeClass({ en: ['Cat'] }, {}),
+      'functional',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('adds bracket to header that has none when entity has an explicit label', async () => {
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}>`,
+      `  AnnotationAssertion(rdfs:label <${CAT}> "Cat"@en)`,
+      ')',
+    ].join('\n');
+
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
+      makeClass({ en: ['Cat'] }, {}),
+      'functional',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.updatedText).toContain(`# Class: <${CAT}> (Cat)`);
+  });
+
+  it('does not touch header when entity has no label set', async () => {
+    // Newly created entity — no rdfs:label yet; bracket stays as local-name placeholder.
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  # Class: <${CAT}> (Cat)`,
+      ')',
+    ].join('\n');
+
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
+      makeClass({}, {}),
+      'functional',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('inserts first annotation inside the cluster, not after the Declaration', async () => {
+    // Regression: when no existing AnnotationAssertion exists and the entity segment's
+    // startLine points to the Declaration, the new annotation must still land in the
+    // cluster (after the cluster header comment) — not in the declarations section.
+    const ANIMAL = 'http://example.org#Animal';
+    const content = [
+      'Ontology(<http://example.org/ont>',
+      `  Declaration(Class(<${CAT}>))`,
+      `  Declaration(Class(<${ANIMAL}>))`,
+      '',
+      `  # Class: <${CAT}> (Cat)`,
+      `  SubClassOf(<${CAT}> <${ANIMAL}>)`,
+      '',
+      `  # Class: <${ANIMAL}> (Animal)`,
+      ')',
+    ].join('\n');
+
+    setupContent(content);
+    const result = await syncAnnotationsToDocument(
+      makeUri('test.ofn'),
+      makeClass({ en: ['Felix'] }, {}),
+      'functional',
+    );
+
+    expect(result).not.toBeNull();
+    const lines = result!.updatedText.split('\n');
+    const annotIdx = lines.findIndex(l => l.includes(`AnnotationAssertion(rdfs:label <${CAT}>`));
+    const subClassIdx = lines.findIndex(l => l.includes(`SubClassOf(<${CAT}>`));
+    const declIdx = lines.findIndex(l => l.includes(`Declaration(Class(<${CAT}>))`));
+    // Annotation must appear AFTER the cluster header and BEFORE SubClassOf
+    expect(annotIdx).toBeGreaterThan(declIdx);
+    expect(annotIdx).toBeLessThan(subClassIdx);
+  });
+});
 
 describe('syncAnnotationsToDocument — DL query sync inhibition guard', () => {
   afterEach(() => { temporaryClassIris.clear(); });

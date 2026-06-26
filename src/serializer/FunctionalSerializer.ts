@@ -1,4 +1,4 @@
-import { OWLEntity, OntologyModel, getLabel, OWLClass, OWLObjectProperty, OWLDataProperty, OWLIndividual } from '../model/OntologyModel';
+import { OWLEntity, OntologyModel, getLabel, OWLClass, OWLObjectProperty, OWLDataProperty, OWLAnnotationProperty, OWLIndividual } from '../model/OntologyModel';
 import { manchesterToFunctional } from '../utils/ExpressionUtils';
 
 const OWL = 'http://www.w3.org/2002/07/owl#';
@@ -98,6 +98,11 @@ export function generateEntityCluster(entity: OWLEntity, model: OntologyModel): 
       axioms.push(`DataPropertyRange(${iri(p.iri)} ${iri(r)})`);
     }
     if (p.isFunctional) { axioms.push(`FunctionalDataProperty(${iri(p.iri)})`); }
+  } else if (entity.type === 'annotationProperty') {
+    const p = entity as OWLAnnotationProperty;
+    for (const sup of p.superPropertyIris) {
+      axioms.push(`SubAnnotationPropertyOf(${iri(p.iri)} ${iri(sup)})`);
+    }
   } else if (entity.type === 'individual') {
     const ind = entity as OWLIndividual;
     for (const cls of ind.classIris) {
@@ -112,7 +117,6 @@ export function generateEntityCluster(entity: OWLEntity, model: OntologyModel): 
   }
 
   if (axioms.length > 0) {
-    out.push('');
     out.push(...axioms);
   }
 

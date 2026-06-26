@@ -11,9 +11,9 @@ import { ReasonerBridge } from './reasoner/ReasonerBridge';
 import { classifyOntology } from './commands/classifyOntology';
 import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
-import { addEntity } from './commands/addEntity';
+import { addEntity, createEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
-import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge } from './views/EntityEditorPanel';
+import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge, setRefreshAllViews } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
 import { updateDLQueryModel } from './views/DLQueryPanel';
@@ -156,6 +156,7 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
     console.log(`[perf:refresh] tree providers: ${Date.now() - tProviders}ms`);
     console.log(`[perf:refresh] total: ${Date.now() - tRefresh}ms`);
   }
+  setRefreshAllViews(refreshAllViews);
 
   async function executeReload(): Promise<void> {
     if (!activeModel) { return; }
@@ -425,6 +426,47 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
 
     vscode.commands.registerCommand('ontograph.addEntity', () =>
       addEntity(activeModel)),
+
+    vscode.commands.registerCommand('ontograph.addClass', () => {
+      if (!activeModel || !activeIndex) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
+      const parentIri = classView.selection[0]?.iri ?? inferredView.selection[0]?.iri;
+      void createEntity('class', parentIri, context, activeModel, activeIndex, (m, iri) => {
+        refreshAllViews(m);
+        showEntityInfo(context, m, iri);
+      });
+    }),
+
+    vscode.commands.registerCommand('ontograph.addObjectProperty', () => {
+      if (!activeModel || !activeIndex) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
+      void createEntity('objectProperty', objectPropView.selection[0]?.iri, context, activeModel, activeIndex, (m, iri) => {
+        refreshAllViews(m);
+        showEntityInfo(context, m, iri);
+      });
+    }),
+
+    vscode.commands.registerCommand('ontograph.addDataProperty', () => {
+      if (!activeModel || !activeIndex) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
+      void createEntity('dataProperty', dataPropView.selection[0]?.iri, context, activeModel, activeIndex, (m, iri) => {
+        refreshAllViews(m);
+        showEntityInfo(context, m, iri);
+      });
+    }),
+
+    vscode.commands.registerCommand('ontograph.addAnnotationProperty', () => {
+      if (!activeModel || !activeIndex) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
+      void createEntity('annotationProperty', annotationPropView.selection[0]?.iri, context, activeModel, activeIndex, (m, iri) => {
+        refreshAllViews(m);
+        showEntityInfo(context, m, iri);
+      });
+    }),
+
+    vscode.commands.registerCommand('ontograph.addIndividual', () => {
+      if (!activeModel || !activeIndex) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
+      void createEntity('individual', individualView.selection[0]?.iri, context, activeModel, activeIndex, (m, iri) => {
+        refreshAllViews(m);
+        showEntityInfo(context, m, iri);
+      });
+    }),
 
     vscode.commands.registerCommand('ontograph.openGraph', (item?: { iri?: string }) =>
       openGraphView(context, activeModel, item?.iri)),

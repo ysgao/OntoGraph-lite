@@ -53,7 +53,12 @@
       "Bash(grep -v \"^$\")",
       "Bash(pnpm *)",
       "Bash(awk '{print $5}')",
-      "Bash(unzip -l /Users/yoga/JavaApp/OntoGraph-lite/ontograph-lite-0.1.11.vsix)"
+      "Bash(unzip -l /Users/yoga/JavaApp/OntoGraph-lite/ontograph-lite-0.1.11.vsix)",
+      "Bash(grep -n \"^\\\\s*\\)$\" /Users/yoga/SCT_OWL/anatomy.owl)",
+      "Bash(npx vitest *)",
+      "Bash(grep -n \"# \\\\${typeLabel\\\\|# Class:\\\\|TypeLabel\\\\|generateEntityCluster\\\\|displayLabel\\\\|\\(label\\)\\\\|header\" /Users/yoga/JavaApp/OntoGraph-lite/src/sync/EntityCreationSync.ts)",
+      "Bash(grep -n \"# \\\\|Class:\\\\|push\\(.*#\\\\|header\\\\|\\(\\\\${\\\\|label\" /Users/yoga/JavaApp/OntoGraph-lite/src/serializer/FunctionalSerializer.ts)",
+      "Bash(awk '/Declaration\\\\\\(Class\\\\\\(/{c=NR} /Declaration\\\\\\(ObjectProperty\\\\\\(/{print \"first OP decl at NR=\"NR; exit} END{}' anatomy.owl)"
     ]
   }
 }

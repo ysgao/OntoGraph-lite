@@ -64,7 +64,7 @@ Activates the extension, registers commands and tree views (Classes, Properties,
 `OntologyModel.ts` defines core types (OWLClass, ObjectProperty, DataProperty, Individual, axioms). `OntologyIndex.ts` provides fast lookup structures built post-parse. `AxiomDisplay.ts` handles how axioms are rendered in the UI.
 
 **4. Serializer Layer** (`src/serializer/`)
-`FunctionalSerializer.ts` round-trips the in-memory model back to OWL Functional Syntax. It uses a Protégé-style entity-cluster arrangement (see `ContentArrangementInOWLfunctionalSyntaxDocument.md`):
+`FunctionalSerializer.ts` round-trips the in-memory model back to OWL Functional Syntax. It uses a Protégé-style entity-cluster arrangement defined by the normative write spec [`ContentArrangementInOWLfunctionalSyntaxDocument.md`](ContentArrangementInOWLfunctionalSyntaxDocument.md):
 
 ```
 Declarations → Object Property clusters → Data Property clusters →
@@ -80,6 +80,16 @@ Within each class cluster: annotations first (labels, then other), then `Equival
 - For `.ttl`: `AxiomSync` handles both structural and annotation segments in a **single atomic edit** to avoid VS Code document-version conflicts from two concurrent `applyEdit` calls.
 
 **IRI abbreviation rule:** The four RDFS built-in annotation property IRIs are written as abbreviated tokens: `rdfs:label`, `rdfs:comment`, `rdfs:seeAlso`, `rdfs:isDefinedBy`. All other IRIs — including entity IRIs, other annotation property IRIs, and class expression IRIs — use the full `<IRI>` bracket form. This matches Protégé output.
+
+> **⚠️ OWL write format is normative — always consult the format spec.**
+> Any code that writes or modifies OWL Functional Syntax — the serializer
+> (`FunctionalSerializer.ts`), the in-place sync writers (`AnnotationSync.ts`,
+> `AxiomSync.ts`), and entity creation (`EntityCreationSync.ts`) — **MUST**
+> conform to [`ContentArrangementInOWLfunctionalSyntaxDocument.md`](ContentArrangementInOWLfunctionalSyntaxDocument.md),
+> the authoritative write specification (section & cluster ordering, blank-line
+> separation, indentation matching, IRI abbreviation). **Before changing how OWL
+> files are produced or edited, read that document; if the behaviour must change,
+> update the document in the same commit so spec and code stay in lock-step.**
 
 **6. Commands Layer** (`src/commands/`)
 One file per VS Code command: `classifyOntology`, `checkConsistency`, `exportOntology`, `addEntity`, `openVisualization`, `openSparqlEditor`, `openDLQuery`. Commands read the shared `activeModel`/`activeIndex` from `extension.ts`.
@@ -126,7 +136,7 @@ A Language Server Protocol server (`server/server.ts`) provides completions and 
 | `java-server/.../ReasonerServer.java` | Java entry point |
 | `java-server/.../OntologyService.java` | OWLAPI 5 wrapper |
 | `esbuild.mjs` | Build config — 7 output bundles |
-| `ContentArrangementInOWLfunctionalSyntaxDocument.md` | Reference for OWL Functional Syntax ordering conventions |
+| `ContentArrangementInOWLfunctionalSyntaxDocument.md` | **Normative** write spec for OWL Functional Syntax (ordering, blank lines, indentation, IRI abbreviation) — consult before any OWL-file write change |
 
 ## Code Style
 

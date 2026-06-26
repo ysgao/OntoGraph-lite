@@ -1,7 +1,7 @@
 {
   "name": "ontograph-lite",
   "displayName": "OntoGraph Lite: OWL Ontology Editor",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "publisher": "ysgao",
   "description": "Protégé-like OWL ontology editing, reasoning, and visualization for VS Code",
   "icon": "resources/icons/ontology.png",
@@ -137,6 +137,36 @@
         "icon": "$(add)"
       },
       {
+        "command": "ontograph.addClass",
+        "title": "OntoGraph: Add Class...",
+        "category": "OntoGraph",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ontograph.addObjectProperty",
+        "title": "OntoGraph: Add Object Property...",
+        "category": "OntoGraph",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ontograph.addDataProperty",
+        "title": "OntoGraph: Add Data Property...",
+        "category": "OntoGraph",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ontograph.addAnnotationProperty",
+        "title": "OntoGraph: Add Annotation Property...",
+        "category": "OntoGraph",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ontograph.addIndividual",
+        "title": "OntoGraph: Add Individual...",
+        "category": "OntoGraph",
+        "icon": "$(add)"
+      },
+      {
         "command": "ontograph.exportOntology",
         "title": "OntoGraph: Export Ontology As...",
         "icon": "$(export)"
@@ -201,6 +231,36 @@
           "command": "ontograph.loadOntologyFile",
           "when": "view == ontograph.inferredClasses",
           "group": "navigation@-1"
+        },
+        {
+          "command": "ontograph.addClass",
+          "when": "view == ontograph.classes",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ontograph.addClass",
+          "when": "view == ontograph.inferredClasses",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ontograph.addObjectProperty",
+          "when": "view == ontograph.objectProperties",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ontograph.addDataProperty",
+          "when": "view == ontograph.dataProperties",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ontograph.addAnnotationProperty",
+          "when": "view == ontograph.annotationProperties",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ontograph.addIndividual",
+          "when": "view == ontograph.individuals",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -347,6 +407,11 @@
           "type": "number",
           "default": 50000,
           "description": "Class count above which large-ontology optimisations are applied (Worker Thread parsing, ELK default)"
+        },
+        "ontograph.entity.defaultNamespace": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Base IRI prefix used when creating new ontology entities. Must end with `#` or `/` (e.g., `http://example.org/ontology#`). Leave empty to derive the namespace from the ontology's declared IRI."
         }
       }
     }
