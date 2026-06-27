@@ -4,6 +4,7 @@ import { runSearch } from './commands/core/searchCommand';
 import { runValidate } from './commands/core/validateCommand';
 import { runConvert } from './commands/core/convertCommand';
 import { runStats } from './commands/core/statsCommand';
+import { runEntityInfo } from './commands/core/entityInfoCommand';
 import { runClassify } from './commands/bridge/classifyCommand';
 import { runCheckConsistency } from './commands/bridge/consistencyCommand';
 import { runDlQuery } from './commands/bridge/dlQueryCommand';
@@ -63,6 +64,14 @@ program
   .action(async (file: string) => {
     const timeout = Number(program.opts().timeout);
     process.exitCode = await runStats(file, timeout);
+  });
+
+program
+  .command('entity-info <file> <iri>')
+  .description('Get full details for a specific entity by IRI')
+  .action(async (file: string, iri: string) => {
+    const timeout = Number(program.opts().timeout);
+    process.exitCode = await runEntityInfo(file, iri, timeout);
   });
 
 program
