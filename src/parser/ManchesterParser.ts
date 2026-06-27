@@ -124,6 +124,11 @@ export class ManchesterParser {
       const nx=this.peek();
       if(nx&&(nx.type==='WORD'||nx.type==='IRI')){this.advance();return (this.pfx.get(':')??':')+nx.value;}
     }
+    if(t.type==='WORD'){
+      const localName=t.value;this.advance();
+      const baseIri=this.model.metadata.iri||'http://example.org/';
+      return baseIri.endsWith('#')?baseIri+localName:baseIri+'#'+localName;
+    }
     return null;
   }
 
