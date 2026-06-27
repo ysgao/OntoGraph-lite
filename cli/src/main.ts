@@ -3,6 +3,7 @@ import { runParse } from './commands/core/parseCommand';
 import { runSearch } from './commands/core/searchCommand';
 import { runValidate } from './commands/core/validateCommand';
 import { runConvert } from './commands/core/convertCommand';
+import { runStats } from './commands/core/statsCommand';
 import { runClassify } from './commands/bridge/classifyCommand';
 import { runCheckConsistency } from './commands/bridge/consistencyCommand';
 import { runDlQuery } from './commands/bridge/dlQueryCommand';
@@ -54,6 +55,14 @@ program
   .action(async (file: string, opts: { to: string; out?: string }) => {
     const timeout = Number(program.opts().timeout);
     process.exitCode = await runConvert(file, opts.to, opts.out, timeout);
+  });
+
+program
+  .command('stats <file>')
+  .description('Analyze ontology structure and return comprehensive statistics as JSON')
+  .action(async (file: string) => {
+    const timeout = Number(program.opts().timeout);
+    process.exitCode = await runStats(file, timeout);
   });
 
 program
