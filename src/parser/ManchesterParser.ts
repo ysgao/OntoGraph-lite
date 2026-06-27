@@ -390,7 +390,7 @@ export class ManchesterParser {
       while(!this.eat('RBRACE')){const r=this.readIri();if(r)parts.push(r);else this.advance();this.eat('COMMA');}
       return{iri:null,str:`{${parts.join(', ')}}`};
     }
-    if(t.type==='IRI'||t.type==='COLON'){
+    if(t.type==='IRI'||t.type==='COLON'||t.type==='WORD'){
       const prop=this.readIri();
       if(!prop){this.advance();return{iri:null,str:''};}
       const nx=this.peek();
@@ -399,7 +399,7 @@ export class ManchesterParser {
         if(op==='Self')return{iri:null,str:`${prop} Self`};
         if(op==='min'||op==='max'||op==='exactly'){
           const n=this.peek()?.type==='INT'?this.advance().value:'0';
-          const f=(this.peek()?.type==='IRI'||this.peek()?.type==='COLON')?this.readIri():null;
+          const f=(this.peek()?.type==='IRI'||this.peek()?.type==='COLON'||this.peek()?.type==='WORD')?this.readIri():null;
           return{iri:null,str:f?`${prop} ${op} ${n} ${f}`:`${prop} ${op} ${n}`};
         }
         const f=this.parsePrimary();return{iri:null,str:`${prop} ${op} ${f.str}`};
