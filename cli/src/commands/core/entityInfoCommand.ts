@@ -13,9 +13,10 @@ export interface EntityInfoResult {
   annotations: Record<string, string[]>;
 
   // Class-specific
-  superClassIris?: string[];
-  equivalentClassIris?: string[];
-  disjointClassIris?: string[];
+  superClasses?: string[];
+  directSubClasses?: string[];
+  equivalentClasses?: string[];
+  disjointClasses?: string[];
   superClassExpressions?: string[];
   equivalentClassExpressions?: string[];
   gciExpressions?: string[];
@@ -33,14 +34,14 @@ export interface EntityInfoResult {
   isReflexive?: boolean;
   isIrreflexive?: boolean;
   isAsymmetric?: boolean;
-  inverseOfIri?: string;
+  inverseOfIri?: string | undefined;
   equivalentPropertyIris?: string[];
   disjointPropertyIris?: string[];
 
   // Individual-specific
   classIris?: string[];
   objectPropertyAssertions?: { propertyIri: string; targetIri: string }[];
-  dataPropertyAssertions?: { propertyIri: string; value: string; datatype?: string }[];
+  dataPropertyAssertions?: { propertyIri: string; value: string; datatype?: string | undefined }[];
 }
 
 function getLocalName(iri: string): string {
@@ -105,20 +106,42 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
 
   // Add type-specific fields
   if ('superClassIris' in entity) {
-    result.superClassIris = entity.superClassIris;
-    result.equivalentClassIris = entity.equivalentClassIris;
-    result.disjointClassIris = entity.disjointClassIris;
-    result.superClassExpressions = entity.superClassExpressions;
-    result.equivalentClassExpressions = entity.equivalentClassExpressions;
-    if ('gciExpressions' in entity) {
+    // Convert IRIs to local names for display
+    if (entity.superClassIris.length > 0) {
+      result.superClasses = entity.superClassIris.map(getLocalName);
+    }
+    if (entity.equivalentClassIris.length > 0) {
+      result.equivalentClasses = entity.equivalentClassIris.map(getLocalName);
+    }
+    if (entity.disjointClassIris.length > 0) {
+      result.disjointClasses = entity.disjointClassIris.map(getLocalName);
+    }
+    if (entity.superClassExpressions.length > 0) {
+      result.superClassExpressions = entity.superClassExpressions;
+    }
+    if (entity.equivalentClassExpressions.length > 0) {
+      result.equivalentClassExpressions = entity.equivalentClassExpressions;
+    }
+    if ('gciExpressions' in entity && entity.gciExpressions.length > 0) {
       result.gciExpressions = entity.gciExpressions;
+    }
+
+    // Calculate direct subclasses
+    const directSubClasses: string[] = [];
+    for (const potentialSubClass of model.classes.values()) {
+      if (potentialSubClass.superClassIris.includes(entity.iri)) {
+        directSubClasses.push(getLocalName(potentialSubClass.iri));
+      }
+    }
+    if (directSubClasses.length > 0) {
+      result.directSubClasses = directSubClasses;
     }
   }
 
   if ('superPropertyIris' in entity) {
-    result.superPropertyIris = entity.superPropertyIris;
-    result.domainIris = entity.domainIris;
-    result.rangeIris = entity.rangeIris;
+    result.superPropertyIris = entity.superPropertyIris.map(getLocalName);
+    result.domainIris = entity.domainIris.map(getLocalName);
+    result.rangeIris = entity.rangeIris.map(getLocalName);
     result.isTransitive = entity.isTransitive;
     result.isSymmetric = entity.isSymmetric;
     result.isFunctional = entity.isFunctional;
@@ -128,16 +151,29 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
       result.isReflexive = entity.isReflexive;
       result.isIrreflexive = entity.isIrreflexive;
       result.isAsymmetric = entity.isAsymmetric;
-      result.inverseOfIri = entity.inverseOfIri;
-      result.equivalentPropertyIris = entity.equivalentPropertyIris;
-      result.disjointPropertyIris = entity.disjointPropertyIris;
+      if (entity.inverseOfIri) {
+        result.inverseOfIri = getLocalName(entity.inverseOfIri);
+      }
+      if (entity.equivalentPropertyIris && entity.equivalentPropertyIris.length > 0) {
+        result.equivalentPropertyIris = entity.equivalentPropertyIris.map(getLocalName);
+      }
+      if (entity.disjointPropertyIris && entity.disjointPropertyIris.length > 0) {
+        result.disjointPropertyIris = entity.disjointPropertyIris.map(getLocalName);
+      }
     }
   }
 
   if ('classIris' in entity) {
-    result.classIris = entity.classIris;
-    result.objectPropertyAssertions = entity.objectPropertyAssertions;
-    result.dataPropertyAssertions = entity.dataPropertyAssertions;
+    result.classIris = entity.classIris.map(getLocalName);
+    result.objectPropertyAssertions = entity.objectPropertyAssertions.map(a => ({
+      propertyIri: getLocalName(a.propertyIri),
+      targetIri: getLocalName(a.targetIri),
+    }));
+    result.dataPropertyAssertions = entity.dataPropertyAssertions.map(a => ({
+      propertyIri: getLocalName(a.propertyIri),
+      value: a.value,
+      datatype: a.datatype ? getLocalName(a.datatype) : undefined,
+    }));
   }
 
   writeResult(result, command, Date.now() - start);
