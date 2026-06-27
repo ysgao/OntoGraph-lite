@@ -139,18 +139,24 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
   }
 
   if ('superPropertyIris' in entity) {
-    result.superPropertyIris = entity.superPropertyIris.map(getLocalName);
-    result.domainIris = entity.domainIris.map(getLocalName);
-    result.rangeIris = entity.rangeIris.map(getLocalName);
-    result.isTransitive = entity.isTransitive;
-    result.isSymmetric = entity.isSymmetric;
-    result.isFunctional = entity.isFunctional;
+    if (entity.superPropertyIris.length > 0) {
+      result.superPropertyIris = entity.superPropertyIris.map(getLocalName);
+    }
+    if (entity.domainIris.length > 0) {
+      result.domainIris = entity.domainIris.map(getLocalName);
+    }
+    if (entity.rangeIris.length > 0) {
+      result.rangeIris = entity.rangeIris.map(getLocalName);
+    }
+    if (entity.isTransitive) result.isTransitive = entity.isTransitive;
+    if (entity.isSymmetric) result.isSymmetric = entity.isSymmetric;
+    if (entity.isFunctional) result.isFunctional = entity.isFunctional;
 
-    if ('isInverseFunctional' in entity) {
-      result.isInverseFunctional = entity.isInverseFunctional;
-      result.isReflexive = entity.isReflexive;
-      result.isIrreflexive = entity.isIrreflexive;
-      result.isAsymmetric = entity.isAsymmetric;
+    if (entity.type === 'objectProperty') {
+      if (entity.isInverseFunctional) result.isInverseFunctional = entity.isInverseFunctional;
+      if (entity.isReflexive) result.isReflexive = entity.isReflexive;
+      if (entity.isIrreflexive) result.isIrreflexive = entity.isIrreflexive;
+      if (entity.isAsymmetric) result.isAsymmetric = entity.isAsymmetric;
       if (entity.inverseOfIri) {
         result.inverseOfIri = getLocalName(entity.inverseOfIri);
       }
