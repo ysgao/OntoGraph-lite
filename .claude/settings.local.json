@@ -63,7 +63,8 @@
       "Bash(~/.specify/extensions/git/scripts/bash/create-new-feature.sh *)",
       "Bash(git branch *)",
       "Bash(~/.specify/scripts/bash/setup-tasks.sh --json)",
-      "Bash(~/.specify/scripts/bash/check-prerequisites.sh *)"
+      "Bash(~/.specify/scripts/bash/check-prerequisites.sh *)",
+      "Bash(git push *)"
     ]
   }
 }
