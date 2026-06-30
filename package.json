@@ -1,9 +1,9 @@
 {
   "name": "ontograph-lite",
   "displayName": "OntoGraph Lite: OWL Ontology Editor",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "publisher": "ysgao",
-  "description": "Prot\u00e9g\u00e9-like OWL ontology editing, reasoning, and visualization for VS Code",
+  "description": "Protégé-like OWL ontology editing, reasoning, and visualization for VS Code",
   "icon": "resources/icons/ontology.png",
   "keywords": [
     "OWL",
@@ -192,7 +192,7 @@
       },
       {
         "command": "ontograph.loadOntologyFile",
-        "title": "OntoGraph: Load Ontology File\u2026",
+        "title": "OntoGraph: Load Ontology File…",
         "icon": "$(folder-opened)"
       },
       {
@@ -369,9 +369,9 @@
           ],
           "default": "elk",
           "enumDescriptions": [
-            "HermiT \u2014 full OWL 2 DL reasoner, best for medium ontologies",
-            "ELK \u2014 scalable EL reasoner, recommended for SNOMED CT scale",
-            "Auto \u2014 use ELK for ontologies with >5k classes, HermiT otherwise"
+            "HermiT — full OWL 2 DL reasoner, best for medium ontologies",
+            "ELK — scalable EL reasoner, recommended for SNOMED CT scale",
+            "Auto — use ELK for ontologies with >5k classes, HermiT otherwise"
           ],
           "description": "OWL reasoner to use for classification and consistency checking"
         },
@@ -393,7 +393,7 @@
         "ontograph.reasoner.timeoutSeconds": {
           "type": "number",
           "default": 600,
-          "description": "Timeout in seconds for reasoning operations (large ontologies may need 300\u2013600 s)"
+          "description": "Timeout in seconds for reasoning operations (large ontologies may need 300–600 s)"
         },
         "ontograph.display.preferredLabelLanguage": {
           "type": "string",
