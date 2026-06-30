@@ -20,6 +20,7 @@ import { updateDLQueryModel } from './views/DLQueryPanel';
 import { reloadOntology } from './commands/reloadOntology';
 import { loadOntologyFile } from './commands/loadOntologyFile';
 
+import { NavigationHistory } from './views/NavigationHistory';
 import { isReloadSuppressed, isOwnRecentWrite, registerWatcherSuspendHandler } from './sync/reloadGuard';
 import { computeLineDiff, canApplyIncremental } from './sync/lineDiff';
 import { applyIncrementalReload } from './sync/incrementalReload';
@@ -36,6 +37,7 @@ export let outputChannel: vscode.OutputChannel;
 
 let activeModel: OntologyModel | undefined;
 let activeIndex: OntologyIndex | undefined;
+const navigationHistory = new NavigationHistory();
 let activeFileWatcher: vscode.FileSystemWatcher | undefined;
 let reloadDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -43,6 +45,8 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
   outputChannel = vscode.window.createOutputChannel('OntoGraph');
   context.subscriptions.push(outputChannel);
   outputChannel.appendLine('OntoGraph activating…');
+  void vscode.commands.executeCommand('setContext', 'ontograph.canNavigateBack', false);
+  void vscode.commands.executeCommand('setContext', 'ontograph.canNavigateForward', false);
 
   // --- Tree data providers ---
   const classProvider = new ClassHierarchyProvider();
@@ -65,6 +69,8 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       suppressNextSelection = false;
       return;
     }
+    navigationHistory.push(iri);
+    updateNavContextKeys();
     showEntityInfo(context, activeModel, iri);
     if (activeModel.classes.has(iri)) {
       classProvider.setFocus(iri);
@@ -339,6 +345,11 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
     }
   }
 
+  function updateNavContextKeys(): void {
+    void vscode.commands.executeCommand('setContext', 'ontograph.canNavigateBack', navigationHistory.canGoBack);
+    void vscode.commands.executeCommand('setContext', 'ontograph.canNavigateForward', navigationHistory.canGoForward);
+  }
+
   interface SearchQuickPickItem extends vscode.QuickPickItem {
     iri: string;
     entityType: EntityType;
@@ -404,6 +415,28 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       if (fromIpc) { suppressNextSelection = true; }
       showEntityInfo(context, activeModel, iri, fromIpc);
       revealInTreeView(iri, entityType, fromIpc);
+    }),
+
+    vscode.commands.registerCommand('ontograph.navigateBack', () => {
+      const iri = navigationHistory.back();
+      updateNavContextKeys();
+      if (iri && activeModel) {
+        suppressNextSelection = true;
+        showEntityInfo(context, activeModel, iri);
+        const entityType = entityTypeForIri(iri);
+        if (entityType) { revealInTreeView(iri, entityType); }
+      }
+    }),
+
+    vscode.commands.registerCommand('ontograph.navigateForward', () => {
+      const iri = navigationHistory.forward();
+      updateNavContextKeys();
+      if (iri && activeModel) {
+        suppressNextSelection = true;
+        showEntityInfo(context, activeModel, iri);
+        const entityType = entityTypeForIri(iri);
+        if (entityType) { revealInTreeView(iri, entityType); }
+      }
     }),
 
     vscode.commands.registerCommand('ontograph.loadOntologyFile', async (prefillUri?: vscode.Uri) => {
@@ -582,6 +615,10 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
   // limit. Users must invoke OntoGraph's load command to bring an ontology
   // into the editor.
   const onLoadedCallback = async (model: OntologyModel): Promise<void> => {
+    if (model.sourceUri !== activeModel?.sourceUri) {
+      navigationHistory.clear();
+      updateNavContextKeys();
+    }
     activeModel = model;
     resetSearchQuery();
     refreshAllViews(model);
