@@ -30,6 +30,7 @@ import type { OntoGraphApi } from './api';
 import { BridgeServer } from './bridge/BridgeServer';
 import { ParserRegistry } from './parser/ParserRegistry';
 import { buildModelSegmentIndex } from './model/SegmentIndex';
+import { getSearchQuery, setSearchQuery, resetSearchQuery } from './commands/searchQueryState';
 
 export let outputChannel: vscode.OutputChannel;
 
@@ -352,9 +353,10 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       const qp = vscode.window.createQuickPick<SearchQuickPickItem>();
       qp.placeholder = 'Search by name or label…';
       qp.matchOnDescription = true;
-      qp.onDidChangeValue(value => {
-        if (!value.trim()) { qp.items = []; return; }
-        const entities = activeIndex!.searchByLabel(value.trim(), 100);
+
+      function runSearch(query: string): void {
+        if (!query.trim()) { qp.items = []; return; }
+        const entities = activeIndex!.searchByLabel(query.trim(), 100);
         qp.items = entities.map(e => ({
           label: getLabel(e, preferredLang),
           description: e.type,
@@ -362,6 +364,11 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
           entityType: e.type,
           alwaysShow: true,
         }));
+      }
+
+      qp.onDidChangeValue(value => {
+        setSearchQuery(value);
+        runSearch(value);
       });
       qp.onDidAccept(() => {
         const sel = qp.selectedItems[0];
@@ -373,6 +380,11 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
         qp.dispose();
       });
       qp.onDidHide(() => qp.dispose());
+
+      // Pre-populate with last search and immediately run it so results appear on open.
+      // onDidChangeValue does not fire on programmatic value assignment, so we call runSearch directly.
+      qp.value = getSearchQuery();
+      if (getSearchQuery()) { runSearch(getSearchQuery()); }
       qp.show();
     }),
 
@@ -571,6 +583,7 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
   // into the editor.
   const onLoadedCallback = async (model: OntologyModel): Promise<void> => {
     activeModel = model;
+    resetSearchQuery();
     refreshAllViews(model);
     await refreshEntityEditorIfOpen(model, context);
     updateDLQueryModel(model, activeIndex);

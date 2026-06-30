@@ -58,7 +58,12 @@
       "Bash(npx vitest *)",
       "Bash(grep -n \"# \\\\${typeLabel\\\\|# Class:\\\\|TypeLabel\\\\|generateEntityCluster\\\\|displayLabel\\\\|\\(label\\)\\\\|header\" /Users/yoga/JavaApp/OntoGraph-lite/src/sync/EntityCreationSync.ts)",
       "Bash(grep -n \"# \\\\|Class:\\\\|push\\(.*#\\\\|header\\\\|\\(\\\\${\\\\|label\" /Users/yoga/JavaApp/OntoGraph-lite/src/serializer/FunctionalSerializer.ts)",
-      "Bash(awk '/Declaration\\\\\\(Class\\\\\\(/{c=NR} /Declaration\\\\\\(ObjectProperty\\\\\\(/{print \"first OP decl at NR=\"NR; exit} END{}' anatomy.owl)"
+      "Bash(awk '/Declaration\\\\\\(Class\\\\\\(/{c=NR} /Declaration\\\\\\(ObjectProperty\\\\\\(/{print \"first OP decl at NR=\"NR; exit} END{}' anatomy.owl)",
+      "Bash(~/.specify/scripts/bash/setup-plan.sh *)",
+      "Bash(~/.specify/extensions/git/scripts/bash/create-new-feature.sh *)",
+      "Bash(git branch *)",
+      "Bash(~/.specify/scripts/bash/setup-tasks.sh --json)",
+      "Bash(~/.specify/scripts/bash/check-prerequisites.sh *)"
     ]
   }
 }

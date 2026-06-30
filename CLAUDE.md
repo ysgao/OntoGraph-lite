@@ -223,5 +223,5 @@ Install: `npm install -g @ysgao/ontograph-cli`
 
 <!-- SPECKIT START -->
 ## Active Feature Plan
-- **019-create-entity**: [Implementation Plan](specs/019-create-entity/plan.md) — Create new OWL entities via command palette; namespace configuration; IRI editing in Entity Editor
+- **020-persist-search-query**: [Implementation Plan](specs/020-persist-search-query/plan.md) — Retain the last entity search string in the QuickPick across open/close within the same session; auto-execute search on reopen; reset on ontology change
 <!-- SPECKIT END -->
