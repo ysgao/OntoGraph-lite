@@ -223,5 +223,5 @@ Install: `npm install -g @ysgao/ontograph-cli`
 
 <!-- SPECKIT START -->
 ## Active Feature Plan
-- **020-persist-search-query**: [Implementation Plan](specs/020-persist-search-query/plan.md) — Retain the last entity search string in the QuickPick across open/close within the same session; auto-execute search on reopen; reset on ontology change
+- **021-entity-nav-history**: [Implementation Plan](specs/021-entity-nav-history/plan.md) — Back/Forward toolbar buttons (←/→) in the OntoGraph sidebar to navigate entity focus history; keyboard shortcuts scoped to OntoGraph views; history cleared on ontology load
 <!-- SPECKIT END -->

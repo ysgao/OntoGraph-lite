@@ -3,7 +3,7 @@
   "displayName": "OntoGraph Lite: OWL Ontology Editor",
   "version": "0.1.14",
   "publisher": "ysgao",
-  "description": "Protégé-like OWL ontology editing, reasoning, and visualization for VS Code",
+  "description": "Prot\u00e9g\u00e9-like OWL ontology editing, reasoning, and visualization for VS Code",
   "icon": "resources/icons/ontology.png",
   "keywords": [
     "OWL",
@@ -192,12 +192,24 @@
       },
       {
         "command": "ontograph.loadOntologyFile",
-        "title": "OntoGraph: Load Ontology File…",
+        "title": "OntoGraph: Load Ontology File\u2026",
         "icon": "$(folder-opened)"
       },
       {
         "command": "ontograph.focusEntity",
         "title": "OntoGraph: Focus Entity by IRI"
+      },
+      {
+        "command": "ontograph.navigateBack",
+        "title": "Go Back",
+        "icon": "$(arrow-left)",
+        "category": "OntoGraph"
+      },
+      {
+        "command": "ontograph.navigateForward",
+        "title": "Go Forward",
+        "icon": "$(arrow-right)",
+        "category": "OntoGraph"
       }
     ],
     "menus": {
@@ -261,6 +273,18 @@
           "command": "ontograph.addIndividual",
           "when": "view == ontograph.individuals",
           "group": "navigation@3"
+        },
+        {
+          "command": "ontograph.navigateBack",
+          "when": "view =~ /^ontograph\\./",
+          "group": "navigation@-3",
+          "enablement": "ontograph.canNavigateBack"
+        },
+        {
+          "command": "ontograph.navigateForward",
+          "when": "view =~ /^ontograph\\./",
+          "group": "navigation@-2",
+          "enablement": "ontograph.canNavigateForward"
         }
       ],
       "view/item/context": [
@@ -345,9 +369,9 @@
           ],
           "default": "elk",
           "enumDescriptions": [
-            "HermiT — full OWL 2 DL reasoner, best for medium ontologies",
-            "ELK — scalable EL reasoner, recommended for SNOMED CT scale",
-            "Auto — use ELK for ontologies with >5k classes, HermiT otherwise"
+            "HermiT \u2014 full OWL 2 DL reasoner, best for medium ontologies",
+            "ELK \u2014 scalable EL reasoner, recommended for SNOMED CT scale",
+            "Auto \u2014 use ELK for ontologies with >5k classes, HermiT otherwise"
           ],
           "description": "OWL reasoner to use for classification and consistency checking"
         },
@@ -369,7 +393,7 @@
         "ontograph.reasoner.timeoutSeconds": {
           "type": "number",
           "default": 600,
-          "description": "Timeout in seconds for reasoning operations (large ontologies may need 300–600 s)"
+          "description": "Timeout in seconds for reasoning operations (large ontologies may need 300\u2013600 s)"
         },
         "ontograph.display.preferredLabelLanguage": {
           "type": "string",
@@ -414,7 +438,21 @@
           "markdownDescription": "Base IRI prefix used when creating new ontology entities. Must end with `#` or `/` (e.g., `http://example.org/ontology#`). Leave empty to derive the namespace from the ontology's declared IRI."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "ontograph.navigateBack",
+        "key": "alt+left",
+        "mac": "ctrl+-",
+        "when": "focusedView =~ /^ontograph\\./"
+      },
+      {
+        "command": "ontograph.navigateForward",
+        "key": "alt+right",
+        "mac": "ctrl+shift+-",
+        "when": "focusedView =~ /^ontograph\\./"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run build",
