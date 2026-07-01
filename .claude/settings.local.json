@@ -64,7 +64,17 @@
       "Bash(git branch *)",
       "Bash(~/.specify/scripts/bash/setup-tasks.sh --json)",
       "Bash(~/.specify/scripts/bash/check-prerequisites.sh *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite rev-parse --git-dir)",
+      "Bash(git *)",
+      "Bash(npm version *)"
     ]
+  },
+  "skillOverrides": {
+    "anatomy-quarterly-report": "off",
+    "humanizer": "name-only",
+    "ontograph": "name-only",
+    "search-and-summarize-work": "name-only",
+    "speckit-taskstoissues": "name-only"
   }
 }

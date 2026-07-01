@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatManchesterForDisplay, collectLogicalLines, stripAndContinuations, findFormatBreaks } from './ManchesterFormatting';
+import { formatManchesterForDisplay, collectLogicalLines, stripAndContinuations, findFormatBreaks, splitTopLevelConjuncts, sortManchesterConjuncts } from './ManchesterFormatting';
 
 describe('formatManchesterForDisplay', () => {
   it('returns empty string unchanged', () => {
@@ -202,5 +202,200 @@ describe('round-trip invariant', () => {
     ];
     const joined = exprs.map(e => formatManchesterForDisplay(e)).join('\n');
     expect(collectLogicalLines(joined)).toEqual(exprs);
+  });
+});
+
+// T001 — splitTopLevelConjuncts
+describe('splitTopLevelConjuncts', () => {
+  it('empty string returns empty array', () => {
+    expect(splitTopLevelConjuncts('')).toEqual([]);
+  });
+
+  it('single conjunct with no and returns one-element array', () => {
+    expect(splitTopLevelConjuncts('Material anatomical entity')).toEqual(['Material anatomical entity']);
+  });
+
+  it('two conjuncts split on top-level and', () => {
+    expect(splitTopLevelConjuncts('A and B')).toEqual(['A', 'B']);
+  });
+
+  it('three conjuncts split correctly', () => {
+    expect(splitTopLevelConjuncts('A and B and C')).toEqual(['A', 'B', 'C']);
+  });
+
+  it('and inside IRI angle brackets is not a split point', () => {
+    expect(splitTopLevelConjuncts('<http://ex.org/land> and B')).toEqual(['<http://ex.org/land>', 'B']);
+  });
+
+  it('and inside double-quoted string is not a split point', () => {
+    expect(splitTopLevelConjuncts('hasName value "bread and butter" and B')).toEqual([
+      'hasName value "bread and butter"',
+      'B',
+    ]);
+  });
+
+  it('and inside single-quoted label is not a split point', () => {
+    expect(splitTopLevelConjuncts("'Milk and Honey' and B")).toEqual(["'Milk and Honey'", 'B']);
+  });
+
+  it('and inside parentheses is not a split point', () => {
+    expect(splitTopLevelConjuncts('constitutional part of (A and B) and regional part of C')).toEqual([
+      'constitutional part of (A and B)',
+      'regional part of C',
+    ]);
+  });
+
+  it('nested parentheses are handled correctly', () => {
+    expect(splitTopLevelConjuncts('A and (B and (C and D)) and E')).toEqual([
+      'A',
+      '(B and (C and D))',
+      'E',
+    ]);
+  });
+});
+
+// T003 — sortManchesterConjuncts
+describe('sortManchesterConjuncts', () => {
+  it('empty string is returned unchanged', () => {
+    expect(sortManchesterConjuncts('')).toBe('');
+  });
+
+  it('expression with no and clauses is returned unchanged', () => {
+    expect(sortManchesterConjuncts('Material anatomical entity')).toBe('Material anatomical entity');
+  });
+
+  it('already-sorted input is returned unchanged', () => {
+    const expr = 'Material anatomical entity and constitutional part of some Limb and laterality some Left';
+    expect(sortManchesterConjuncts(expr)).toBe(expr);
+  });
+
+  it('reverse-sorted attributes are reordered into canonical order', () => {
+    const input = 'Material anatomical entity and laterality some side and regional part of some entire skin and constitutional part of some entire upper limb';
+    const expected = 'Material anatomical entity and constitutional part of some entire upper limb and regional part of some entire skin and laterality some side';
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it('laterality appearing before other attributes is moved to last position', () => {
+    const input = 'Material anatomical entity and laterality some side and constitutional part of some Limb';
+    const expected = 'Material anatomical entity and constitutional part of some Limb and laterality some side';
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it('unknown role filler is placed after all known attributes but before laterality', () => {
+    const input = 'Entity and laterality some side and unknownRole some X and constitutional part of some Y';
+    const expected = 'Entity and constitutional part of some Y and unknownRole some X and laterality some side';
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it('multiple unknown role fillers preserve their relative order', () => {
+    const input = 'Entity and unknownB some X and unknownA some Y and constitutional part of some Z';
+    const expected = 'Entity and constitutional part of some Z and unknownB some X and unknownA some Y';
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it('and inside IRI filler is treated as opaque — not split mid-IRI', () => {
+    const expr = 'Entity and constitutional part of <http://ex.org/land>';
+    expect(sortManchesterConjuncts(expr)).toBe(expr);
+  });
+
+  it('and inside double-quoted filler is treated as opaque', () => {
+    const expr = 'Entity and constitutional part of some "bread and butter"';
+    expect(sortManchesterConjuncts(expr)).toBe(expr);
+  });
+
+  it('and inside nested parentheses is treated as opaque — parenthesised conjunct moves as a unit', () => {
+    const input = 'Entity and laterality some side and constitutional part of (A and B)';
+    const expected = 'Entity and constitutional part of (A and B) and laterality some side';
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it('expression with top-level or is returned unchanged', () => {
+    const expr = 'A or B';
+    expect(sortManchesterConjuncts(expr)).toBe(expr);
+  });
+
+  it("single-quoted role name 'Constitutional part of' is matched correctly", () => {
+    const input = "Entity and laterality some side and 'Constitutional part of' some Limb";
+    const expected = "Entity and 'Constitutional part of' some Limb and laterality some side";
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it("'All or part of' in single quotes does NOT trigger the or-guard", () => {
+    const input = "Entity and laterality some side and 'All or part of' some X";
+    const expected = "Entity and 'All or part of' some X and laterality some side";
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it('expression with top-level not is returned unchanged', () => {
+    const expr = 'not Material anatomical entity';
+    expect(sortManchesterConjuncts(expr)).toBe(expr);
+  });
+
+  it('named-class head (index 0) is never moved regardless of its role name', () => {
+    const input = 'Material anatomical entity and laterality some side';
+    const result = sortManchesterConjuncts(input);
+    expect(result.startsWith('Material anatomical entity')).toBe(true);
+  });
+
+  it('full canonical example from spec', () => {
+    const input = 'Material anatomical entity and regional part of some entire skin and constitutional part of some entire upper limb and laterality some side';
+    const expected = 'Material anatomical entity and constitutional part of some entire upper limb and regional part of some entire skin and laterality some side';
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+});
+
+// T008 + T009 — sort + display composition and idempotency
+describe('sortManchesterConjuncts + formatManchesterForDisplay composition', () => {
+  it('sorted expression has laterality on the final indented and-line when displayed', () => {
+    const expr = 'Material anatomical entity and regional part of some entire skin and constitutional part of some entire upper limb and laterality some side';
+    const formatted = formatManchesterForDisplay(sortManchesterConjuncts(expr));
+    const lines = formatted.split('\n');
+    expect(lines[lines.length - 1].trim()).toBe('and laterality some side');
+  });
+
+  it('constitutional part of appears before regional part of in display output', () => {
+    const expr = 'Material anatomical entity and regional part of some entire skin and constitutional part of some entire upper limb and laterality some side';
+    const formatted = formatManchesterForDisplay(sortManchesterConjuncts(expr));
+    expect(formatted.indexOf('constitutional part of')).toBeLessThan(formatted.indexOf('regional part of'));
+  });
+
+  it('sort is idempotent through a display-format round-trip', () => {
+    const expr = 'Material anatomical entity and regional part of some entire skin and constitutional part of some entire upper limb and laterality some side';
+    const sorted = sortManchesterConjuncts(expr);
+    const collected = collectLogicalLines(formatManchesterForDisplay(sorted)).join(' ');
+    expect(sortManchesterConjuncts(collected)).toBe(sorted);
+  });
+});
+
+// T011 — canonical order reconfigurability (indirect)
+describe('canonical attribute ordering', () => {
+  it('constitutional part of sorts before regional part of', () => {
+    const input = 'Entity and regional part of some A and constitutional part of some B';
+    const result = sortManchesterConjuncts(input);
+    expect(result.indexOf('constitutional part of')).toBeLessThan(result.indexOf('regional part of'));
+  });
+
+  it('regional part of sorts before lateral half of', () => {
+    const input = 'Entity and lateral half of some A and regional part of some B';
+    const result = sortManchesterConjuncts(input);
+    expect(result.indexOf('regional part of')).toBeLessThan(result.indexOf('lateral half of'));
+  });
+
+  it('lateral half of sorts before systemic part of', () => {
+    const input = 'Entity and systemic part of some A and lateral half of some B';
+    const result = sortManchesterConjuncts(input);
+    expect(result.indexOf('lateral half of')).toBeLessThan(result.indexOf('systemic part of'));
+  });
+
+  it('systemic part of sorts before laterality', () => {
+    const input = 'Entity and laterality some A and systemic part of some B';
+    const result = sortManchesterConjuncts(input);
+    expect(result.indexOf('systemic part of')).toBeLessThan(result.indexOf('laterality some'));
+  });
+
+  it("'All or part of' (single-quoted) sorts first among known attributes", () => {
+    const input = "Entity and laterality some X and 'Constitutional part of' some Y and 'All or part of' some Z";
+    const result = sortManchesterConjuncts(input);
+    expect(result.indexOf('All or part of')).toBeLessThan(result.indexOf('Constitutional part of'));
   });
 });

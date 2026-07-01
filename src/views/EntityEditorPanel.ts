@@ -10,7 +10,7 @@ import type {
 } from '../model/OntologyModel';
 import { createEmptyModel, getLabel } from '../model/OntologyModel';
 import { OntologyIndex } from '../model/OntologyIndex';
-import { collectLogicalLines } from '../utils/ManchesterFormatting';
+import { collectLogicalLines, sortManchesterConjuncts } from '../utils/ManchesterFormatting';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge';
 import { normalizeExpression, renderExpressionWithEntityRefs, type AxiomDisplayStyle } from '../model/AxiomDisplay';
 import { syncAnnotationsToDocument } from '../sync/AnnotationSync';
@@ -748,15 +748,17 @@ function handleMessage(
               .map(e => normalizeExpression(e, model, index)).filter(e => e.length > 0);
           } else {
             const validSuper = filterSection(msg.superClassExpressions, 'superClassExpressions');
-            const splitSuper = splitNormalizedExpressions(validSuper.map(e => normalizeExpression(e, model, index)));
+            const splitSuper = splitNormalizedExpressions(
+              validSuper.map(e => normalizeExpression(sortManchesterConjuncts(e), model, index)));
             cls.superClassIris = splitSuper.namedClassIris;
             cls.superClassExpressions = splitSuper.complexExpressions;
             const validEquiv = filterSection(msg.equivalentClassExpressions, 'equivalentClassExpressions');
-            const splitEquiv = splitNormalizedExpressions(validEquiv.map(e => normalizeExpression(e, model, index)));
+            const splitEquiv = splitNormalizedExpressions(
+              validEquiv.map(e => normalizeExpression(sortManchesterConjuncts(e), model, index)));
             cls.equivalentClassIris = splitEquiv.namedClassIris;
             cls.equivalentClassExpressions = splitEquiv.complexExpressions;
             const validGci = filterSection(msg.gciExpressions, 'gciExpressions');
-            cls.gciExpressions = validGci.map(e => normalizeExpression(e, model, index));
+            cls.gciExpressions = validGci.map(e => normalizeExpression(sortManchesterConjuncts(e), model, index));
             cls.disjointClassIris = msg.disjointClassIris ?? [];
           }
           break;
