@@ -135,6 +135,13 @@ export interface PositionHints {
   regAxioms: Map<string, number>;
 }
 
+/** Sent by the extension to ask whether the editor has unsaved changes. */
+export interface QueryDirtyMessage { type: 'queryDirty' }
+/** Sent by the extension to request the webview to save the current entity (same as user clicking Save). */
+export interface RequestSaveMessage { type: 'requestSave' }
+/** Sent by the webview in response to QueryDirtyMessage. */
+export interface DirtyStateMessage { type: 'dirtyState'; isDirty: boolean }
+
 export interface UndoRequestMessage { type: 'undoRequest' }
 export interface RedoRequestMessage { type: 'redoRequest' }
 export interface UndoRedoStateMessage { type: 'undoRedoState'; canUndo: boolean; canRedo: boolean }
@@ -164,7 +171,9 @@ export type EntityEditorExtToWebview =
   | SaveDraftErrorMessage
   | UndoRedoStateMessage
   | AutoSaveMessage
-  | IriRenameResultMessage;
+  | IriRenameResultMessage
+  | QueryDirtyMessage
+  | RequestSaveMessage;
 export type EntityEditorWebviewToExt =
   | EntityEditorReadyMessage
   | RequestCompletionMessage
@@ -175,4 +184,5 @@ export type EntityEditorWebviewToExt =
   | SaveEntityMessage
   | UndoRequestMessage
   | RedoRequestMessage
-  | RenameIriMessage;
+  | RenameIriMessage
+  | DirtyStateMessage;

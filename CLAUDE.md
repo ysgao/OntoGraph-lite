@@ -223,5 +223,5 @@ Install: `npm install -g @ysgao/ontograph-cli`
 
 <!-- SPECKIT START -->
 ## Active Feature Plan
-- **021-entity-nav-history**: [Implementation Plan](specs/021-entity-nav-history/plan.md) — Back/Forward toolbar buttons (←/→) in the OntoGraph sidebar to navigate entity focus history; keyboard shortcuts scoped to OntoGraph views; history cleared on ontology load
+- **022-unsaved-changes-warning**: COMPLETE — Guard all entity navigation paths (tree click, Back/Forward, focus, QuickPick) with a Save/Discard/Cancel modal dialog when the Entity Editor has unsaved changes; reload advisory notification for FR-010
 <!-- SPECKIT END -->

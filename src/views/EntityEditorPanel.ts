@@ -38,6 +38,7 @@ import type {
   ValidationResultMessage,
   SaveDraftErrorMessage,
   IriRenameResultMessage,
+  DirtyStateMessage,
 } from './EntityEditorMessages';
 
 // ── Singleton panel ───────────────────────────────────────────────────────────
@@ -56,7 +57,27 @@ export function setRefreshAllViews(fn: (model: OntologyModel) => void): void {
 
 let panel: vscode.WebviewPanel | undefined;
 let lastIri = '';
-// Always tracks the most recent model provided by showEntityInfo or
+
+// ── Dirty-guard state ─────────────────────────────────────────────────────────
+
+/** IRI the user wants to navigate to, held while the dirty-guard dialog is open. */
+let pendingNavigationIri: string | null = null;
+/** Resolver for the in-flight queryDirty round-trip. Cleared once resolved. */
+let dirtyQueryResolve: ((isDirty: boolean) => void) | null = null;
+
+/** Returns the IRI currently shown in the Entity Editor (empty string if none). */
+export function getLastIri(): string { return lastIri; }
+
+/**
+ * Queries the open Entity Editor webview for its dirty state.
+ * Returns false immediately if no panel is open.
+ */
+export function queryEntityEditorDirty(): Promise<boolean> {
+  if (!panel) { return Promise.resolve(false); }
+  return queryDirty(panel);
+}
+
+// ── Always tracks the most recent model provided by showEntityInfo or
 // refreshEntityEditorIfOpen. handleMessage uses this instead of the closure-
 // captured model so that save mutations always target the current activeModel,
 // even after handleDocument has re-parsed and replaced the original model object.
@@ -254,6 +275,67 @@ export async function refreshEntityEditorIfOpen(
     // Same file (classify, reload, incremental update) — preserve history.
     const h = entityHistoryMap.get(lastIri);
     postUndoRedoState(panel, h?.canUndo ?? false, h?.canRedo ?? false);
+  }
+}
+
+// ── Dirty guard helpers ───────────────────────────────────────────────────────
+
+function queryDirty(p: vscode.WebviewPanel): Promise<boolean> {
+  return new Promise(resolve => {
+    dirtyQueryResolve = resolve;
+    void p.webview.postMessage({ type: 'queryDirty' } as EntityEditorExtToWebview);
+  });
+}
+
+/**
+ * Guard wrapper around showEntityInfo that intercepts navigation when the
+ * Entity Editor has unsaved changes and shows a Save / Discard / Cancel dialog.
+ *
+ * Returns 'navigated' when navigation proceeds (Save, Discard, or clean editor),
+ * and 'cancelled' when the user dismissed the dialog.
+ *
+ * @param cancelRevealCallback  Optional: called on Cancel to restore tree selection.
+ */
+export async function guardedShowEntityInfo(
+  context: vscode.ExtensionContext,
+  model: OntologyModel,
+  iri: string,
+  cancelRevealCallback?: () => void,
+): Promise<'navigated' | 'cancelled'> {
+  // Skip guard: no panel open, no previous entity, or same entity
+  if (!panel || !lastIri || iri === lastIri) {
+    showEntityInfo(context, model, iri);
+    return 'navigated';
+  }
+
+  const isDirty = await queryDirty(panel);
+  if (!isDirty) {
+    showEntityInfo(context, model, iri);
+    return 'navigated';
+  }
+
+  const entity = findEntity(model, lastIri);
+  const label = entity ? getLabel(entity) : lastIri;
+
+  const choice = await vscode.window.showWarningMessage(
+    `"${label}" has unsaved changes. What would you like to do?`,
+    { modal: true },
+    'Save',
+    'Discard',
+    'Continue Editing',
+  );
+
+  if (choice === 'Save') {
+    pendingNavigationIri = iri;
+    void panel.webview.postMessage({ type: 'requestSave' } as EntityEditorExtToWebview);
+    return 'navigated';
+  } else if (choice === 'Discard') {
+    showEntityInfo(context, model, iri);
+    return 'navigated';
+  } else {
+    // 'Continue Editing' or dismissed via Escape/X
+    cancelRevealCallback?.();
+    return 'cancelled';
   }
 }
 
@@ -567,6 +649,16 @@ function handleMessage(
       break;
     }
 
+    case 'dirtyState': {
+      const typed = msg as DirtyStateMessage;
+      if (dirtyQueryResolve) {
+        const resolve = dirtyQueryResolve;
+        dirtyQueryResolve = null;
+        resolve(typed.isDirty);
+      }
+      break;
+    }
+
     case 'navigate':
       showEntityInfo(context, model, msg.iri);
       void vscode.commands.executeCommand('ontograph.focusEntity', { iri: msg.iri });
@@ -828,6 +920,16 @@ function handleMessage(
               _incrementalSavesSinceRebuild = 0;
               await buildModelSegmentIndexAsync(model);
             }
+
+            // Complete deferred navigation triggered by the dirty-guard "Save" choice.
+            if (pendingNavigationIri && currentPanelModel) {
+              const targetIri = pendingNavigationIri;
+              pendingNavigationIri = null;
+              if (writeOk) {
+                showEntityInfo(context, currentPanelModel, targetIri);
+              }
+              // On write failure: pendingNavigationIri cleared; error already shown above.
+            }
           }
           highlightSyncedRanges(uri, changedRanges);
 
@@ -841,6 +943,7 @@ function handleMessage(
             const newSnapshot = buildEntityPayload(model, msg.iri);
             if (newSnapshot) { saveHistory.updateCurrentSnapshot(newSnapshot); }
           }
+
         } finally {
           _annotationSyncActive = false;
           savedEntityState.delete(msg.iri);

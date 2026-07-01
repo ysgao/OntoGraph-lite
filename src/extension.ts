@@ -13,7 +13,7 @@ import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity, createEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
-import { showEntityInfo, refreshEntityEditorIfOpen, setReasonerBridge, setRefreshAllViews } from './views/EntityEditorPanel';
+import { showEntityInfo, guardedShowEntityInfo, getLastIri, queryEntityEditorDirty, refreshEntityEditorIfOpen, setReasonerBridge, setRefreshAllViews } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
 import { updateDLQueryModel } from './views/DLQueryPanel';
@@ -69,18 +69,33 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       suppressNextSelection = false;
       return;
     }
-    navigationHistory.push(iri);
-    updateNavContextKeys();
-    showEntityInfo(context, activeModel, iri);
-    if (activeModel.classes.has(iri)) {
-      classProvider.setFocus(iri);
-      inferredProvider.setFocus(iri);
-    }
-    const id = extractSctid(iri) ?? iri;
-    vscode.commands.executeCommand(
-      'ontographEditor.ipcRoute',
-      { command: 'GRAPH_NODE_SELECT', payload: { id } }
-    ).then(undefined, () => {});
+    const prevIri = getLastIri();
+    const prevEntityType = prevIri ? entityTypeForIri(prevIri) : undefined;
+    void (async () => {
+      const result = await guardedShowEntityInfo(
+        context, activeModel!, iri,
+        prevIri && prevEntityType
+          ? () => {
+              // Suppress the selection-change event that reveal() fires, so we
+              // don't re-enter onEntitySelected and reload the entity editor.
+              suppressNextSelection = true;
+              revealInTreeView(prevIri, prevEntityType);
+            }
+          : undefined,
+      );
+      if (result === 'cancelled') { return; }
+      navigationHistory.push(iri);
+      updateNavContextKeys();
+      if (activeModel!.classes.has(iri)) {
+        classProvider.setFocus(iri);
+        inferredProvider.setFocus(iri);
+      }
+      const id = extractSctid(iri) ?? iri;
+      vscode.commands.executeCommand(
+        'ontographEditor.ipcRoute',
+        { command: 'GRAPH_NODE_SELECT', payload: { id } }
+      ).then(undefined, () => {});
+    })();
   }
 
   function entityTypeForIri(iri: string): EntityType | undefined {
@@ -167,6 +182,7 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
 
   async function executeReload(): Promise<void> {
     if (!activeModel) { return; }
+    const hadUnsavedEdits = await queryEntityEditorDirty();
     const uri = vscode.Uri.parse(activeModel.sourceUri);
     const filename = uri.fsPath.split(/[\\/]/).pop() ?? 'ontology';
 
@@ -211,6 +227,9 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
         const incrementalOk = await tryIncrementalReload(uri, filename);
         if (incrementalOk) {
           vscode.window.setStatusBarMessage('$(check) Ontology reloaded (incremental)', 8000);
+          if (hadUnsavedEdits) {
+            void vscode.window.showInformationMessage('OntoGraph: Ontology reloaded — your unsaved edits have been discarded.');
+          }
           return;
         }
         outputChannel.appendLine('[reload] incremental skipped — falling back to full re-parse');
@@ -238,6 +257,9 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
         },
       );
       vscode.window.setStatusBarMessage('$(check) Ontology reloaded from disk', 8000);
+      if (hadUnsavedEdits) {
+        void vscode.window.showInformationMessage('OntoGraph: Ontology reloaded — your unsaved edits have been discarded.');
+      }
     } finally {
       await vscode.commands.executeCommand('setContext', 'ontograph.reloading', false);
     }
@@ -384,8 +406,9 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       qp.onDidAccept(() => {
         const sel = qp.selectedItems[0];
         if (sel && activeModel) {
-          showEntityInfo(context, activeModel, sel.iri);
-          revealInTreeView(sel.iri, sel.entityType);
+          void guardedShowEntityInfo(context, activeModel, sel.iri).then(result => {
+            if (result === 'navigated') { revealInTreeView(sel.iri, sel.entityType); }
+          });
         }
         qp.hide();
         qp.dispose();
@@ -413,8 +436,9 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       }
       const fromIpc = item?.fromIpc ?? false;
       if (fromIpc) { suppressNextSelection = true; }
-      showEntityInfo(context, activeModel, iri, fromIpc);
-      revealInTreeView(iri, entityType, fromIpc);
+      void guardedShowEntityInfo(context, activeModel, iri).then(result => {
+        if (result === 'navigated') { revealInTreeView(iri, entityType, fromIpc); }
+      });
     }),
 
     vscode.commands.registerCommand('ontograph.navigateBack', () => {
@@ -422,9 +446,15 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       updateNavContextKeys();
       if (iri && activeModel) {
         suppressNextSelection = true;
-        showEntityInfo(context, activeModel, iri);
-        const entityType = entityTypeForIri(iri);
-        if (entityType) { revealInTreeView(iri, entityType); }
+        void guardedShowEntityInfo(context, activeModel, iri).then(result => {
+          if (result === 'cancelled') {
+            navigationHistory.forward();
+            updateNavContextKeys();
+          } else {
+            const entityType = entityTypeForIri(iri);
+            if (entityType) { revealInTreeView(iri, entityType); }
+          }
+        });
       }
     }),
 
@@ -433,9 +463,15 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       updateNavContextKeys();
       if (iri && activeModel) {
         suppressNextSelection = true;
-        showEntityInfo(context, activeModel, iri);
-        const entityType = entityTypeForIri(iri);
-        if (entityType) { revealInTreeView(iri, entityType); }
+        void guardedShowEntityInfo(context, activeModel, iri).then(result => {
+          if (result === 'cancelled') {
+            navigationHistory.back();
+            updateNavContextKeys();
+          } else {
+            const entityType = entityTypeForIri(iri);
+            if (entityType) { revealInTreeView(iri, entityType); }
+          }
+        });
       }
     }),
 
@@ -526,7 +562,7 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       const iri = item?.iri;
       if (!iri) { void vscode.window.showWarningMessage('OntoGraph: Right-click an entity to open the editor.'); return; }
       if (!activeModel) { void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.'); return; }
-      showEntityInfo(context, activeModel, iri);
+      void guardedShowEntityInfo(context, activeModel, iri);
     }),
 
     vscode.commands.registerCommand('ontograph.copyIri', (item?: { iri?: string }) => {
@@ -547,7 +583,7 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
         void vscode.window.showWarningMessage('OntoGraph: No ontology loaded.');
         return;
       }
-      showEntityInfo(context, activeModel, iri);
+      void guardedShowEntityInfo(context, activeModel, iri);
     }),
 
     vscode.commands.registerCommand('ontograph.diagnose', () => {

@@ -114,6 +114,9 @@ interface IriRenameResultMessage {
   error?: string;
 }
 
+interface QueryDirtyMessage { type: 'queryDirty' }
+interface RequestSaveMessage { type: 'requestSave' }
+
 // ── Global state ──────────────────────────────────────────────────────────────
 
 let currentIri = '';
@@ -2013,7 +2016,18 @@ function updateUndoRedoState(canUndo: boolean, canRedo: boolean): void {
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | UndoRedoStateMessage | AutoSaveMessage | IriRenameResultMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
+  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | UndoRedoStateMessage | AutoSaveMessage | IriRenameResultMessage | QueryDirtyMessage | RequestSaveMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
+
+  if (msg.type === 'queryDirty') {
+    const isDirty = JSON.stringify(getCurrentState()) !== lastSavedStateString;
+    vscode.postMessage({ type: 'dirtyState', isDirty });
+    return;
+  }
+
+  if (msg.type === 'requestSave') {
+    handleSave();
+    return;
+  }
 
   if (msg.type === 'autoSave') {
     handleSave();
