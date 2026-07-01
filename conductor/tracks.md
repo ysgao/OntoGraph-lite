@@ -30,4 +30,17 @@ Feature work since May 2026 uses the **speckit** system instead — see [`specs/
 | 008 | Invalid axiom draft save | ✅ Complete |
 | 009 | Unify named-class axiom display | ✅ Complete |
 | 010 | Reload ontology from disk | ✅ Complete |
+| 011 | Autodetect OWL syntax | ✅ Complete |
+| 012 | Load large ontology | ✅ Complete |
+| 013 | Entity search partial match | ✅ Complete |
+| 014 | Entity editor undo/redo | ✅ Complete |
+| 015 | Remove authoring UI integration | ✅ Complete |
+| 016 | Fix editor stale display | ✅ Complete |
+| 017 | Open workspace folder | ✅ Complete |
+| 018 | OntoGraph CLI | ✅ Complete |
+| 019 | Create entity | ✅ Complete |
+| 020 | Persist search query | ✅ Complete |
+| 021 | Entity nav history | ✅ Complete |
+| 022 | Unsaved changes warning | ✅ Complete |
+| 023 | Manchester sort attributes | ✅ Complete |
 

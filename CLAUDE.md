@@ -222,6 +222,4 @@ Install: `npm install -g @ysgao/ontograph-cli`
 - In-memory only — `Map<entityIri, EntityEditHistory>` on the extension host; no persistence (014-entity-editor-undo-redo)
 
 <!-- SPECKIT START -->
-## Active Feature Plan
-- **022-unsaved-changes-warning**: COMPLETE — Guard all entity navigation paths (tree click, Back/Forward, focus, QuickPick) with a Save/Discard/Cancel modal dialog when the Entity Editor has unsaved changes; reload advisory notification for FR-010
 <!-- SPECKIT END -->
