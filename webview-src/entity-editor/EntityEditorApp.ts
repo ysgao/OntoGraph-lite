@@ -1,7 +1,7 @@
 import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
 import { createAnnotationDisplayElement } from './annotationValueDisplay';
 import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks, stripAndContinuations } from '../../src/utils/ManchesterFormatting';
-import { EditorState, StateField } from '@codemirror/state';
+import { EditorSelection, EditorState, StateField } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -354,8 +354,78 @@ function createEditor(parent: HTMLElement, initialDoc: string, entityRefs: Expre
             const raw = update.state.doc.toString();
             const reformatted = formatManchesterForDisplay(stripAndContinuations(raw));
             if (reformatted !== raw && raw.trimEnd() !== reformatted) {
+              // Preserve cursor position across the full-document replacement.
+              //
+              // Two strategies depending on whether the number of lines changes:
+              //
+              // A) Same line count (e.g. trailing-space trim, leading-space normalise):
+              //    Map via (lineNumber, column) and clamp column to the reformed line length.
+              //    This avoids the off-by-one that arises when trailing spaces on a line
+              //    cause singleLine to be shorter than the raw positions imply.
+              //
+              // B) Different line count (e.g. user typed a new ` and ` clause):
+              //    Map through single-line coordinates using the rawBreakInfo table so that
+              //    the cursor lands on the correct conjunct in the newly formatted output.
+              const rawNewlines = (raw.match(/\n/g) ?? []).length;
+              const refNewlines = (reformatted.match(/\n/g) ?? []).length;
+              const refLines = reformatted.split('\n');
+              const mapPos = (rawPos: number): number => {
+                if (rawNewlines === refNewlines) {
+                  // Strategy A: line/column mapping.
+                  const beforeCursor = raw.slice(0, rawPos);
+                  const lineNum = (beforeCursor.match(/\n/g) ?? []).length;
+                  const lastNl = beforeCursor.lastIndexOf('\n');
+                  const col = rawPos - lastNl - 1;
+                  let absPos = 0;
+                  for (let i = 0; i < lineNum && i < refLines.length; i++) {
+                    absPos += refLines[i].length + 1; // +1 for '\n'
+                  }
+                  if (lineNum < refLines.length) {
+                    absPos += Math.min(col, refLines[lineNum].length);
+                  }
+                  return Math.min(absPos, reformatted.length);
+                }
+                // Strategy B: singleLine-based mapping.
+                const singleLine = stripAndContinuations(raw);
+                const slBreaks = findFormatBreaks(singleLine);
+                const rawLines = raw.split('\n');
+                type RawBreak = { rawPos: number; extraChars: number };
+                const rawBreakInfo: RawBreak[] = [];
+                let lineStart = 0;
+                for (let li = 0; li < rawLines.length; li++) {
+                  const lineLen = rawLines[li].length;
+                  if (li > 0) {
+                    const trimmed = rawLines[li].trim();
+                    if (trimmed.length > 0 && /^and\s/.test(trimmed)) {
+                      const leadingSpaces = rawLines[li].length - rawLines[li].trimStart().length;
+                      rawBreakInfo.push({ rawPos: lineStart - 1, extraChars: leadingSpaces });
+                    }
+                  }
+                  lineStart += lineLen + 1;
+                }
+                let slPos = rawPos;
+                let totalSubtracted = 0;
+                for (const brk of rawBreakInfo) {
+                  if (rawPos <= brk.rawPos) { break; }
+                  if (rawPos <= brk.rawPos + brk.extraChars) {
+                    slPos = brk.rawPos - totalSubtracted;
+                    const slB = slBreaks.filter(b => b < slPos).length;
+                    return Math.min(slPos + 4 * slB, reformatted.length);
+                  }
+                  totalSubtracted += brk.extraChars;
+                  slPos -= brk.extraChars;
+                }
+                slPos = Math.max(0, Math.min(slPos, singleLine.length));
+                const slBefore = slBreaks.filter(b => b < slPos).length;
+                return Math.min(slPos + 4 * slBefore, reformatted.length);
+              };
+              const sel = update.state.selection;
               update.view.dispatch({
                 changes: { from: 0, to: raw.length, insert: reformatted },
+                selection: EditorSelection.create(
+                  sel.ranges.map(r => EditorSelection.range(mapPos(r.anchor), mapPos(r.head))),
+                  sel.mainIndex,
+                ),
               });
             } else {
               checkForChanges();
