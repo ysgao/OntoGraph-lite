@@ -246,6 +246,16 @@ function hasTopLevelToken(expr: string, op: string): boolean {
 }
 
 /**
+ * Returns true if `conjunct` is a bare named-class reference — it contains no
+ * top-level restriction operator (`some`, `only`, `value`, `min`, `max`,
+ * `exactly`).  Such conjuncts are sorted before role-based ones.
+ */
+function isBareNamedClass(conjunct: string): boolean {
+  const ops = [' some ', ' only ', ' value ', ' min ', ' max ', ' exactly '];
+  return !ops.some(op => hasTopLevelToken(conjunct, op));
+}
+
+/**
  * Extracts the lowercase role name from a conjunct for prefix matching.
  * Handles both unquoted (`constitutional part of some X`) and single-quoted
  * (`'Constitutional part of' some X`) forms by stripping the surrounding
@@ -283,6 +293,7 @@ export function sortManchesterConjuncts(expr: string): string {
   const head = conjuncts[0];
   const tail = conjuncts.slice(1);
 
+  const bares: string[] = [];
   const known: Array<{ index: number; conjunct: string }> = [];
   const unknowns: string[] = [];
   const lateralityConjuncts: string[] = [];
@@ -291,6 +302,8 @@ export function sortManchesterConjuncts(expr: string): string {
     const roleLower = extractRoleLower(c);
     if (roleLower.startsWith(LATERALITY_PREFIX)) {
       lateralityConjuncts.push(c);
+    } else if (isBareNamedClass(c)) {
+      bares.push(c);
     } else {
       let matched = false;
       for (let idx = 0; idx < CANONICAL_ROLE_PREFIXES.length; idx++) {
@@ -306,5 +319,5 @@ export function sortManchesterConjuncts(expr: string): string {
 
   known.sort((a, b) => a.index - b.index);
 
-  return [head, ...known.map(k => k.conjunct), ...unknowns, ...lateralityConjuncts].join(' and ');
+  return [head, ...bares, ...known.map(k => k.conjunct), ...unknowns, ...lateralityConjuncts].join(' and ');
 }

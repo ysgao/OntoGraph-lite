@@ -342,6 +342,18 @@ describe('sortManchesterConjuncts', () => {
     const expected = 'Material anatomical entity and constitutional part of some entire upper limb and regional part of some entire skin and laterality some side';
     expect(sortManchesterConjuncts(input)).toBe(expected);
   });
+
+  it('bare named-class conjunct in tail is moved before role-based conjuncts', () => {
+    const input = "'Entire tendinous arch' and 'Constitutional part of' some 'Entire lower leg, from knee to ankle' and 'Regional part of' some 'Entire triceps surae muscle and tendon' and 'Entire triceps surae tendon' and Laterality some Side";
+    const expected = "'Entire tendinous arch' and 'Entire triceps surae tendon' and 'Constitutional part of' some 'Entire lower leg, from knee to ankle' and 'Regional part of' some 'Entire triceps surae muscle and tendon' and Laterality some Side";
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
+
+  it('multiple bare named-class conjuncts in tail preserve their relative order before role-based conjuncts', () => {
+    const input = 'Head and BareB and constitutional part of some X and BareA and laterality some side';
+    const expected = 'Head and BareB and BareA and constitutional part of some X and laterality some side';
+    expect(sortManchesterConjuncts(input)).toBe(expected);
+  });
 });
 
 // T008 + T009 — sort + display composition and idempotency
