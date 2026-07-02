@@ -44,6 +44,26 @@ export interface EntityInfoResult {
   dataPropertyAssertions?: { propertyIri: string; value: string; datatype?: string | undefined }[];
 }
 
+// Returns top-level named-class IRIs from a flat and-conjunction expression.
+// A named-class conjunct is a bare IRI (no spaces); restrictions like
+// "propIri some fillerIri" contain spaces and are excluded.
+function extractNamedConjuncts(expr: string): string[] {
+  let depth = 0;
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < expr.length; i++) {
+    if (expr[i] === '(') { depth++; continue; }
+    if (expr[i] === ')') { depth--; continue; }
+    if (depth === 0 && expr.slice(i, i + 5) === ' and ') {
+      parts.push(expr.slice(start, i).trim());
+      start = i + 5;
+      i += 4;
+    }
+  }
+  parts.push(expr.slice(start).trim());
+  return parts.filter(p => p.startsWith('http') && !p.includes(' '));
+}
+
 function getLocalName(iri: string): string {
   let sep = -1;
   for (let j = iri.length - 1; j >= 0; j--) {
@@ -106,10 +126,17 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
 
   // Add type-specific fields
   if ('superClassIris' in entity) {
-    // Convert IRIs to local names for display
-    if (entity.superClassIris.length > 0) {
-      result.superClasses = entity.superClassIris.map(getLocalName);
+    // Superconcepts: explicit SubClassOf axioms + named conjuncts in EquivalentClasses expressions
+    const superIriSet = new Set<string>(entity.superClassIris);
+    for (const expr of entity.equivalentClassExpressions) {
+      for (const iri of extractNamedConjuncts(expr)) {
+        superIriSet.add(iri);
+      }
     }
+    if (superIriSet.size > 0) {
+      result.superClasses = [...superIriSet].map(getLocalName);
+    }
+
     if (entity.equivalentClassIris.length > 0) {
       result.equivalentClasses = entity.equivalentClassIris.map(getLocalName);
     }
@@ -126,11 +153,16 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
       result.gciExpressions = entity.gciExpressions;
     }
 
-    // Calculate direct subclasses
+    // Direct subconcepts: explicit SubClassOf axioms + named conjuncts in EquivalentClasses expressions
     const directSubClasses: string[] = [];
-    for (const potentialSubClass of model.classes.values()) {
-      if (potentialSubClass.superClassIris.includes(entity.iri)) {
-        directSubClasses.push(getLocalName(potentialSubClass.iri));
+    for (const potentialSub of model.classes.values()) {
+      if (potentialSub.iri === entity.iri) continue;
+      const viaSubClassOf = potentialSub.superClassIris.includes(entity.iri);
+      const viaEquivalent = potentialSub.equivalentClassExpressions.some(
+        expr => extractNamedConjuncts(expr).includes(entity.iri)
+      );
+      if (viaSubClassOf || viaEquivalent) {
+        directSubClasses.push(getLocalName(potentialSub.iri));
       }
     }
     if (directSubClasses.length > 0) {
