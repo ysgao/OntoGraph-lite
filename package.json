@@ -378,7 +378,7 @@
         "ontograph.reasoner.javaPath": {
           "type": "string",
           "default": "java",
-          "description": "Path to the Java executable (must be Java 11+)"
+          "description": "Path to the Java executable (must be Java 21+)"
         },
         "ontograph.reasoner.jvmArgs": {
           "type": "array",

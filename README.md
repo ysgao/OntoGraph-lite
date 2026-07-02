@@ -23,7 +23,6 @@ OntoGraph provides rich language support for OWL files via the Language Server P
 - **Auto-completion**: Intelligent suggestions for OWL keywords, entities, and IRIs.
 - **Diagnostics**: Real-time syntax checking and error reporting for Manchester and Functional syntax.
 - **Hover Information**: View entity details and labels by hovering over IRIs in the editor.
-- **Go to Definition**: Jump directly to entity declarations.
 
 ---
 
@@ -64,7 +63,7 @@ npx @ysgao/ontograph-cli parse ./ontology.ofn
 
 Verify install:
 ```bash
-ontograph --version   # 0.1.11
+ontograph --version   # 0.1.12
 ontograph --help
 ```
 
@@ -212,7 +211,7 @@ Configure OntoGraph in VS Code Settings under `ontograph.*`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `ontograph.reasoner.engine` | `auto` | `hermit`, `elk`, or `auto` (ELK for >5k classes) |
+| `ontograph.reasoner.engine` | `elk` | `hermit`, `elk`, or `auto` (ELK for >5k classes) |
 | `ontograph.reasoner.javaPath` | `java` | Path to Java 21+ executable |
 | `ontograph.reasoner.jvmArgs` | `["-Xmx4g"]` | Extra JVM arguments for the reasoner |
 | `ontograph.reasoner.timeoutSeconds` | `600` | Reasoning timeout in seconds |
@@ -221,6 +220,7 @@ Configure OntoGraph in VS Code Settings under `ontograph.*`:
 | `ontograph.display.axiomEntityStyle` | `label` | `label`, `shortIri`, or `fullIri` in axiom expressions |
 | `ontograph.graph.defaultDepth` | `1` | Default graph visualization depth (1–5) |
 | `ontograph.largeOntologyThreshold` | `50000` | Class count above which large-ontology optimisations apply |
+| `ontograph.entity.defaultNamespace` | `""` | Base IRI prefix for new entities (must end with `#` or `/`); leave empty to derive from the ontology IRI |
 
 ---
 
