@@ -32,7 +32,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.1.12] — 2026-06-12
 
 ### Added
-- **`@ysgao/ontograph-cli`** — standalone npm CLI (`npm install -g @ysgao/ontograph-cli`) for AI coding assistants and scripts. Core commands (`parse`, `search`, `validate`, `convert`) work without VS Code; bridge commands (`classify`, `check-consistency`, `dl-query`) delegate to the running extension.
+- **`@ysgao/ontograph-cli` v0.1.12** — standalone npm CLI (`npm install -g @ysgao/ontograph-cli`) for AI coding assistants and scripts. Core commands (`parse`, `search`, `validate`, `convert`) work without VS Code; bridge commands (`classify`, `check-consistency`, `dl-query`) delegate to the running extension.
 - Loading an ontology file from outside the current workspace now opens the containing folder as a VS Code workspace automatically.
 
 ## [0.1.10] — 2026-06-10
