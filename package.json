@@ -457,6 +457,7 @@
   "scripts": {
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.mjs",
+    "build-all": "npm run build && pnpm --filter ontograph-cli build",
     "build:watch": "node esbuild.mjs --watch",
     "build:parser": "npx peggy --format commonjs --allowed-start-rules ClassExpression,ClassExpressionList,ObjectPropertyExpressionList,SubPropertyChain,DataRange,Fact,IndividualIRIList --output src/parser/manchester/omnParser.js src/parser/manchester/owl-manchester.peggy",
     "compile": "tsc --noEmit",
