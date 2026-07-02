@@ -19,7 +19,7 @@ npm run package         # Create .vsix for VS Code marketplace (--no-dependencie
 ```
 or 
 ```bash
-/
+npm run build all && npm run package
 ```
 
 ### CLI Package (`cli/`)
