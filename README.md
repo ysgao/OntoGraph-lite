@@ -38,7 +38,7 @@ OntoGraph provides rich language support for OWL files via the Language Server P
 ### Installing the VS Code Extension
 
 #### From the Marketplace
-Search for **OntoGraph** in the VS Code Extensions view (`Ctrl+Shift+X`).
+Install directly from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=ysgao.ontograph-lite), or search for **OntoGraph** in the VS Code Extensions view (`Ctrl+Shift+X`).
 
 #### From VSIX
 1. Download `ontograph-lite-x.x.x.vsix` from the [releases page](https://github.com/ysgao/OntoGraph-lite/releases).
