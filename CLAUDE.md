@@ -222,4 +222,5 @@ Install: `npm install -g @ysgao/ontograph-cli`
 - In-memory only — `Map<entityIri, EntityEditHistory>` on the extension host; no persistence (014-entity-editor-undo-redo)
 
 <!-- SPECKIT START -->
+Plan: specs/024-show-direct-supertypes/plan.md
 <!-- SPECKIT END -->
