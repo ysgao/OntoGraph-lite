@@ -18,7 +18,7 @@ interface GraphEdge {
   source: string;
   target: string;
   type: 'subClassOf' | 'equivalentTo' | 'disjointWith' | 'subPropertyOf'
-      | 'domain' | 'range' | 'type' | 'inverseOf' | 'inferred';
+      | 'domain' | 'range' | 'type' | 'inverseOf' | 'inferred' | 'directSupertype';
   label?: string;
   isInferred?: boolean;
 }
@@ -179,6 +179,13 @@ const CY_STYLES: any[] = [
     },
   },
   {
+    selector: 'edge[type="directSupertype"]',
+    style: {
+      'line-color': '#c17ade', 'target-arrow-color': '#c17ade',
+      'target-arrow-shape': 'triangle', width: 2, 'line-style': 'solid',
+    },
+  },
+  {
     selector: 'edge[type="equivalentTo"]',
     style: {
       'line-color': '#e8a800', 'target-arrow-color': '#e8a800',
@@ -268,7 +275,7 @@ function buildLayout(): cytoscape.LayoutOptions {
   if (layoutMode === 'dagre') {
     return {
       name: 'dagre',
-      rankDir: 'TB',
+      rankDir: 'BT',
       nodeSep: 60,
       rankSep: 80,
       animate: true,
