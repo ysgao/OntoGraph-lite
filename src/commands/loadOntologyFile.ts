@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { OntologyModel } from '../model/OntologyModel';
 import { ParserRegistry } from '../parser/ParserRegistry';
+import { detectConflictMarkers, showConflictError } from '../utils/conflictMarkers';
 
 const ONTOLOGY_EXTENSIONS = ['owl', 'ofn', 'omn', 'ttl', 'owx', 'n3'];
 
@@ -68,6 +69,12 @@ export async function loadOntologyFile(
         } catch (readErr) {
           const msg = readErr instanceof Error ? readErr.message : String(readErr);
           void vscode.window.showErrorMessage(`OntoGraph: failed to read '${filename}' — ${msg}.`);
+          return;
+        }
+
+        const conflicts = detectConflictMarkers(text);
+        if (conflicts) {
+          showConflictError(uri!, conflicts);
           return;
         }
 

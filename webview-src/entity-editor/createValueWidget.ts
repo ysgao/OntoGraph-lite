@@ -27,6 +27,7 @@ export function createValueWidget(
   const ta = document.createElement('textarea');
   ta.className = 'annotation-value-input';
   ta.value = value;
+  ta.addEventListener('focus', () => autoGrow(ta));
 
   if (MULTILINE_IRIS.includes(propIri)) {
     ta.addEventListener('input', () => { autoGrow(ta); onChange(ta.value); });

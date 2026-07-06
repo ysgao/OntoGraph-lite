@@ -30,6 +30,13 @@ describe('createValueWidget', () => {
     expect(createValueWidget(RDFS_LABEL, 'my label', () => {}).value).toBe('my label');
   });
 
+  it('triggers autoGrow on focus', () => {
+    const widget = createValueWidget(SKOS_DEFINITION, 'some value', () => {});
+    Object.defineProperty(widget, 'scrollHeight', { value: 150, configurable: true });
+    widget.dispatchEvent(new Event('focus'));
+    expect(widget.style.height).toBe('150px');
+  });
+
   it('calls onChange on input for multiline properties', () => {
     const onChange = vi.fn();
     const widget = createValueWidget(SKOS_DEFINITION, 'initial', onChange);
