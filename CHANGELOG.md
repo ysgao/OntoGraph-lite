@@ -3,6 +3,22 @@
 All notable changes to OntoGraph Lite are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.2] — 2026-07-06
+
+### Added
+- Loading or syncing an OWL file that contains git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) is now blocked — the extension logs an error and skips the file rather than attempting to parse a corrupt ontology.
+
+## [0.2.0] — 2026-07-03
+
+### Added
+- Graph view now renders the direct supertypes of the focused entity as upward-linked nodes, giving immediate superclass context without requiring a full inferred hierarchy.
+- **`@ysgao/ontograph-cli` v0.1.14** adds two new commands:
+  - `ontograph entity-info <file> <iri-or-local-name>` — detailed entity lookup: labels, axioms, superconcepts, and direct subconcepts; handles SNOMED CT–scale ontologies.
+  - `ontograph stats <file>` — ontology statistics summary (class count, property counts, axiom counts).
+
+### Fixed
+- Manchester Syntax parser now accepts plain local names (e.g. `Koala`, `hasHabitat`) in class expressions, not just prefixed names or full IRIs.
+
 ## [0.1.17] — 2026-07-01
 
 ### Added
