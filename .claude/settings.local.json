@@ -67,7 +67,13 @@
       "Bash(git push *)",
       "Bash(git -C /Users/yoga/JavaApp/OntoGraph-lite rev-parse --git-dir)",
       "Bash(git *)",
-      "Bash(npm version *)"
+      "Bash(npm version *)",
+      "Bash(ontograph entity-info *)",
+      "Bash(ontograph --version)",
+      "Bash(npm publish *)",
+      "Bash(npm whoami *)",
+      "Bash(npx @vscode/vsce --version)",
+      "WebFetch(domain:code.visualstudio.com)"
     ]
   },
   "skillOverrides": {
