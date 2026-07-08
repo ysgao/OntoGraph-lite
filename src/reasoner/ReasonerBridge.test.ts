@@ -137,6 +137,49 @@ describe('ReasonerBridge.dlQuery', () => {
   });
 });
 
+describe('ReasonerBridge.classify — equivalentClasses', () => {
+  let bridge: ReasonerBridge;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStdout.on.mockImplementation(vi.fn());
+    bridge = new ReasonerBridge('/fake/ext/path');
+    (bridge as unknown as Record<string, unknown>)['proc'] = mockProc;
+    (bridge as unknown as Record<string, unknown>)['ready'] = true;
+  });
+
+  it('returns the equivalentClasses array from the classify JSON-RPC response', async () => {
+    mockWrite.mockImplementationOnce((payload: string) => {
+      const req = JSON.parse(payload) as { id: number; method: string };
+      const pending = (bridge as unknown as Record<string, unknown>)['pending'] as Map<
+        number,
+        { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+      >;
+      const entry = pending.get(req.id);
+      if (entry) {
+        clearTimeout(entry.timer);
+        entry.resolve({
+          consistent: true,
+          incoherentClasses: [],
+          hierarchy: [['http://www.w3.org/2002/07/owl#Thing', 'http://example.org/A']],
+          equivalentClasses: [
+            { classIri: 'http://example.org/A', equivalentClassIri: 'http://example.org/B' },
+            { classIri: 'http://example.org/C', equivalentClassExpression: 'ObjectIntersectionOf(<http://example.org/D> <http://example.org/E>)' },
+          ],
+        });
+      }
+      return true;
+    });
+
+    const result = await bridge.classifyFile('functional', '/fake/ontology.ofn', 'auto');
+
+    expect(result.equivalentClasses).toEqual([
+      { classIri: 'http://example.org/A', equivalentClassIri: 'http://example.org/B' },
+      { classIri: 'http://example.org/C', equivalentClassExpression: 'ObjectIntersectionOf(<http://example.org/D> <http://example.org/E>)' },
+    ]);
+  });
+});
+
 // ── T024: anatomy.owl dlQuery benchmark ──────────────────────────────────────
 // Real benchmark lives in src/parser/Phase3Reasoner.test.ts (spawnSync pattern).
 // anatomy.owl is >>50k classes so ELK auto-selects; 30s wall-clock limit applies.

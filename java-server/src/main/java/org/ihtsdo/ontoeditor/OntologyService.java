@@ -37,13 +37,22 @@ public class OntologyService {
         public final List<String> incoherentClasses;
         /** Each element is a two-element list [parentIri, childIri] */
         public final List<List<String>> hierarchy;
+        /**
+         * Reasoner-derived class equivalences not already asserted in the ontology.
+         * Each entry is a map with keys "classIri" and either "equivalentClassIri"
+         * (named target) or "equivalentClassExpression" (complex target, rendered
+         * as OWL Functional Syntax text).
+         */
+        public final List<Map<String, String>> equivalentClasses;
 
         ClassificationResult(boolean consistent,
                              List<String> incoherentClasses,
-                             List<List<String>> hierarchy) {
+                             List<List<String>> hierarchy,
+                             List<Map<String, String>> equivalentClasses) {
             this.consistent = consistent;
             this.incoherentClasses = incoherentClasses;
             this.hierarchy = hierarchy;
+            this.equivalentClasses = equivalentClasses;
         }
     }
 
@@ -433,6 +442,7 @@ public class OntologyService {
         boolean consistent = reasoner.isConsistent();
         List<String> incoherent = new ArrayList<>();
         List<List<String>> hierarchy = new ArrayList<>(ontology.getClassesInSignature().size());
+        List<Map<String, String>> equivalentClasses = new ArrayList<>();
 
         if (consistent) {
             OWLDataFactory df = ontology.getOWLOntologyManager().getOWLDataFactory();
@@ -460,9 +470,89 @@ public class OntologyService {
                     }
                 }
             }
+
+            // Inferred-but-unasserted class equivalences (a modeling error worth flagging).
+            // Iterates every declared class, not just `visited`: a class that collapses into
+            // owl:Thing's equivalence node never appears as a hierarchy edge (it IS Thing, not
+            // a subclass of it), so it would otherwise be silently skipped.
+            for (OWLClass cls : ontology.getClassesInSignature()) {
+                if (cls.isOWLThing() || cls.isOWLNothing() || unsatisfiable.contains(cls)) continue;
+                computeInferredEquivalentClasses(ontology, reasoner, cls, equivalentClasses);
+            }
         }
 
-        return new ClassificationResult(consistent, incoherent, hierarchy);
+        return new ClassificationResult(consistent, incoherent, hierarchy, equivalentClasses);
+    }
+
+    /**
+     * Appends inferred-but-unasserted equivalences for {@code cls} to {@code out}: named
+     * classes from {@code reasoner.getEquivalentClasses(cls)} minus anything already covered
+     * by an asserted EquivalentClasses axiom, plus complex expressions already related to
+     * {@code cls} via SubClassOf/GCI axioms that the reasoner also entails full equivalence
+     * with (and which aren't themselves already asserted equivalent).
+     */
+    private void computeInferredEquivalentClasses(OWLOntology ontology, OWLReasoner reasoner,
+            OWLClass cls, List<Map<String, String>> out) {
+        String clsIri = cls.getIRI().toString();
+        Set<OWLEquivalentClassesAxiom> assertedAxioms = ontology.getEquivalentClassesAxioms(cls);
+
+        Set<OWLClass> assertedNamedEquivalents = new HashSet<>();
+        Set<OWLClassExpression> assertedExpressions = new HashSet<>();
+        for (OWLEquivalentClassesAxiom axiom : assertedAxioms) {
+            assertedNamedEquivalents.addAll(axiom.getNamedClasses());
+            assertedExpressions.addAll(axiom.getClassExpressions());
+        }
+
+        for (OWLClass equiv : reasoner.getEquivalentClasses(cls).getEntities()) {
+            if (equiv.equals(cls) || assertedNamedEquivalents.contains(equiv)) continue;
+            Map<String, String> entry = new LinkedHashMap<>();
+            entry.put("classIri", clsIri);
+            entry.put("equivalentClassIri", equiv.getIRI().toString());
+            out.add(entry);
+        }
+
+        // Complex-expression candidates are deliberately narrowed to expressions that
+        // appear on BOTH sides of a SubClassOf relationship with `cls` (SubClassOf(cls,
+        // expr) AND SubClassOf(expr, cls) both asserted) — i.e. a genuine two-way GCI
+        // cycle, which is what an unintended equivalence to a complex expression looks
+        // like syntactically. This is a cheap, pure axiom-set check.
+        //
+        // We do NOT probe the reasoner with every anonymous expression that merely
+        // touches `cls` in one direction (e.g. every ObjectSomeValuesFrom restriction
+        // used in a definitional axiom): reasoner.getEquivalentClasses(expr) on an
+        // ad-hoc expression is not O(1) the way named-class queries are, and at
+        // SNOMED-CT scale (hundreds of thousands of restriction axioms) that blows up
+        // to an OutOfMemoryError. A one-directional restriction can never be entailed
+        // equivalent without some other axiom already making it two-way, so this
+        // narrowing does not miss the failure mode this feature targets.
+        Set<OWLClassExpression> subSideAnonymous = new HashSet<>();
+        for (OWLSubClassOfAxiom axiom : ontology.getSubClassAxiomsForSubClass(cls)) {
+            if (axiom.getSuperClass().isAnonymous()) subSideAnonymous.add(axiom.getSuperClass());
+        }
+        Set<OWLClassExpression> superSideAnonymous = new HashSet<>();
+        for (OWLSubClassOfAxiom axiom : ontology.getSubClassAxiomsForSuperClass(cls)) {
+            if (axiom.getSubClass().isAnonymous()) superSideAnonymous.add(axiom.getSubClass());
+        }
+        subSideAnonymous.retainAll(superSideAnonymous);
+
+        for (OWLClassExpression candidate : subSideAnonymous) {
+            if (assertedExpressions.contains(candidate)) continue;
+            if (reasoner.getEquivalentClasses(candidate).contains(cls)) {
+                Map<String, String> entry = new LinkedHashMap<>();
+                entry.put("classIri", clsIri);
+                entry.put("equivalentClassExpression", renderFunctionalSyntax(ontology, candidate));
+                out.add(entry);
+            }
+        }
+    }
+
+    /** Renders a single class expression as OWL Functional Syntax text. */
+    private static String renderFunctionalSyntax(OWLOntology ontology, OWLClassExpression expr) {
+        java.io.StringWriter writer = new java.io.StringWriter();
+        org.semanticweb.owlapi.functional.renderer.FunctionalSyntaxObjectRenderer renderer =
+                new org.semanticweb.owlapi.functional.renderer.FunctionalSyntaxObjectRenderer(ontology, writer);
+        expr.accept(renderer);
+        return writer.toString();
     }
 
     private static boolean isFunctionalSyntaxExpression(String expr) {

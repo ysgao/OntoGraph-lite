@@ -123,6 +123,11 @@ export interface OntologyModel {
   gciInsertLine?: number;
   /** Inferred class hierarchy populated after reasoning; parent IRI → Set of child IRIs */
   inferredSubClasses: Map<string, Set<string>>;
+  /**
+   * Inferred-but-unasserted class equivalences populated after reasoning; class IRI →
+   * named equivalent IRIs and complex equivalent expressions (Manchester/Functional text).
+   */
+  inferredEquivalentClasses: Map<string, { iris: string[]; expressions: string[] }>;
   /** Whether the ontology has been classified by a reasoner */
   isClassified: boolean;
   /** Whether saved ontology edits have made the current inferred hierarchy stale */
@@ -189,6 +194,7 @@ export function createEmptyModel(sourceUri: string): OntologyModel {
     sourceFormat: 'functional',
     standaloneGcis: [],
     inferredSubClasses: new Map(),
+    inferredEquivalentClasses: new Map(),
     isClassified: false,
     classificationNeedsUpdate: false,
   };

@@ -767,10 +767,12 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
         childSet.add(child);
       }
       const roots = [...nodeMap.values()].filter(n => !childSet.has(n.iri));
+      const { buildInferredEquivalentClasses } = await import('./api');
       return {
         ontologyIri: model.metadata.iri ?? null,
         classCount: model.classes.size,
         inferredSubclassRelations: result.hierarchy.length,
+        inferredEquivalentClasses: buildInferredEquivalentClasses(result.equivalentClasses, getLabel),
         reasoner: 'elk',
         hierarchy: roots,
       };

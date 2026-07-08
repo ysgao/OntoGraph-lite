@@ -15,6 +15,7 @@ function makeModel(iri?: string, rawContent = ''): OntologyModel {
     sourceFormat: 'functional',
     standaloneGcis: [],
     inferredSubClasses: new Map(),
+    inferredEquivalentClasses: new Map(),
     isClassified: false,
     classificationNeedsUpdate: false,
   } as OntologyModel;

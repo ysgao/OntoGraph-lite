@@ -1,10 +1,10 @@
 import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
 import { createAnnotationDisplayElement } from './annotationValueDisplay';
 import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks, stripAndContinuations } from '../../src/utils/ManchesterFormatting';
-import { EditorSelection, EditorState, StateField } from '@codemirror/state';
+import { manchesterLanguage, vsCodeTheme, clickableEntityExtension, shiftRefsForFormat, type ExpressionEntityRef } from './manchesterCodeMirror';
+import { createReadOnlyExpressionEntry } from './readOnlyExpressionEntry';
+import { EditorSelection, EditorState } from '@codemirror/state';
 import {
-  Decoration,
-  type DecorationSet,
   EditorView,
   keymap,
   lineNumbers,
@@ -12,7 +12,6 @@ import {
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import {
-  StreamLanguage,
   syntaxHighlighting,
   defaultHighlightStyle,
 } from '@codemirror/language';
@@ -22,7 +21,6 @@ import {
   type CompletionResult,
 } from '@codemirror/autocomplete';
 import { linter, forEachDiagnostic, type Diagnostic } from '@codemirror/lint';
-import type { StringStream } from '@codemirror/language';
 
 // ── VS Code API ───────────────────────────────────────────────────────────────
 
@@ -38,14 +36,6 @@ const vscode = acquireVsCodeApi();
 
 type EntityType = 'class' | 'objectProperty' | 'dataProperty' | 'annotationProperty' | 'individual';
 
-interface ExpressionEntityRef {
-  from: number;
-  to: number;
-  iri: string;
-  entityType: EntityType;
-  label: string;
-}
-
 interface LoadEntityMessage {
   type: 'loadEntity';
   entityType: EntityType;
@@ -58,6 +48,8 @@ interface LoadEntityMessage {
   superClassExpressions?: string[];
   equivalentClassIris?: string[];
   equivalentClassExpressions?: string[];
+  inferredEquivalentClassIris?: string[];
+  inferredEquivalentClassExpressions?: string[];
   disjointClassIris?: string[];
   superPropertyIris?: string[];
   domainIris?: string[];
@@ -164,52 +156,8 @@ interface AnnotationEntry { propIri: string; value: string; lang?: string; }
 let annotationState: AnnotationEntry[] = [];
 
 // ── Manchester syntax ─────────────────────────────────────────────────────────
-
-const MANCHESTER_KEYWORDS = new Set([
-  'some', 'all', 'value', 'min', 'max', 'exactly', 'only',
-  'and', 'or', 'not', 'that', 'Self',
-]);
-
-const manchesterLanguage = StreamLanguage.define({
-  token(stream: StringStream): string | null {
-    if (stream.eatSpace()) { return null; }
-    if (stream.match(/^#.*/)) { return 'comment'; }
-    if (stream.peek() === '<') {
-      stream.next();
-      while (!stream.eol() && stream.peek() !== '>') { stream.next(); }
-      if (stream.peek() === '>') { stream.next(); }
-      return 'string';
-    }
-    if (stream.peek() === '"') {
-      stream.next();
-      while (!stream.eol() && stream.peek() !== '"') {
-        if (stream.peek() === '\\') { stream.next(); }
-        stream.next();
-      }
-      if (stream.peek() === '"') { stream.next(); }
-      return 'string';
-    }
-    if (stream.peek() === "'") {
-      stream.next();
-      while (!stream.eol() && stream.peek() !== "'") {
-        if (stream.peek() === '\\') { stream.next(); }
-        stream.next();
-      }
-      if (stream.peek() === "'") { stream.next(); }
-      return 'variableName';
-    }
-    if (stream.match(/^\d+(\.\d+)?/)) { return 'number'; }
-    const word = stream.match(/^[A-Za-z_][\w-]*/);
-    const w = typeof word === 'object' ? (word as RegExpMatchArray)[0] : '';
-    if (MANCHESTER_KEYWORDS.has(w)) { return 'keyword'; }
-    if (stream.peek() === ':') {
-      stream.next();
-      stream.match(/^[\w-]*/);
-      return 'variableName';
-    }
-    return 'variableName';
-  },
-});
+// manchesterLanguage/vsCodeTheme/clickableEntityExtension live in ./manchesterCodeMirror
+// so they can be shared with the read-only renderer without a circular import.
 
 async function manchesterCompletionSource(context: CompletionContext): Promise<CompletionResult | null> {
   const word = context.matchBefore(/'[^']*'?|[\w:_-]{2,}/);
@@ -270,69 +218,6 @@ async function manchesterLinter(view: EditorView): Promise<Diagnostic[]> {
   return errors.map(e => ({ from: e.from, to: e.to, severity: e.severity, message: e.message }));
 }
 
-const vsCodeTheme = EditorView.theme({
-  '&': {
-    color: 'var(--vscode-editor-foreground)',
-    backgroundColor: 'var(--vscode-editor-background)',
-    fontFamily: 'var(--vscode-editor-font-family, var(--vscode-font-family))',
-    fontSize: 'var(--vscode-editor-font-size, var(--vscode-font-size))',
-  },
-  '&.cm-focused': {
-    backgroundColor: 'field',
-  },
-  '.cm-content': { caretColor: 'var(--vscode-editorCursor-foreground)' },
-  '.cm-cursor': { borderLeftColor: 'var(--vscode-editorCursor-foreground)' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-    backgroundColor: 'var(--vscode-editor-selectionBackground)',
-  },
-  '.cm-gutters': {
-    backgroundColor: 'var(--vscode-editorGutter-background, var(--vscode-editor-background))',
-    color: 'var(--vscode-editorLineNumber-foreground)',
-    borderRight: '1px solid var(--vscode-editorGroup-border)',
-  },
-  '.cm-activeLineGutter': { backgroundColor: 'var(--vscode-editor-lineHighlightBackground)' },
-  '.cm-activeLine': { backgroundColor: 'var(--vscode-editor-lineHighlightBackground)' },
-});
-
-function clickableEntityExtension(refs: ExpressionEntityRef[]) {
-  const initialDecorations = Decoration.set(
-    refs
-      .filter(ref => ref.from < ref.to)
-      .map(ref => Decoration.mark({
-        class: `cm-clickable-entity cm-clickable-entity-${ref.entityType}`,
-        attributes: {
-          'data-iri': ref.iri,
-          title: `${ref.label}\n${ref.iri}`,
-        },
-      }).range(ref.from, ref.to)),
-    true,
-  );
-
-  const decorationField = StateField.define<DecorationSet>({
-    create() { return initialDecorations; },
-    update(decorations, transaction) {
-      return decorations.map(transaction.changes);
-    },
-    provide: field => EditorView.decorations.from(field),
-  });
-
-  return [
-    decorationField,
-    EditorView.domEventHandlers({
-      click(event) {
-        const target = event.target instanceof HTMLElement
-          ? event.target.closest<HTMLElement>('.cm-clickable-entity')
-          : null;
-        const iri = target?.dataset['iri'];
-        if (!iri) { return false; }
-        event.preventDefault();
-        vscode.postMessage({ type: 'focusEntity', iri });
-        return true;
-      },
-    }),
-  ];
-}
-
 function createEditor(parent: HTMLElement, initialDoc: string, entityRefs: ExpressionEntityRef[] = []): EditorView {
   return new EditorView({
     state: EditorState.create({
@@ -347,7 +232,7 @@ function createEditor(parent: HTMLElement, initialDoc: string, entityRefs: Expre
         keymap.of([...defaultKeymap, ...historyKeymap]),
         autocompletion({ override: [manchesterCompletionSource] }),
         linter(manchesterLinter, { delay: 400 }),
-        clickableEntityExtension(entityRefs),
+        clickableEntityExtension(entityRefs, iri => vscode.postMessage({ type: 'focusEntity', iri })),
         vsCodeTheme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -708,24 +593,7 @@ function renderPropertyChainSection(container: HTMLElement): void {
 }
 
 // ── Expression section ────────────────────────────────────────────────────────
-
-/**
- * The server computes entity-ref offsets against the original single-line
- * expressions.  After T005 formatting each expression expands by 4 chars per
- * 'and' break.  Remap every ref so it points at the correct position in the
- * formatted initialDoc.
- */
-function shiftRefsForFormat(
-  expr: string,
-  refs: ExpressionEntityRef[],
-): ExpressionEntityRef[] {
-  const breaks = findFormatBreaks(expr);
-  if (breaks.length === 0) { return refs; }
-  return refs.map(ref => {
-    const shift = breaks.filter(b => b < ref.from).length * 4;
-    return { ...ref, from: ref.from + shift, to: ref.to + shift };
-  });
-}
+// shiftRefsForFormat lives in ./manchesterCodeMirror (shared with the read-only renderer).
 
 function createExpressionEntry(
   body: HTMLElement,
@@ -794,6 +662,44 @@ function renderExpressionSection(
     }
   });
   actions.appendChild(addBtn);
+
+  container.appendChild(sec);
+}
+
+/**
+ * Renders a read-only counterpart to renderExpressionSection: same Manchester-syntax
+ * highlighting and clickable entity references, but no add/delete controls and a
+ * non-editable CodeMirror instance per entry (FR-005/FR-009 — read-only, reasoner-derived
+ * content, never synced back to the source file). Editors are still tracked in editorMap
+ * so destroySection can clean them up on re-render; getCurrentState() never reads this key.
+ *
+ * Renders nothing at all (no heading, no DOM node) when there are no expressions to show
+ * (FR-007/FR-008) — the extension host already omits the underlying message fields when
+ * unclassified/stale/empty, so an empty `expressions` array is the normal "nothing to flag"
+ * case, not an edge case to special-case at the call site.
+ */
+function renderReadOnlyExpressionSection(
+  container: HTMLElement,
+  title: string,
+  key: string,
+  expressions: string[],
+  perExprRefs: ExpressionEntityRef[][] = [],
+): void {
+  destroySection(key);
+  if (expressions.length === 0) { return; }
+  editorMap[key] = [];
+
+  const sec = makeSectionEl(title);
+  sec.classList.add('section-sm', 'inferred-equivalent-error');
+  const body = sec.querySelector('.section-body') as HTMLElement;
+
+  for (let i = 0; i < expressions.length; i++) {
+    const editor = createReadOnlyExpressionEntry(
+      body, expressions[i], perExprRefs[i] ?? [],
+      iri => vscode.postMessage({ type: 'focusEntity', iri }),
+    );
+    editorMap[key].push(editor);
+  }
 
   container.appendChild(sec);
 }
@@ -1518,6 +1424,17 @@ function renderEntity(msg: LoadEntityMessage): void {
       renderExpressionSection(content, 'GCI (General Concept Inclusions)', 'gciExpressions',
         [...(msg.gciExpressions ?? []), ...draftsFor('gciExpressions')],
         msg.expressionEntityRefs?.['gciExpressions'] ?? [], true);
+
+      const namedInferredEquivLabels = (msg.inferredEquivalentClassIris ?? []).map(iri => `'${localIriLabels[iri] ?? localNameFromIri(iri)}'`);
+      const namedInferredEquivRefs: ExpressionEntityRef[][] = (msg.inferredEquivalentClassIris ?? []).map((iri, idx) => {
+        const quoted = namedInferredEquivLabels[idx];
+        const plainLabel = localIriLabels[iri] ?? localNameFromIri(iri);
+        return [{ from: 0, to: quoted.length, iri, entityType: 'class' as EntityType, label: plainLabel }];
+      });
+      renderReadOnlyExpressionSection(content, 'Inferred Equivalent Class', 'inferredEquivalentClassExpressions',
+        [...namedInferredEquivLabels, ...(msg.inferredEquivalentClassExpressions ?? [])],
+        [...namedInferredEquivRefs, ...(msg.expressionEntityRefs?.['inferredEquivalentClassExpressions'] ?? [])]);
+
       renderIriListSection(content, 'DisjointWith', 'disjointClassIris');
       break;
     }
@@ -1976,6 +1893,21 @@ function injectStyles(): void {
       font-size: 0.85em;
       padding: 8px 12px;
       margin-bottom: 16px;
+    }
+    .inferred-equivalent-error .section-title,
+    .inferred-equivalent-error .expression-editor,
+    .inferred-equivalent-error .expression-editor .cm-content,
+    .inferred-equivalent-error .expression-editor .cm-line {
+      color: var(--vscode-errorForeground, #f48771);
+    }
+    .inferred-equivalent-error .expression-editor {
+      border-color: var(--vscode-errorForeground, #f48771);
+      background: rgba(244, 67, 54, 0.06);
+    }
+    .inferred-equivalent-error .expression-editor:hover,
+    .inferred-equivalent-error .expression-editor:focus-within {
+      border-color: var(--vscode-errorForeground, #f48771);
+      background: rgba(244, 67, 54, 0.1);
     }
 
     .annotation-delete-btn { position: absolute; top: 50%; right: -12px; transform: translateY(-50%); opacity: 0; z-index: 10; }

@@ -6,7 +6,10 @@ describe('classifyCommand', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('calls bridgeClient.send with method classify and writes ClassificationResult', async () => {
-    const mockData = { ontologyIri: null, classCount: 10, inferredSubclassRelations: 3, reasoner: 'elk', hierarchy: [] };
+    const mockData = {
+      ontologyIri: null, classCount: 10, inferredSubclassRelations: 3, reasoner: 'elk', hierarchy: [],
+      inferredEquivalentClasses: [],
+    };
     vi.spyOn(bridgeClient, 'send').mockResolvedValue({ id: '1', success: true, data: mockData });
 
     let captured: unknown;
@@ -21,6 +24,37 @@ describe('classifyCommand', () => {
     expect(r.data.classCount).toBe(10);
     const call = (bridgeClient.send as ReturnType<typeof vi.spyOn>).mock.calls[0];
     expect(call[0].method).toBe('classify');
+  });
+
+  it('forwards inferredEquivalentClasses entries through to the CLI output unmodified', async () => {
+    const mockData = {
+      ontologyIri: 'http://example.org/ont', classCount: 3, inferredSubclassRelations: 0, reasoner: 'hermit', hierarchy: [],
+      inferredEquivalentClasses: [
+        {
+          iri: 'http://example.org/A',
+          label: 'A',
+          equivalentClasses: [{ iri: 'http://example.org/B', label: 'B' }],
+          equivalentExpressions: [],
+        },
+        {
+          iri: 'http://example.org/C',
+          label: 'C',
+          equivalentClasses: [],
+          equivalentExpressions: ['ObjectIntersectionOf(<http://example.org/D> <http://example.org/E>)'],
+        },
+      ],
+    };
+    vi.spyOn(bridgeClient, 'send').mockResolvedValue({ id: '2', success: true, data: mockData });
+
+    let captured: unknown;
+    const origWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: unknown) => { captured = JSON.parse(chunk as string); return true; };
+    const code = await runClassify(5000);
+    process.stdout.write = origWrite;
+
+    expect(code).toBe(0);
+    const r = captured as { data: typeof mockData };
+    expect(r.data.inferredEquivalentClasses).toEqual(mockData.inferredEquivalentClasses);
   });
 
   it('returns BRIDGE_UNAVAILABLE exit code when send rejects', async () => {

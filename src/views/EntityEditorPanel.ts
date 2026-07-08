@@ -992,7 +992,10 @@ export function buildEntityPayload(model: OntologyModel, iri: string): EntitySna
 
   if (entity.type === 'class') {
     const cls = entity as OWLClass;
-    for (const i of [...cls.superClassIris, ...cls.equivalentClassIris, ...cls.disjointClassIris]) {
+    const inferredEquivIris = (model.isClassified && !model.classificationNeedsUpdate)
+      ? model.inferredEquivalentClasses.get(cls.iri)?.iris ?? []
+      : [];
+    for (const i of [...cls.superClassIris, ...cls.equivalentClassIris, ...cls.disjointClassIris, ...inferredEquivIris]) {
       allIris.add(i);
     }
   } else if (
@@ -1072,6 +1075,20 @@ export function buildEntityPayload(model: OntologyModel, iri: string): EntitySna
       style,
       lang,
     );
+    const inferredEquiv = model.isClassified && !model.classificationNeedsUpdate
+      ? model.inferredEquivalentClasses.get(cls.iri)
+      : undefined;
+    if (inferredEquiv && (inferredEquiv.iris.length > 0 || inferredEquiv.expressions.length > 0)) {
+      payload.inferredEquivalentClassIris = inferredEquiv.iris;
+      payload.inferredEquivalentClassExpressions = renderExpressionsWithRefs(
+        'inferredEquivalentClassExpressions',
+        inferredEquiv.expressions,
+        payload.expressionEntityRefs!,
+        model,
+        style,
+        lang,
+      );
+    }
     payload.disjointClassIris = cls.disjointClassIris;
   } else if (entity.type === 'objectProperty') {
     const prop = entity as OWLObjectProperty;

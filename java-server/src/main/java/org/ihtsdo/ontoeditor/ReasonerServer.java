@@ -124,6 +124,7 @@ public class ReasonerServer {
         node.put("consistent", result.consistent);
         node.set("incoherentClasses", MAPPER.valueToTree(result.incoherentClasses));
         node.set("hierarchy", MAPPER.valueToTree(result.hierarchy));
+        node.set("equivalentClasses", MAPPER.valueToTree(result.equivalentClasses));
         return node;
     }
 

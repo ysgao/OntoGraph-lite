@@ -17,6 +17,9 @@ export interface LoadEntityMessage {
   equivalentClassIris?: string[];
   equivalentClassExpressions?: string[];
   gciExpressions?: string[];
+  /** Reasoner-derived, unasserted class equivalences (read-only; never sent back on save). */
+  inferredEquivalentClassIris?: string[];
+  inferredEquivalentClassExpressions?: string[];
   disjointClassIris?: string[];
 
   // Object/Data/Annotation property

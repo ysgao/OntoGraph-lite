@@ -430,6 +430,117 @@ describe('buildEntityPayload', () => {
   });
 });
 
+describe('buildEntityPayload — inferredEquivalentClassIris/Expressions (T011)', () => {
+  function makeClassModel() {
+    const model = createEmptyModel('http://example.org/test');
+    const cls: OWLClass = {
+      iri: 'http://example.org/test#A',
+      type: 'class',
+      labels: { en: ['A'] },
+      annotations: {},
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+    model.classes.set(cls.iri, cls);
+    model.isClassified = true;
+    model.classificationNeedsUpdate = false;
+    return { model, cls };
+  }
+
+  beforeEach(() => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn().mockReturnValue(undefined),
+    } as unknown as ReturnType<typeof vscode.workspace.getConfiguration>);
+  });
+
+  it('populates inferredEquivalentClassIris from model.inferredEquivalentClasses', () => {
+    const { model, cls } = makeClassModel();
+    model.inferredEquivalentClasses.set(cls.iri, { iris: ['http://example.org/test#B'], expressions: [] });
+
+    const snap = buildEntityPayload(model, cls.iri);
+
+    expect(snap?.inferredEquivalentClassIris).toEqual(['http://example.org/test#B']);
+  });
+
+  it('populates inferredEquivalentClassExpressions with matching expressionEntityRefs entries', () => {
+    const { model, cls } = makeClassModel();
+    model.inferredEquivalentClasses.set(cls.iri, {
+      iris: [],
+      expressions: ['ObjectIntersectionOf(<http://example.org/test#D> <http://example.org/test#E>)'],
+    });
+
+    const snap = buildEntityPayload(model, cls.iri);
+
+    expect(snap?.inferredEquivalentClassExpressions).toHaveLength(1);
+    expect(snap?.expressionEntityRefs?.['inferredEquivalentClassExpressions']).toBeDefined();
+    expect(snap?.expressionEntityRefs?.['inferredEquivalentClassExpressions']).toHaveLength(1);
+  });
+});
+
+describe('buildEntityPayload — omits inferredEquivalentClass* when nothing qualifies (T018)', () => {
+  function makeClassModel() {
+    const model = createEmptyModel('http://example.org/test');
+    const cls: OWLClass = {
+      iri: 'http://example.org/test#A',
+      type: 'class',
+      labels: { en: ['A'] },
+      annotations: {},
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+    model.classes.set(cls.iri, cls);
+    model.isClassified = true;
+    model.classificationNeedsUpdate = false;
+    return { model, cls };
+  }
+
+  beforeEach(() => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn().mockReturnValue(undefined),
+    } as unknown as ReturnType<typeof vscode.workspace.getConfiguration>);
+  });
+
+  it('omits both fields when the class has no entries in model.inferredEquivalentClasses', () => {
+    const { model, cls } = makeClassModel();
+    // No model.inferredEquivalentClasses.set(...) call — class has nothing to flag.
+
+    const snap = buildEntityPayload(model, cls.iri);
+
+    expect(snap?.inferredEquivalentClassIris).toBeUndefined();
+    expect(snap?.inferredEquivalentClassExpressions).toBeUndefined();
+  });
+
+  it('omits both fields when the ontology has not been classified', () => {
+    const { model, cls } = makeClassModel();
+    model.inferredEquivalentClasses.set(cls.iri, { iris: ['http://example.org/test#B'], expressions: [] });
+    model.isClassified = false;
+
+    const snap = buildEntityPayload(model, cls.iri);
+
+    expect(snap?.inferredEquivalentClassIris).toBeUndefined();
+    expect(snap?.inferredEquivalentClassExpressions).toBeUndefined();
+  });
+
+  it('omits both fields when classification is stale (classificationNeedsUpdate)', () => {
+    const { model, cls } = makeClassModel();
+    model.inferredEquivalentClasses.set(cls.iri, { iris: ['http://example.org/test#B'], expressions: [] });
+    model.classificationNeedsUpdate = true;
+
+    const snap = buildEntityPayload(model, cls.iri);
+
+    expect(snap?.inferredEquivalentClassIris).toBeUndefined();
+    expect(snap?.inferredEquivalentClassExpressions).toBeUndefined();
+  });
+});
+
 function makeSnap(label: string, iri = 'http://example.org/A'): EntitySnapshot {
   return {
     entityType: 'class',

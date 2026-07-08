@@ -6,11 +6,39 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { DLQueryResult } from '../model/OntologyModel.js';
 
+export interface EquivalentClassEntry {
+  classIri: string;
+  equivalentClassIri?: string;
+  equivalentClassExpression?: string;
+}
+
 export interface ClassificationResult {
   consistent: boolean;
   incoherentClasses: string[];
   /** Directed edges of the inferred hierarchy: [parentIri, childIri] */
   hierarchy: [string, string][];
+  /** Reasoner-derived class equivalences not already asserted in the ontology */
+  equivalentClasses: EquivalentClassEntry[];
+}
+
+/** Groups flat equivalentClasses entries by classIri, splitting named vs. complex targets. */
+export function groupEquivalentClasses(
+  entries: EquivalentClassEntry[],
+): Map<string, { iris: string[]; expressions: string[] }> {
+  const grouped = new Map<string, { iris: string[]; expressions: string[] }>();
+  for (const entry of entries) {
+    let group = grouped.get(entry.classIri);
+    if (!group) {
+      group = { iris: [], expressions: [] };
+      grouped.set(entry.classIri, group);
+    }
+    if (entry.equivalentClassIri) {
+      group.iris.push(entry.equivalentClassIri);
+    } else if (entry.equivalentClassExpression) {
+      group.expressions.push(entry.equivalentClassExpression);
+    }
+  }
+  return grouped;
 }
 
 export interface ConsistencyResult {
