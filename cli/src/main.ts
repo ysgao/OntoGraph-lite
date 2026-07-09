@@ -14,7 +14,7 @@ const program = new Command();
 program
   .name('ontograph')
   .description('OntoGraph CLI — OWL ontology operations for AI tools and developers')
-  .version('0.1.0')
+  .version('0.2.2')
   .option('--timeout <ms>', 'operation timeout in milliseconds', '30000')
   .exitOverride()
   .action(() => {
