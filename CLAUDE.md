@@ -29,6 +29,10 @@ pnpm --filter ontograph-cli test    # Run CLI unit + integration tests (Vitest)
 node cli/dist/main.js --help        # Try the CLI locally
 ```
 
+`cli/package.json` version and the `.version()` string in `cli/src/main.ts` should track the root `package.json` version (they are bumped together, not independently).
+
+To publish: `cd cli && npm publish --access public`. The npm account's 2FA method is a security key (WebAuthn) — the CLI's `--otp` flow only accepts typed TOTP codes, so publishing from a terminal requires a granular access token (Read+write, "bypass 2FA for write actions" enabled) set as `//registry.npmjs.org/:_authToken` in `~/.npmrc`, not the token from `npm login`.
+
 ### Java Reasoner Server
 ```bash
 cd java-server && mvn clean package   # Builds fat JAR via maven-shade-plugin
