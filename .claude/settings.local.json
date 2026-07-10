@@ -73,7 +73,14 @@
       "Bash(npm publish *)",
       "Bash(npm whoami *)",
       "Bash(npx @vscode/vsce --version)",
-      "WebFetch(domain:code.visualstudio.com)"
+      "WebFetch(domain:code.visualstudio.com)",
+      "Bash(npx @vscode/vsce publish --help)",
+      "Bash(npx *)",
+      "Bash(mvn -q clean package)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(ontograph validate *)",
+      "Bash(cat tsconfig.json)",
+      "Bash(cat esbuild.mjs)"
     ]
   },
   "skillOverrides": {
