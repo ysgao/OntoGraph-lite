@@ -8,3 +8,4 @@ test-ontologies/
 *.log
 .env*
 uml-diagram-cli-plan/
+cli-standalone/.runtime-cache/

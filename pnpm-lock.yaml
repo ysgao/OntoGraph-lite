@@ -110,6 +110,25 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@22.19.20)(jsdom@29.1.1)
 
+  cli-standalone:
+    dependencies:
+      commander:
+        specifier: ^12.1.0
+        version: 12.1.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.20
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@22.19.20)(jsdom@29.1.1)
+
 packages:
 
   '@asamuzakjp/css-color@5.1.11':

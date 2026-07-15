@@ -1,6 +1,7 @@
 packages:
   - '.'
   - 'cli'
+  - 'cli-standalone'
 allowBuilds:
   '@vscode/vsce-sign': true
   esbuild: true

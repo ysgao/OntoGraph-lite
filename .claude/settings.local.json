@@ -81,7 +81,11 @@
       "Bash(ontograph validate *)",
       "Bash(cat tsconfig.json)",
       "Bash(cat esbuild.mjs)",
-      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(curl -s \"https://api.adoptium.net/v3/assets/latest/21/hotspot?image_type=jre&os=mac&architecture=aarch64\" --max-time 15)",
+      "Bash(/Users/yoga/JavaApp/OntoGraph-lite/cli-standalone/dist/runtime/jre/Contents/Home/bin/java -version)",
+      "Bash(time node cli-standalone/dist/main.js classify test-ontologies/anatomy.owl --reasoner elk)",
+      "Bash(echo \"exit: $?\")"
     ]
   },
   "skillOverrides": {

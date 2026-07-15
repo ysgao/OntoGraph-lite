@@ -58,9 +58,10 @@ describe('ReasonerBridge.dlQuery', () => {
     vi.clearAllMocks();
     mockStdout.on.mockImplementation(vi.fn());
     bridge = new ReasonerBridge('/fake/ext/path');
-    // Inject the mock process so we don't need to start()
-    (bridge as unknown as Record<string, unknown>)['proc'] = mockProc;
-    (bridge as unknown as Record<string, unknown>)['ready'] = true;
+    // Inject the mock process into the composed ReasonerProcess so we don't need to start()
+    const inner = (bridge as unknown as Record<string, unknown>)['inner'] as Record<string, unknown>;
+    inner['proc'] = mockProc;
+    inner['ready'] = true;
   });
 
   it('dlQuery method exists on ReasonerBridge', () => {
@@ -72,7 +73,8 @@ describe('ReasonerBridge.dlQuery', () => {
     mockWrite.mockImplementationOnce((payload: string) => {
       const req = JSON.parse(payload) as { id: number; method: string; params: unknown };
       // Immediately inject the fake response into the pending map
-      const pending = (bridge as unknown as Record<string, unknown>)['pending'] as Map<
+      const inner = (bridge as unknown as Record<string, unknown>)['inner'] as Record<string, unknown>;
+      const pending = inner['pending'] as Map<
         number,
         { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
       >;
@@ -119,7 +121,8 @@ describe('ReasonerBridge.dlQuery', () => {
   it('throws when the reasoner returns an error', async () => {
     mockWrite.mockImplementationOnce((payload: string) => {
       const req = JSON.parse(payload) as { id: number };
-      const pending = (bridge as unknown as Record<string, unknown>)['pending'] as Map<
+      const inner = (bridge as unknown as Record<string, unknown>)['inner'] as Record<string, unknown>;
+      const pending = inner['pending'] as Map<
         number,
         { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
       >;
@@ -144,14 +147,16 @@ describe('ReasonerBridge.classify — equivalentClasses', () => {
     vi.clearAllMocks();
     mockStdout.on.mockImplementation(vi.fn());
     bridge = new ReasonerBridge('/fake/ext/path');
-    (bridge as unknown as Record<string, unknown>)['proc'] = mockProc;
-    (bridge as unknown as Record<string, unknown>)['ready'] = true;
+    const inner = (bridge as unknown as Record<string, unknown>)['inner'] as Record<string, unknown>;
+    inner['proc'] = mockProc;
+    inner['ready'] = true;
   });
 
   it('returns the equivalentClasses array from the classify JSON-RPC response', async () => {
     mockWrite.mockImplementationOnce((payload: string) => {
       const req = JSON.parse(payload) as { id: number; method: string };
-      const pending = (bridge as unknown as Record<string, unknown>)['pending'] as Map<
+      const inner = (bridge as unknown as Record<string, unknown>)['inner'] as Record<string, unknown>;
+      const pending = inner['pending'] as Map<
         number,
         { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
       >;

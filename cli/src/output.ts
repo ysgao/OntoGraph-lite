@@ -22,7 +22,10 @@ export function writeError(
   process.stdout.write(JSON.stringify(response) + '\n');
 }
 
-const EXIT_CODES: Record<string, number> = {
+/** Exported (not just module-private) so cli-standalone/src/output.ts can extend this same base
+ *  map with its own additional codes (RUNTIME_UNAVAILABLE, PLATFORM_UNSUPPORTED) without
+ *  duplicating it — see specs/028-standalone-cli-reasoner. */
+export const EXIT_CODES: Record<string, number> = {
   FILE_NOT_FOUND: 1,
   PARSE_ERROR: 2,
   UNSUPPORTED_FORMAT: 3,
