@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatManchesterForDisplay, collectLogicalLines, stripAndContinuations, findFormatBreaks, splitTopLevelConjuncts, sortManchesterConjuncts } from './ManchesterFormatting';
+import { formatManchesterForDisplay, collectLogicalLines, stripAndContinuations, findFormatBreaks, splitTopLevelConjuncts, sortManchesterConjuncts, parseConjuncts } from './ManchesterFormatting';
 
 describe('formatManchesterForDisplay', () => {
   it('returns empty string unchanged', () => {
@@ -409,5 +409,59 @@ describe('canonical attribute ordering', () => {
     const input = "Entity and laterality some X and 'Constitutional part of' some Y and 'All or part of' some Z";
     const result = sortManchesterConjuncts(input);
     expect(result.indexOf('All or part of')).toBeLessThan(result.indexOf('Constitutional part of'));
+  });
+});
+
+describe('parseConjuncts', () => {
+  it('returns an empty array for an empty expression', () => {
+    expect(parseConjuncts('')).toEqual([]);
+  });
+
+  it('parses a single bare named-class conjunct (genus term)', () => {
+    expect(parseConjuncts('http://example.org/Genus')).toEqual([
+      { kind: 'bare', targetIri: 'http://example.org/Genus' },
+    ]);
+  });
+
+  it('parses a genus term plus a "some" restriction as bare + restriction', () => {
+    const expr = 'http://example.org/Genus and http://example.org/partOf some http://example.org/Whole';
+    expect(parseConjuncts(expr)).toEqual([
+      { kind: 'bare', targetIri: 'http://example.org/Genus' },
+      { kind: 'restriction', propertyIri: 'http://example.org/partOf', targetIri: 'http://example.org/Whole' },
+    ]);
+  });
+
+  it('parses a genus term plus a restriction using an unrelated (non-part-of) property identically — classification of the property happens in src/uml/partOfGraph.ts, not here', () => {
+    const expr = 'http://example.org/Genus and http://example.org/vasculatureOf some http://example.org/Artery';
+    expect(parseConjuncts(expr)).toEqual([
+      { kind: 'bare', targetIri: 'http://example.org/Genus' },
+      { kind: 'restriction', propertyIri: 'http://example.org/vasculatureOf', targetIri: 'http://example.org/Artery' },
+    ]);
+  });
+
+  it('parses multiple "some" restrictions in the same intersection', () => {
+    const expr = 'http://example.org/Genus'
+      + ' and http://example.org/partOfA some http://example.org/WholeA'
+      + ' and http://example.org/partOfB some http://example.org/WholeB';
+    expect(parseConjuncts(expr)).toEqual([
+      { kind: 'bare', targetIri: 'http://example.org/Genus' },
+      { kind: 'restriction', propertyIri: 'http://example.org/partOfA', targetIri: 'http://example.org/WholeA' },
+      { kind: 'restriction', propertyIri: 'http://example.org/partOfB', targetIri: 'http://example.org/WholeB' },
+    ]);
+  });
+
+  it('does not misclassify an "only"/"value"/"min"/"max"/"exactly" conjunct as a bare named class', () => {
+    // Cardinality/universal restrictions are out of scope (0 occurrences confirmed in this
+    // project's real anatomy fixture) — such a conjunct is neither 'bare' nor 'restriction'.
+    const expr = 'http://example.org/Genus and http://example.org/hasPart only http://example.org/Whole';
+    expect(parseConjuncts(expr)).toEqual([
+      { kind: 'bare', targetIri: 'http://example.org/Genus' },
+    ]);
+  });
+
+  it('parses a bare pairwise SubClassOf-shaped expression (no intersection at all)', () => {
+    expect(parseConjuncts('http://example.org/Parent')).toEqual([
+      { kind: 'bare', targetIri: 'http://example.org/Parent' },
+    ]);
   });
 });

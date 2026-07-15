@@ -82,6 +82,16 @@ const dlQueryBuild = esbuild.build({
   target: 'es2020',
 });
 
+// UML diagram webview bundle (browser)
+const umlDiagramBuild = esbuild.build({
+  ...baseConfig,
+  entryPoints: ['webview-src/uml/UmlDiagramApp.ts'],
+  outfile: 'dist/uml-diagram-webview.js',
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2020',
+});
+
 await Promise.all([
   extensionBuild,
   parserWorkerBuild,
@@ -90,4 +100,5 @@ await Promise.all([
   classEditorBuild,
   sparqlEditorBuild,
   dlQueryBuild,
+  umlDiagramBuild,
 ]).catch(() => process.exit(1));

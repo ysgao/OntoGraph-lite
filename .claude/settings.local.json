@@ -80,7 +80,8 @@
       "Bash(echo \"EXIT:$?\")",
       "Bash(ontograph validate *)",
       "Bash(cat tsconfig.json)",
-      "Bash(cat esbuild.mjs)"
+      "Bash(cat esbuild.mjs)",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")"
     ]
   },
   "skillOverrides": {

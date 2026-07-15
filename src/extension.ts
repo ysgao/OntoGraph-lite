@@ -13,6 +13,7 @@ import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity, createEntity } from './commands/addEntity';
 import { openGraphView } from './commands/openVisualization';
+import { generateUmlDiagram, exportUmlDiagramDrawio, exportUmlDiagramSvg, exportUmlDiagramPng } from './commands/generateUmlDiagram';
 import { showEntityInfo, guardedShowEntityInfo, getLastIri, queryEntityEditorDirty, refreshEntityEditorIfOpen, setReasonerBridge, setRefreshAllViews } from './views/EntityEditorPanel';
 import { openSparqlEditor } from './commands/openSparqlEditor';
 import { openDLQuery } from './commands/openDLQuery';
@@ -551,6 +552,18 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
 
     vscode.commands.registerCommand('ontograph.openGraph', (item?: { iri?: string }) =>
       openGraphView(context, activeModel, item?.iri)),
+
+    vscode.commands.registerCommand('ontograph.generateUmlDiagram', (item?: { iri?: string }) =>
+      generateUmlDiagram(context, activeModel, item?.iri)),
+
+    vscode.commands.registerCommand('ontograph.exportUmlDiagramDrawio', (item?: { iri?: string }) =>
+      exportUmlDiagramDrawio(activeModel, item?.iri)),
+
+    vscode.commands.registerCommand('ontograph.exportUmlDiagramSvg', (item?: { iri?: string }) =>
+      exportUmlDiagramSvg(activeModel, item?.iri)),
+
+    vscode.commands.registerCommand('ontograph.exportUmlDiagramPng', (item?: { iri?: string }) =>
+      exportUmlDiagramPng(activeModel, item?.iri)),
 
     vscode.commands.registerCommand('ontograph.openSparqlEditor', () =>
       openSparqlEditor(context, activeModel)),

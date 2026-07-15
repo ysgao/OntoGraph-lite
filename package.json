@@ -121,6 +121,26 @@
         "icon": "$(type-hierarchy-sub)"
       },
       {
+        "command": "ontograph.generateUmlDiagram",
+        "title": "Generate UML Diagram",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "ontograph.exportUmlDiagramDrawio",
+        "title": "Export UML Diagram to draw.io...",
+        "icon": "$(export)"
+      },
+      {
+        "command": "ontograph.exportUmlDiagramSvg",
+        "title": "Export UML Diagram to SVG...",
+        "icon": "$(export)"
+      },
+      {
+        "command": "ontograph.exportUmlDiagramPng",
+        "title": "Export UML Diagram to PNG...",
+        "icon": "$(export)"
+      },
+      {
         "command": "ontograph.openSparqlEditor",
         "title": "OntoGraph: Open SPARQL Editor",
         "icon": "$(search)"
@@ -297,6 +317,11 @@
           "command": "ontograph.openGraph",
           "when": "view =~ /^ontograph\\.(classes|inferredClasses|individuals)/ && viewItem =~ /^owlEntity/",
           "group": "2_navigate"
+        },
+        {
+          "command": "ontograph.generateUmlDiagram",
+          "when": "view =~ /^ontograph\\.(classes|inferredClasses|individuals)/ && viewItem =~ /^owlEntity/",
+          "group": "2_navigate"
         }
       ],
       "commandPalette": [
@@ -411,6 +436,39 @@
           "minimum": 1,
           "maximum": 5,
           "description": "Default neighbourhood depth for graph visualization"
+        },
+        "ontograph.umlDiagram.defaultDepth": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Default relationship depth for a newly generated UML diagram"
+        },
+        "ontograph.umlDiagram.defaultDirection": {
+          "type": "string",
+          "enum": [
+            "TB",
+            "LR"
+          ],
+          "default": "LR",
+          "enumDescriptions": [
+            "Top to bottom (root at the top, descendants below)",
+            "Left to right (root at the left, descendants to the right)"
+          ],
+          "description": "Default layout flow direction for a newly generated UML diagram; can also be switched in-panel via the diagram's own Layout toggle"
+        },
+        "ontograph.umlDiagram.compositionProperties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "http://snomed.info/id/733931002",
+            "http://snomed.info/id/733930001",
+            "http://snomed.info/id/733932009",
+            "http://snomed.info/id/774081006"
+          ],
+          "markdownDescription": "Object property IRIs treated as composition (part-of) relationships when generating a UML diagram. Properties not listed here are never rendered as composition connectors (they appear as an excluded-relation badge instead). Defaults to SNOMED CT's four part-of properties (Constitutional/Regional/Systemic/Proper part of) since anatomy.owl is this project's reference ontology; clear the list or replace it with your own ontology's part-of-style property IRIs as needed."
         },
         "ontograph.display.axiomEntityStyle": {
           "type": "string",
