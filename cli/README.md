@@ -4,6 +4,11 @@ Standalone CLI for [OntoGraph](https://github.com/ysgao/OntoGraph-lite) OWL onto
 
 All commands print one JSON object to stdout and exit with a standard code. No interactive prompts.
 
+> Need `classify`/`check-consistency`/`dl-query` without a running VS Code instance at all? See the
+> separate [`@ysgao/ontograph-cli-standalone`](../cli-standalone/README.md) package (macOS Apple
+> Silicon only) — it bundles its own Java runtime and reasoner. It shares this package's core
+> commands (`parse`/`search`/`validate`/`convert`/`stats`/`entity-info`) exactly.
+
 ## Install
 
 ```bash
@@ -30,6 +35,8 @@ Use the `ontograph` CLI when working with OWL files (.ofn, .omn, .ttl, .owl, .ow
   ontograph search <file> <query>           # find entities by label or IRI substring
   ontograph validate <file>                 # structural error check
   ontograph convert <file> --to functional  # normalize to OWL Functional Syntax
+  ontograph stats <file>                    # ontology-wide statistics summary
+  ontograph entity-info <file> <iri>        # detailed lookup for one entity
 All output is JSON on stdout. Exit 0 = success, non-zero = error (errorCode field identifies type).
 ```
 
@@ -155,6 +162,55 @@ Supported targets: `functional` (OWL Functional Syntax), `turtle`. Manchester an
 
 ---
 
+### `ontograph stats <file>`
+
+Analyze ontology structure and return comprehensive statistics: entity counts, class hierarchy
+depth/breadth, orphan classes, equivalent-class groups, property/axiom/annotation counts.
+
+```bash
+ontograph stats ./ontology.ofn
+ontograph stats ./snomed.owl
+```
+
+Output (abridged):
+```json
+{
+  "success": true,
+  "command": "stats",
+  "durationMs": 61,
+  "data": {
+    "filePath": "...",
+    "format": "functional",
+    "ontologyIri": "http://example.org/my-ontology",
+    "classCount": 350412,
+    "classHierarchyDepth": 14,
+    "orphanClassCount": 2,
+    "equivalentClassGroups": 5,
+    "subClassOfAxioms": 350401,
+    "annotationCount": 700000
+  }
+}
+```
+
+---
+
+### `ontograph entity-info <file> <iri-or-local-name>`
+
+Detailed lookup for one entity: labels, annotations, asserted axioms, superconcepts, and direct
+subconcepts. Handles SNOMED CT–scale ontologies.
+
+```bash
+ontograph entity-info ./ontology.ofn "http://example.org/animals#Koala"
+ontograph entity-info ./snomed.owl Koala
+```
+
+Accepts a full IRI or a bare local name (resolved via a reverse local-name index). Output shape
+varies by entity type (`class`, `objectProperty`, `dataProperty`, `annotationProperty`,
+`individual`) — see `EntityInfoResult` in `cli/src/commands/core/entityInfoCommand.ts` for the
+full field list.
+
+---
+
 ## Bridge commands — requires OntoGraph running in VS Code
 
 These commands connect to a running OntoGraph VS Code extension via a local IPC socket. They require:
@@ -206,15 +262,27 @@ Output:
 
 ### `ontograph dl-query <expression>`
 
-Run a DL query against the active ontology.
+Run a DL query against the active ontology. Auto-classifies first if the ontology hasn't been
+classified yet (or is stale) — no need to run `ontograph classify` beforehand.
 
 ```bash
 ontograph dl-query "Animal and hasHabitat some Ocean"
 ontograph dl-query "pizza:Pizza and pizza:hasTopping some pizza:MozzarellaTopping"
 ontograph dl-query "ClinicalFinding and findingSite some (BodyStructure and partOf some Heart)"
+
+# Restrict which categories come back, and filter results by label/IRI substring
+ontograph dl-query "Body structure" --types directSubClasses,subClasses --filter "liver"
 ```
 
-Output:
+Flags:
+- `--types <list>` — comma-separated result categories: `directSuperClasses`, `superClasses`,
+  `equivalentClasses`, `directSubClasses`, `subClasses`, `instances`. Default: `subClasses` only.
+  Only the requested categories appear in `data`. An unrecognized value returns `INVALID_ARGS`
+  before any bridge call is made.
+- `--filter <substring>` — case-insensitive label/IRI substring match, applied client-side to
+  every returned category.
+
+Output (default `--types`):
 ```json
 {
   "success": true,
@@ -222,10 +290,7 @@ Output:
   "durationMs": 540,
   "data": {
     "expression": "Animal and hasHabitat some Ocean",
-    "superClasses": [{ "iri": "http://example.org/animals#Animal", "label": "Animal" }],
-    "equivalentClasses": [],
-    "subClasses": [{ "iri": "http://example.org/animals#Dolphin", "label": "Dolphin" }],
-    "instances": []
+    "subClasses": [{ "iri": "http://example.org/animals#Dolphin", "label": "Dolphin" }]
   }
 }
 ```
@@ -266,6 +331,8 @@ Use `ontograph` CLI when working with OWL files (.ofn, .omn, .ttl, .owl):
   ontograph search <file> <query>           # find entities by label or IRI
   ontograph validate <file>                 # check for errors
   ontograph convert <file> --to functional  # normalize to Functional Syntax
+  ontograph stats <file>                    # ontology-wide statistics summary
+  ontograph entity-info <file> <iri>        # detailed lookup for one entity
 All output is JSON on stdout. Exit 0 = success, non-zero = error.
 ```
 

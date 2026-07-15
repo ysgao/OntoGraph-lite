@@ -9,7 +9,7 @@ const program = new Command();
 program
   .name('ontograph')
   .description('OntoGraph standalone CLI — bundled-runtime OWL ontology reasoning, zero external dependencies')
-  .version('0.2.2')
+  .version('0.3.0')
   .option('--timeout <ms>', 'operation timeout in milliseconds', '30000')
   .exitOverride()
   .action(() => {

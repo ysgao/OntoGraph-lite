@@ -3,6 +3,12 @@
 All notable changes to OntoGraph Lite are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] — 2026-07-15
+
+### Added
+- **`@ysgao/ontograph-cli` v0.3.0** — `dl-query` now auto-classifies the ontology before querying, and accepts `--types` (restrict which relationship categories are returned) and `--filter` (label substring filter on results).
+- **`@ysgao/ontograph-cli-standalone` v0.3.0** (new package) — zero-dependency CLI bundling a Java 21 runtime and the reasoner JAR directly in the npm tarball, so `classify`, `check-consistency`, and `dl-query` run against a local ontology file with no VS Code and no system Java required (macOS arm64 only for now). Shares its command set with `@ysgao/ontograph-cli` via a common registration module, so future commands land in both packages together.
+
 ## [0.2.2] — 2026-07-06
 
 ### Added

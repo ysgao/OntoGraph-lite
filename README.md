@@ -12,10 +12,12 @@ OntoGraph is a Protégé-like OWL 2 ontology editing, reasoning, and visualizati
 - **Inferred Hierarchy**: View classification results side-by-side with your asserted hierarchy.
 - **Entity Editor**: Edit axioms and annotations with a structured interface and Manchester Syntax support, including undo/redo.
 - **Graph Visualization**: Explore entity relationships visually with interactive neighborhood graphs.
-- **DL Query**: Protégé-style DL Query panel — enter a Manchester Syntax class expression and browse results grouped by Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, and Instances.
+- **UML Diagram**: Right-click any class and choose "Generate UML Diagram" for a Protégé-independent, UML-style view rooted at that class — composition (part-of, filled diamond) and generalization (subtype, hollow triangle) connectors derived purely from the ontology's own axioms, with no AI/LLM involvement. Adjustable depth, layout direction, and node exclusion; export to draw.io, SVG, or PNG.
+- **DL Query**: Protégé-style DL Query panel — enter a Manchester Syntax class expression and browse results grouped by Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, and Instances. Classification runs automatically the first time it's needed.
 - **SPARQL Editor**: Execute SPARQL queries against your loaded ontology.
 - **SNOMED CT Scale**: Optimized for large-scale ontologies with tens of thousands of classes via Worker Thread parsing and ELK.
-- **CLI for AI Tools**: `@ysgao/ontograph-cli` — a standalone command-line interface for AI coding assistants (Claude Code, Codex) and developers to parse, search, validate, and convert OWL files without opening VS Code.
+- **CLI for AI Tools**: `@ysgao/ontograph-cli` — a command-line interface for AI coding assistants (Claude Code, Codex) and developers to parse, search, validate, convert, and reason over OWL files. Core commands (`parse`, `search`, `validate`, `convert`, `stats`, `entity-info`) run standalone; `classify`/`check-consistency`/`dl-query` attach to a running VS Code instance.
+- **Standalone CLI**: `@ysgao/ontograph-cli-standalone` — a separate, zero-dependency package (macOS Apple Silicon only) that bundles its own Java runtime and reasoner, so `classify`/`check-consistency`/`dl-query` run against a local file with no VS Code and no system Java installed at all.
 
 ## Language Support
 
@@ -63,9 +65,27 @@ npx @ysgao/ontograph-cli parse ./ontology.ofn
 
 Verify install:
 ```bash
-ontograph --version   # 0.1.12
+ontograph --version   # 0.3.0
 ontograph --help
 ```
+
+### Installing the Standalone CLI (no VS Code, no system Java)
+
+`@ysgao/ontograph-cli-standalone` is a **separate** npm package (not a mode of the CLI above) that
+bundles its own Java 21 runtime and the reasoner JAR, so `classify`/`check-consistency`/`dl-query`
+work against a local ontology file with zero external dependencies. Currently macOS Apple Silicon
+(arm64) only.
+
+```bash
+npm install -g @ysgao/ontograph-cli-standalone
+
+ontograph classify ./ontology.ofn
+ontograph dl-query ./ontology.ofn "Animal and hasHabitat some Ocean" --types directSubClasses
+```
+
+See [`cli-standalone/README.md`](cli-standalone/README.md) for full command reference. Install
+whichever CLI package fits your use case — the two are not designed to coexist under the same
+global `ontograph` binary.
 
 ---
 
@@ -101,8 +121,17 @@ Supported extensions: `.ofn`, `.omn`, `.owl`, `.owx`, `.ttl`, `.n3`
 
 1. Open the Command Palette (`Ctrl+Shift+P`) and run `OntoGraph: Open DL Query`.
 2. Enter a Manchester Syntax class expression (e.g., `Animal and hasHabitat some Ocean`).
-3. Click **Execute** — requires classification to have run first.
+3. Click **Execute** — classification runs automatically first if the ontology hasn't been classified yet (or is stale).
 4. Results group into: Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, Instances.
+
+### UML Diagram (VS Code)
+
+1. Right-click a class in the Classes panel and choose **Generate UML Diagram**.
+2. A panel opens rooted at that class: subclasses connect via generalization (hollow triangle) connectors, part-of relationships via composition (filled diamond) connectors — both derived directly from the ontology's axioms, no AI involved.
+3. Use the in-panel controls to adjust depth, flip layout direction (top-to-bottom / left-to-right), or click nodes to mark them for exclusion and **Regenerate**.
+4. Export the current diagram to draw.io, SVG, or PNG via the panel's toolbar buttons.
+
+Configurable via `ontograph.umlDiagram.*` settings — see [Configuration](#configuration-vs-code).
 
 ### Exporting (VS Code)
 
@@ -131,6 +160,13 @@ ontograph validate ./ontology.ttl
 # Convert between formats
 ontograph convert ./ontology.omn --to functional
 ontograph convert ./ontology.omn --to turtle --out ./ontology.ttl
+
+# Ontology-wide statistics (class/property/axiom counts, hierarchy depth, etc.)
+ontograph stats ./ontology.ofn
+
+# Full details for a single entity (labels, axioms, superconcepts, subconcepts)
+ontograph entity-info ./ontology.ofn "http://example.org/animals#Koala"
+ontograph entity-info ./snomed.owl Koala
 ```
 
 ### Bridge commands — requires OntoGraph running in VS Code
@@ -142,10 +178,17 @@ ontograph classify
 # Check OWL 2 DL consistency
 ontograph check-consistency
 
-# Run a DL query
+# Run a DL query — auto-classifies first if needed
 ontograph dl-query "Animal and hasHabitat some Ocean"
 ontograph dl-query "pizza:Pizza and pizza:hasTopping some pizza:MozzarellaTopping"
+
+# Restrict which result categories come back, filter by label/IRI substring
+ontograph dl-query "Body structure" --types directSubClasses,subClasses --filter "liver"
 ```
+
+`--types` accepts a comma-separated list of `directSuperClasses`, `superClasses`,
+`equivalentClasses`, `directSubClasses`, `subClasses`, `instances` (default: `subClasses` only).
+`--filter` is a case-insensitive label/IRI substring match applied client-side to every returned category.
 
 ### Output format
 
@@ -160,7 +203,7 @@ Errors:
 {"success":false,"command":"classify","durationMs":1500,"error":"OntoGraph extension not detected","errorCode":"BRIDGE_UNAVAILABLE"}
 ```
 
-Error codes: `FILE_NOT_FOUND` (1), `PARSE_ERROR` (2), `UNSUPPORTED_FORMAT` (3), `BRIDGE_UNAVAILABLE` (10), `BRIDGE_TIMEOUT` (11), `BRIDGE_ERROR` (12).
+Error codes: `FILE_NOT_FOUND` (1), `PARSE_ERROR` (2), `UNSUPPORTED_FORMAT` (3), `INVALID_ARGS` (4), `BRIDGE_UNAVAILABLE` (10), `BRIDGE_TIMEOUT` (11), `BRIDGE_ERROR` (12).
 
 ### Global flags
 
@@ -203,6 +246,13 @@ The CLI reads this file automatically. No configuration needed. If the file is a
 | OWL/XML (`.owl`) | ✅ | — |
 | Turtle (`.ttl`) | ✅ | ✅ |
 
+### Need `classify`/`check-consistency`/`dl-query` without VS Code at all?
+
+Install [`@ysgao/ontograph-cli-standalone`](cli-standalone/README.md) instead (macOS Apple Silicon
+only) — it bundles its own Java runtime and reasoner, so those three commands take a `<file>`
+argument directly instead of attaching to a running VS Code bridge. The core commands above are
+identical between both packages.
+
 ---
 
 ## Configuration (VS Code)
@@ -219,6 +269,9 @@ Configure OntoGraph in VS Code Settings under `ontograph.*`:
 | `ontograph.display.showIriOnHover` | `false` | Show full IRI as tooltip on hover |
 | `ontograph.display.axiomEntityStyle` | `label` | `label`, `shortIri`, or `fullIri` in axiom expressions |
 | `ontograph.graph.defaultDepth` | `1` | Default graph visualization depth (1–5) |
+| `ontograph.umlDiagram.defaultDepth` | `1` | Default relationship depth for a newly generated UML diagram (1–5) |
+| `ontograph.umlDiagram.defaultDirection` | `LR` | Default layout flow for a newly generated UML diagram: `TB` (top-to-bottom) or `LR` (left-to-right) |
+| `ontograph.umlDiagram.compositionProperties` | SNOMED's 4 part-of IRIs | Object property IRIs rendered as composition (part-of) connectors in UML diagrams; others appear as an excluded-relation note |
 | `ontograph.largeOntologyThreshold` | `50000` | Class count above which large-ontology optimisations apply |
 | `ontograph.entity.defaultNamespace` | `""` | Base IRI prefix for new entities (must end with `#` or `/`); leave empty to derive from the ontology IRI |
 
@@ -226,16 +279,30 @@ Configure OntoGraph in VS Code Settings under `ontograph.*`:
 
 ## Architecture
 
-Three tiers: **VS Code extension** → **Java reasoning server** (JSON-RPC on stdin/stdout) → **CLI** (standalone npm package).
+Three tiers: **VS Code extension** → **Java reasoning server** (JSON-RPC on stdin/stdout) → **two sibling CLI packages**, each a standalone npm package.
 
 ```
-@ysgao/ontograph-cli (npm)
-    ├── Core commands → imports src/parser, src/model, src/serializer directly
-    └── Bridge commands → IPC socket → OntoGraph VS Code extension
-                                            └── Java reasoner (HermiT / ELK)
+@ysgao/ontograph-cli (npm)                    @ysgao/ontograph-cli-standalone (npm)
+    ├── Core commands ─┐                          ├── Core commands ─┐  (same registration
+    │  (parse/search/  │                          │  (identical)     │   module — cli/src/
+    │  validate/       ├─→ src/parser, src/model,  │                  ├─→  registerCoreCommands.ts)
+    │  convert/stats/  │   src/serializer directly │                  │
+    │  entity-info)   ─┘                          │                  ─┘
+    └── Bridge commands → IPC socket → OntoGraph   └── Reasoning commands → bundled Java 21 JRE
+                          VS Code extension            + reasoner JAR, spawned directly
+                          └── Java reasoner              (no VS Code, no system Java)
+                              (HermiT / ELK)
 ```
 
-The CLI uses an OS-native IPC socket (Unix domain socket on macOS/Linux, named pipe on Windows) to communicate with the extension. The extension's public API is exposed via `activate()` return value (`OntoGraphApi` interface in `src/api.ts`), enabling both CLI bridge access and direct extension-to-extension consumption.
+The minimal CLI (`cli/`) uses an OS-native IPC socket (Unix domain socket on macOS/Linux, named
+pipe on Windows) to talk to a running VS Code extension. The standalone CLI (`cli-standalone/`,
+macOS Apple Silicon only for now) instead spawns its own bundled JRE running the same reasoner JAR
+directly — no extension, no IPC, no system Java. Both packages register their file-based core
+commands (`parse`, `search`, `validate`, `convert`, `stats`, `entity-info`) from the same shared
+module, so new commands land in both automatically.
+
+The extension's public API is exposed via `activate()`'s return value (`OntoGraphApi` interface in
+`src/api.ts`), enabling both CLI bridge access and direct extension-to-extension consumption.
 
 ---
 
