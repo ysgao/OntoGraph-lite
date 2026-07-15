@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { OntoGraphApi } from '../api';
+import type { DLQueryType } from '../views/DLQueryMessages';
 
 function defaultSocketPath(): string {
   if (process.platform === 'win32') {
@@ -83,7 +84,7 @@ export class BridgeServer {
     switch (method) {
       case 'classify': return api.classify();
       case 'checkConsistency': return api.checkConsistency();
-      case 'dlQuery': return api.dlQuery(params.expression as string);
+      case 'dlQuery': return api.dlQuery(params.expression as string, params.queryTypes as DLQueryType[]);
       default: throw new Error(`Unknown bridge method: ${method}`);
     }
   }

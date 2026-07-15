@@ -134,6 +134,12 @@ export interface OntologyModel {
   classificationNeedsUpdate: boolean;
 }
 
+/** True when a DL query MUST classify the ontology before running — either it has never been
+ *  classified, or it has changed since the last classification. */
+export function needsClassificationBeforeQuery(model: OntologyModel): boolean {
+  return !model.isClassified || model.classificationNeedsUpdate;
+}
+
 function makeAnnProp(iri: string, label: string): OWLAnnotationProperty {
   return { iri, type: 'annotationProperty', labels: { en: [label] }, annotations: {}, superPropertyIris: [], domainIris: [], rangeIris: [] };
 }

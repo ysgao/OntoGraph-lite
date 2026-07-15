@@ -216,6 +216,7 @@ Install: `npm install -g @ysgao/ontograph-cli`
 
 ## Recent Changes
 Full detail for each lives under `specs/<id>/` (spec.md/plan.md/tasks.md) — entries below are pointers only.
+- 027-cli-dlquery-filters: `ontograph dl-query` auto-classifies (only when needed) before querying, accepts `--types` (any of the 6 `DLQueryType` categories, default `subClasses`), and `--filter` (case-insensitive label/IRI substring, client-side). → `specs/027-cli-dlquery-filters/`
 - 026-generate-uml-diagram: right-click UML diagram (composition/generalization) + draw.io/SVG/PNG export, no AI/LLM. → `specs/026-generate-uml-diagram/`
 - 025-show-inferred-equivalent-class: Entity Editor shows reasoner-derived unasserted equivalent classes, read-only. → `specs/025-show-inferred-equivalent-class/`
 - 019-create-entity: per-panel toolbar buttons create OWL entities; editable/rename-propagating IRI field. → `specs/019-create-entity/`
@@ -229,5 +230,5 @@ Full detail for each lives under `specs/<id>/` (spec.md/plan.md/tasks.md) — en
 - In-memory only — `Map<entityIri, EntityEditHistory>` on the extension host; no persistence (014-entity-editor-undo-redo)
 
 <!-- SPECKIT START -->
-Plan: specs/026-generate-uml-diagram/plan.md
+Plan: specs/027-cli-dlquery-filters/plan.md
 <!-- SPECKIT END -->

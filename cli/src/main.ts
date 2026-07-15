@@ -93,9 +93,11 @@ program
 program
   .command('dl-query <expression>')
   .description('Run a DL query against the active ontology via the running OntoGraph extension')
-  .action(async (expression: string) => {
+  .option('--types <list>', 'comma-separated result categories: directSuperClasses|superClasses|equivalentClasses|directSubClasses|subClasses|instances (default: subClasses)')
+  .option('--filter <substring>', 'case-insensitive label/IRI substring filter applied to every returned category')
+  .action(async (expression: string, opts: { types?: string; filter?: string }) => {
     const timeout = Number(program.opts().timeout);
-    process.exitCode = await runDlQuery(expression, timeout);
+    process.exitCode = await runDlQuery(expression, timeout, { types: opts.types, filter: opts.filter });
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

@@ -8,6 +8,7 @@ import { AnnotationPropertyProvider } from './views/AnnotationPropertyProvider';
 import { IndividualBrowserProvider } from './views/IndividualBrowserProvider';
 import { getLabel } from './model/OntologyModel';
 import { ReasonerBridge } from './reasoner/ReasonerBridge';
+import { runDlQueryWithClassifyFirst } from './reasoner/dlQueryOrchestration';
 import { classifyOntology } from './commands/classifyOntology';
 import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
@@ -28,7 +29,8 @@ import { applyIncrementalReload } from './sync/incrementalReload';
 import { buildModelSegmentIndexAsync } from './model/SegmentIndex';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
-import type { OntoGraphApi } from './api';
+import type { OntoGraphApi, ApiDLQueryResult } from './api';
+import type { DLQueryType } from './views/DLQueryMessages';
 import { BridgeServer } from './bridge/BridgeServer';
 import { ParserRegistry } from './parser/ParserRegistry';
 import { buildModelSegmentIndex } from './model/SegmentIndex';
@@ -764,6 +766,8 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       const engine = vscode.workspace.getConfiguration('ontograph').get<string>('reasoner.engine', 'auto');
       const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
       const result = await reasonerBridge.classify('functional', serializeToFunctional(model), engine);
+      model.isClassified = true;
+      model.classificationNeedsUpdate = false;
       const index = activeIndex;
       const getLabel = (iri: string): string | null => {
         const entity = index?.getByIri(iri);
@@ -805,30 +809,30 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       };
     },
 
-    async dlQuery(expression: string) {
+    async dlQuery(expression: string, queryTypes: DLQueryType[]) {
       const model = activeModel;
       if (!model) { throw new Error('No ontology loaded'); }
-      const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
-      const result = await reasonerBridge.dlQuery(
-        'functional',
-        serializeToFunctional(model),
-        null,
-        expression,
-        ['superClasses', 'equivalentClasses', 'subClasses', 'instances'],
-      );
-      const index = activeIndex;
-      const toRef = (iri: string) => {
-        const entity = index?.getByIri(iri);
-        const labels = entity?.labels['en'] ?? entity?.labels[''] ?? (entity ? Object.values(entity.labels)[0] : undefined);
-        return { iri, label: labels?.[0] ?? null };
-      };
-      return {
-        expression,
-        superClasses: result.superClasses.map(toRef),
-        equivalentClasses: result.equivalentClasses.map(toRef),
-        subClasses: result.subClasses.map(toRef),
-        instances: result.instances.map(toRef),
-      };
+      return runDlQueryWithClassifyFirst(model, () => api.classify(), async () => {
+        const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
+        const result = await reasonerBridge.dlQuery(
+          'functional',
+          serializeToFunctional(model),
+          null,
+          expression,
+          queryTypes,
+        );
+        const index = activeIndex;
+        const toRef = (iri: string) => {
+          const entity = index?.getByIri(iri);
+          const labels = entity?.labels['en'] ?? entity?.labels[''] ?? (entity ? Object.values(entity.labels)[0] : undefined);
+          return { iri, label: labels?.[0] ?? null };
+        };
+        const output: ApiDLQueryResult = { expression };
+        for (const type of queryTypes) {
+          output[type] = result[type].map(toRef);
+        }
+        return output;
+      });
     },
   };
 

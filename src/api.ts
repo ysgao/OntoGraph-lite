@@ -1,6 +1,7 @@
 import type { OntologyModel } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
 import { groupEquivalentClasses, type EquivalentClassEntry } from './reasoner/ReasonerBridge';
+import type { DLQueryType } from './views/DLQueryMessages';
 
 export interface ClassificationResult {
   ontologyIri: string | null;
@@ -36,10 +37,12 @@ export interface ConsistencyResult {
 
 export interface ApiDLQueryResult {
   expression: string;
-  superClasses: ClassRef[];
-  equivalentClasses: ClassRef[];
-  subClasses: ClassRef[];
-  instances: IndividualRef[];
+  directSuperClasses?: ClassRef[];
+  superClasses?: ClassRef[];
+  equivalentClasses?: ClassRef[];
+  directSubClasses?: ClassRef[];
+  subClasses?: ClassRef[];
+  instances?: IndividualRef[];
 }
 
 export interface ClassRef {
@@ -68,7 +71,7 @@ export function buildInferredEquivalentClasses(
 export interface OntoGraphApi {
   classify(): Promise<ClassificationResult>;
   checkConsistency(): Promise<ConsistencyResult>;
-  dlQuery(expression: string): Promise<ApiDLQueryResult>;
+  dlQuery(expression: string, queryTypes: DLQueryType[]): Promise<ApiDLQueryResult>;
   getActiveModel(): OntologyModel | null;
   getActiveIndex(): OntologyIndex | null;
 }
