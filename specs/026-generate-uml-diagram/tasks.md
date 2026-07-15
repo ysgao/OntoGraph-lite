@@ -674,3 +674,191 @@ closing the panel should bring excluded nodes back.
   violations across all 130 combinations, confirming the larger gap didn't reopen the earlier bug.
 - Full suite: 751/751 tests passing, `npm run compile` clean, production build succeeds
   (`uml-diagram-webview.js` 7.0KB, up from 5.3KB for the new toolbar controls).
+
+## Sixth post-delivery addendum: left-to-right layout
+
+Per user request, the diagram can now lay out left-to-right (depth → columns, siblings → rows)
+as an alternative to the long-standing top-to-bottom default (still the default at this point —
+see the Eleventh addendum for the later default flip).
+
+- New `LayoutDirection = 'TB' | 'LR'` type in `diagramModel.ts`, `ontograph.umlDiagram.defaultDirection`
+  setting (default `'TB'` at this point), and a new in-webview "Layout" toolbar `<select>` mirroring
+  the depth slider's `requestDepthChange` pattern via a new `requestDirectionChange` message /
+  `webview-src/uml/directionControl.ts`.
+- Rather than duplicating the tidy-tree/bus-routing math per direction, `layout.ts` computes the
+  same flow(depth)/cross(sibling) quantities as before and only swaps which screen axis each maps
+  to at the very end (plus direction-specific spacing constants — `COLUMN_WIDTH`/`SLOT_HEIGHT`
+  alongside the existing `ROW_HEIGHT`/`SLOT_WIDTH`, since a column's spacing must clear `NODE_WIDTH`
+  while a TB row only needs to clear `NODE_HEIGHT`, and vice versa for cross-axis spacing).
+- `diagramGeometry.ts`'s `computeEdgeSegments`/`computeEdgeRoutes` gained a `direction` param
+  implemented as a transpose-in/run-existing-TB-logic/transpose-out wrapper (swap x/y on input
+  positions and node dimensions, run the unchanged bus/off-axis routing, swap the output path
+  coordinates back) rather than rewriting the routing logic per axis. New shared `boxRect()` helper
+  centralizes the direction-dependent box-position convention (TB: `x` is horizontal center/`y` is
+  top edge; LR: `x` is left edge/`y` is vertical center) so `htmlRenderer.ts`/`drawioRenderer.ts`/
+  `renderStandaloneSvg` can't compute node-box placement inconsistently with each other.
+- `direction` threads through every webview↔host message alongside `depth`
+  (`RequestDiagramMessage`/`RequestDepthChangeMessage`/`RequestRegenerateMessage`/
+  `ResetExclusionsMessage`/`RequestExportMessage` all gained a `direction` field; new
+  `RequestDirectionChangeMessage`) rather than being a separate persistent setting, matching how
+  `depth` itself is session-adjustable per open panel. `buildDiagramMessage`'s public signature is
+  unchanged (`direction` folded into the existing `ExtractOptions` bag, defaulting to `'TB'`) so no
+  pre-existing call site needed updating.
+
+## Seventh post-delivery addendum: far-child bus routing
+
+User reported a specific real-anatomy.owl crossing (via the draw.io export) between "Tympanic
+cavity"'s composition edge to "Tympanic ostium of eustachian tube" and "Ostium of eustachian
+tube"'s own incoming stem — the same root cause as an earlier, since-reverted attempt (a
+dual-relationship child, FR-011, dragging its parent's shared bus far enough sideways to sweep
+through an unrelated sibling's stem sitting in the row directly below).
+
+- Fixed via the user's own more targeted proposal: rather than notching the shared bus's line
+  around the obstacle (the earlier attempt's approach, which visibly broke other cases), a "far"
+  child — one that does NOT sit at its bus group's own shallowest row — is excluded from the
+  shared bus entirely and routed independently by new `computeSafeJogY()` in `diagramGeometry.ts`:
+  descend straight down the PARENT's own exit column (not the child's) past whatever's in the way,
+  THEN jog sideways only once safely below it.
+- `computeBusGroupPlacements`'s existing vertical bus-push pass couldn't fix this on its own (the
+  blocking stem's span covered the entire row-to-row gap, leaving no push-to height clearing it),
+  and pushing the WHOLE shared bus down would have dragged the near child (sharing the same bus)
+  down with it for no reason — keeping the far child's routing independent means the near child's
+  rendering is completely untouched.
+- `computeSafeJogY` is a NEW, separate, deliberately simpler function (straight-down push only, no
+  left/right exploration) rather than a generalization of the existing `computeStemDetour` — the
+  earlier reverted attempt tried reusing/rotating that function for the bus line and introduced
+  subtle regressions elsewhere; keeping this fix additive and narrowly scoped (only "far" children
+  — same-row children are entirely unaffected, confirmed by all 147 pre-existing UML tests passing
+  unchanged) avoided repeating that mistake. Applied in both `computeEdgeSegmentsCore` (webview)
+  and `computeEdgeRoutesCore` (draw.io/SVG export) so neither can drift from the other.
+- Verified via a hand-built fixture using the exact node/edge coordinates from the user's own
+  draw.io export checked against both an edge-vs-edge crossing detector AND an edge-vs-node-box
+  detector — zero violations on both the webview segment output and the draw.io route output; a
+  permanent regression test pair (`diagramGeometry.test.ts`'s "far-child (dual-relationship) bus
+  routing" describe block) locks in the exact expected path for both renderers.
+
+## Eighth post-delivery addendum: shared-children sibling reordering
+
+Per user request (citing `Middle-ear-structure-uml.drawio` where node4/node6 both break down into
+a shared subnode8 while node5 doesn't), same-depth siblings that share a child are now regrouped
+adjacent to one another rather than left in raw edge-declaration order.
+
+- `layout.ts`'s `childrenByParent` construction is now two-pass: a `rawChildrenByParentByKind` map
+  (declaration-order, deduped, kind-separated) is built first so every node's own child SET is
+  known before any node's final child ORDER is decided, then a new `reorderBySharedChildren()`
+  groups each parent's same-kind children via union-find on "shares ≥1 direct child"
+  (transitively, so a 3-way share still forms one cluster), preserving first-occurrence order for
+  both the group sequence and each group's internal member order — a minimal, order-preserving
+  reorder rather than a full sort, so an unrelated sibling never jumps position for no reason.
+- Reordering is scoped within each kind bucket (composition/generalization), never across, so it
+  can't undo the existing kind-clustering invariant. Applies recursively at every depth (it runs
+  once per parent while building the shared `childrenByParent` map that `assignLeafSlots` then
+  recurses over), not just the top level, since the sharing pattern recurs throughout the
+  hierarchy the same way the clinical/continuant split did.
+- 3 new tests in `layout.test.ts` (the literal node4/node5/node6/subnode8 case, a no-sharing no-op
+  check, and a 3-way shared-child cluster check) plus all 236 pre-existing UML/command tests pass
+  unchanged.
+
+## Ninth post-delivery addendum: shared-node color blending
+
+Per user request, a node shared between two branches (subtype/part of two parents, FR-011) now
+gets a visually distinct BLENDED color instead of silently inheriting whichever parent's branch
+color happened to be assigned first.
+
+- `branchColors.ts`'s `computeBranchColors()` is redesigned from a single first-visited-wins BFS
+  into a direct-parent color resolver: a node with exactly one distinct direct-parent color simply
+  inherits it (unchanged branch-wide propagation), while a node with two or more distinct
+  direct-parent colors gets `blendColors()` — a new plain RGB-channel average across
+  `fill`/`stroke`/`font` — producing an in-between color found in neither parent's own palette
+  entry, so it reads as visually different from an ordinary non-shared sibling sitting next to it.
+- Resolution runs as a fixed-point relaxation (bounded to `nodes.length + 1` passes) rather than a
+  single topological pass, specifically because a part-of cycle can put a node's "parent" at an
+  arbitrary distance from the root — an external distance/depth-based processing order isn't safe
+  here (a dual-relationship node's second, deeper-branch parent might not be resolved yet when the
+  shallower-branch parent's turn comes up); each pass recomputes every node's color from whichever
+  direct parents are CURRENTLY resolved, and since the resolved set only grows monotonically pass
+  over pass, it converges within the longest parent-chain's length.
+- A node that never gains a resolvable parent (a cycle-only island with no branch entry point) is
+  deliberately left uncolored — both renderers already fall back to `DEFAULT_COLOR` for any node
+  missing from the map, so this isn't a new fallback path.
+- 4 new tests in `branchColors.test.ts` (literal two-parent blend with the exact RGB-average
+  assertion, same-color-parents no-op-blend check, blend propagating to a shared node's own
+  descendants, and a part-of-cycle termination/no-throw check) plus all other UML/command tests
+  (243 total) pass unchanged.
+
+## Tenth post-delivery addendum: warm/cool contrast for sharing branches
+
+Per user request — two branch roots that share a descendant should get contrasting temperature
+schemes (one warm, one cool), not just "any two different hues," while non-sharing neighbors need
+no special treatment.
+
+- Each `PALETTE` entry gained a curated `scheme: 'cool' | 'warm'` tag (by eye, against this
+  specific fixed 8-color set; split into `COOL_PALETTE`/`WARM_PALETTE`), and
+  `computeBranchColors()`'s branch-root assignment is no longer a flat `PALETTE[idx % length]`
+  cycle: it first computes each branch root's reachable-descendant set (BFS, cycle-safe) and flags
+  any pair whose sets overlap as "sharing," then greedily assigns schemes — a branch root takes the
+  OPPOSITE scheme of an already-decided sharing neighbor where that's unambiguous, or alternates
+  for baseline variety when it has no sharing neighbor yet (or neighbors already disagree, e.g. a
+  3-way mutual share, which can't be properly 2-colored — deliberately best-effort there) — only
+  then are concrete colors assigned by cycling each scheme's own 4-entry sub-palette independently.
+- Sits upstream of the existing direct-parent color-merge/blend logic (Ninth addendum) unchanged:
+  the blend still runs on whatever concrete colors the branch roots ended up with.
+- 3 new tests in `branchColors.test.ts` (two sharing roots land in opposite schemes, non-sharing
+  roots get no scheme assertion — just distinctness, and a non-adjacent-pair share still pulls
+  those two to opposite schemes) plus all 243 pre-existing tests (246 total) pass unchanged.
+
+## Eleventh post-delivery addendum: LR is now the default layout
+
+Per user request, `ontograph.umlDiagram.defaultDirection`'s package.json default changed from
+`'TB'` to `'LR'` — every other `'TB'` fallback that exists purely to mirror this same product
+default was updated alongside it so none of them silently disagree: `generateUmlDiagram.ts`'s
+`currentDefaultDirection` initial value and its two `cfg.get(...) ?? 'TB'` config-read fallbacks,
+`buildDiagramMessage`/`extractAndLayout`'s own `options.direction ?? 'TB'` internal defaults, and
+the webview's `directionControl.ts` `DEFAULT_DIRECTION` constant plus the toolbar `<select>`'s
+hardcoded `selected` attribute in `UmlDiagramApp.ts` (covers the brief window before the host's
+first `updateDiagram` response arrives over the `'ready'` handshake).
+
+Deliberately NOT changed: the low-level pure functions' own parameter defaults (`layout.ts`'s
+`computeLayout`, `diagramGeometry.ts`'s `computeEdgeSegments`/`computeEdgeRoutes`, `htmlRenderer.ts`,
+`drawioRenderer.ts` — all still default to `'TB'`), since production code always resolves and
+passes an explicit `direction` before calling them. Updated the two tests whose expectations were
+pinned to the old default (`generateUmlDiagram.test.ts`'s direction-default test,
+`directionControl.test.ts`'s `DEFAULT_DIRECTION` test) to assert `'LR'` instead — both now
+additionally exercise the non-default `'TB'` path explicitly. All 246 tests pass.
+
+## Twelfth post-delivery addendum: lateralized-classes toggle + shared depth renumbering
+
+Per user request, SNOMED's Left/Right lateralized variant classes (e.g. "Left kidney", asserted
+as `SubClassOf(Kidney and (Laterality some Left))`) are now hidden from the diagram by default,
+since they roughly double the sibling count of any bilateral anatomical structure without adding
+structural information.
+
+- `partOfGraph.ts` gained `isLateralized()`, matching a class's OWN conjuncts against SNOMED's
+  Laterality property (`272741003`) with a target of Left (`7771000`) or Right (`24028007`)
+  specifically (the generic, unspecified-side qualifier `Side` does NOT count — a class asserting
+  `Laterality some Side` is the bilateral reference concept itself, not a lateralized variant of
+  it). `extractUmlDiagram()`'s return value gained `lateralizedIris: string[]`, and a new "Show
+  full subhierarchy" / "Hide lateralized classes" toolbar toggle button in `UmlDiagramApp.ts`
+  (backed by `webview-src/uml/lateralizedControl.ts`'s `buildRequestToggleLateralizedMessage()`,
+  mirroring `depthControl.ts`/`exclusionControl.ts`'s pure-helper convention) lets the user reveal
+  them per session.
+- Implemented as a session-only toggle (`generateUmlDiagram.ts`'s `currentIncludeLateralized`,
+  default `false`), independent of the node-exclusion feature: it resets when a different entity
+  becomes the focus or the panel closes (same as `currentExcludeIris`), but is deliberately NOT
+  cleared by "Reset exclusions" — a dedicated `RequestToggleLateralizedMessage`/`includeLateralized`
+  field (`UmlDiagramMessages.ts`) keeps the two controls independent. Unlike the exclusion set,
+  which is seeded once and then held fixed, `includeLateralized` is consulted fresh on every
+  `extractAndLayout()` call, so a lateralized node that only becomes reachable after the user later
+  increases the depth slider is still filtered correctly rather than only catching what was visible
+  at toggle time.
+- While building this, found and fixed a real, independent bug in `partOfGraph.ts`'s initial
+  extraction: a dual-relationship node (FR-011) discovered via one parent during BFS kept that
+  parent's shortest-path depth even when a second, much deeper parent also pointed at it —
+  reproducing the Fourth addendum's box-crossing bug, but during ordinary diagram generation rather
+  than only after node exclusion (reported case: "Tympanic ostium of eustachian tube" rendered
+  above its own generalization parent "Ostium of eustachian tube" because a shallower composition
+  parent, "Tympanic cavity," discovered it first). Fixed by extracting `nodeExclusion.ts`'s
+  existing longest-path-from-root renumbering into a shared `src/uml/depthNormalization.ts`
+  (`renumberDepthsLongestPath()`, unchanged logic — cycle-safe, ancestors seeded at depth `-1`) and
+  applying it directly inside `extractUmlDiagram()` as well, not just after exclusion.
+- No new settings added — the toggle is UI/session state only.
