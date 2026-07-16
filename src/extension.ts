@@ -756,6 +756,18 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
 
   outputChannel.appendLine('OntoGraph ready. Open an .ofn, .omn, or .owl file to begin.');
 
+  // Mirrors classifyOntology.ts/DLQueryPanel.ts's content resolution: prefer the live
+  // document text (picks up unsaved edits), then rawContent (the literal source bytes),
+  // and only fall back to re-serializing the in-memory model as a last resort — that
+  // serialization is lossy for complex EquivalentClasses/SubClassOf expressions.
+  async function resolveOntologyContent(model: OntologyModel): Promise<{ content: string; format: string }> {
+    const sourceDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === model.sourceUri);
+    if (sourceDoc) { return { content: sourceDoc.getText(), format: model.sourceFormat }; }
+    if (model.rawContent) { return { content: model.rawContent, format: model.sourceFormat }; }
+    const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
+    return { content: serializeToFunctional(model), format: 'functional' };
+  }
+
   const api: OntoGraphApi = {
     getActiveModel: () => activeModel ?? null,
     getActiveIndex: () => activeIndex ?? null,
@@ -764,8 +776,8 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       const model = activeModel;
       if (!model) { throw new Error('No ontology loaded'); }
       const engine = vscode.workspace.getConfiguration('ontograph').get<string>('reasoner.engine', 'auto');
-      const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
-      const result = await reasonerBridge.classify('functional', serializeToFunctional(model), engine);
+      const { content, format } = await resolveOntologyContent(model);
+      const result = await reasonerBridge.classify(format, content, engine);
       model.isClassified = true;
       model.classificationNeedsUpdate = false;
       const index = activeIndex;
@@ -799,8 +811,8 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       const model = activeModel;
       if (!model) { throw new Error('No ontology loaded'); }
       const engine = vscode.workspace.getConfiguration('ontograph').get<string>('reasoner.engine', 'auto');
-      const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
-      const result = await reasonerBridge.checkConsistency('functional', serializeToFunctional(model));
+      const { content, format } = await resolveOntologyContent(model);
+      const result = await reasonerBridge.checkConsistency(format, content);
       return {
         ontologyIri: model.metadata.iri ?? null,
         consistent: result.consistent,
@@ -813,10 +825,10 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       const model = activeModel;
       if (!model) { throw new Error('No ontology loaded'); }
       return runDlQueryWithClassifyFirst(model, () => api.classify(), async () => {
-        const { serializeToFunctional } = await import('./serializer/FunctionalSerializer');
+        const { content, format } = await resolveOntologyContent(model);
         const result = await reasonerBridge.dlQuery(
-          'functional',
-          serializeToFunctional(model),
+          format,
+          content,
           null,
           expression,
           queryTypes,

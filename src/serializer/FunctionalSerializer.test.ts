@@ -32,6 +32,52 @@ describe('FunctionalSerializer Clustering', () => {
     ]);
   });
 
+  it('should include complex EquivalentClasses conjuncts (regression: ObjectIntersectionOf axioms were silently dropped)', () => {
+    const model = createEmptyModel('test.ofn');
+    const cls: OWLClass = {
+      iri: 'http://example.org#LiverStructure',
+      type: 'class',
+      labels: {},
+      annotations: {},
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: [],
+      equivalentClassExpressions: [
+        'http://example.org#BodyStructure and (http://example.org#allOrPartOf some http://example.org#EntireLiver)',
+      ],
+      gciExpressions: [],
+    };
+
+    const cluster = generateEntityCluster(cls, model);
+
+    expect(cluster).toContain(
+      'EquivalentClasses(<http://example.org#LiverStructure> ObjectIntersectionOf(<http://example.org#BodyStructure> ObjectSomeValuesFrom(<http://example.org#allOrPartOf> <http://example.org#EntireLiver>)))'
+    );
+  });
+
+  it('should include complex SubClassOf superclass expressions (regression: superClassExpressions were silently dropped)', () => {
+    const model = createEmptyModel('test.ofn');
+    const cls: OWLClass = {
+      iri: 'http://example.org#A',
+      type: 'class',
+      labels: {},
+      annotations: {},
+      superClassIris: [],
+      equivalentClassIris: [],
+      disjointClassIris: [],
+      superClassExpressions: ['http://example.org#p some http://example.org#B'],
+      equivalentClassExpressions: [],
+      gciExpressions: [],
+    };
+
+    const cluster = generateEntityCluster(cls, model);
+
+    expect(cluster).toContain(
+      'SubClassOf(<http://example.org#A> ObjectSomeValuesFrom(<http://example.org#p> <http://example.org#B>))'
+    );
+  });
+
   it('should generate a cluster for an object property', () => {
     const model = createEmptyModel('test.ofn');
     const prop: OWLObjectProperty = {
@@ -155,6 +201,27 @@ describe('FunctionalSerializer newline round-trip', () => {
     expect(parsedCls).toBeDefined();
     const recovered = parsedCls!.annotations[SKOS_DEFINITION]?.[0];
     expect(recovered).toBe('First line.\nSecond line.');
+  });
+
+  it('round-trips a SNOMED-style EquivalentClasses(ObjectIntersectionOf(...)) axiom through parse -> serialize -> parse', () => {
+    const src = `Prefix(:=<http://example.org/ontology#>)
+Ontology(<http://example.org/ontology>
+  Declaration(Class(:10200004))
+  Declaration(Class(:123037004))
+  Declaration(Class(:733928003))
+  Declaration(Class(:181268008))
+  EquivalentClasses(:10200004 ObjectIntersectionOf(:123037004 ObjectSomeValuesFrom(:733928003 :181268008)))
+)`;
+    const parsed = new FunctionalParser(src, 'test.ofn').parse();
+    const liver = parsed.classes.get('http://example.org/ontology#10200004');
+    expect(liver?.equivalentClassExpressions).toHaveLength(1);
+
+    const reserialized = serializeToFunctional(parsed);
+    expect(reserialized).toContain('EquivalentClasses(<http://example.org/ontology#10200004> ObjectIntersectionOf(<http://example.org/ontology#123037004> ObjectSomeValuesFrom(<http://example.org/ontology#733928003> <http://example.org/ontology#181268008>)))');
+
+    const reparsed = new FunctionalParser(reserialized, 'test.ofn').parse();
+    const reparsedLiver = reparsed.classes.get('http://example.org/ontology#10200004');
+    expect(reparsedLiver?.equivalentClassExpressions).toHaveLength(1);
   });
 });
 

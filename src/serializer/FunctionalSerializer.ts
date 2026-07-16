@@ -56,12 +56,20 @@ export function generateEntityCluster(entity: OWLEntity, model: OntologyModel): 
   const axioms: string[] = [];
   if (entity.type === 'class') {
     const cls = entity as OWLClass;
-    if (cls.equivalentClassIris.length > 0) {
-      axioms.push(`EquivalentClasses(${[cls.iri, ...cls.equivalentClassIris].map(iri).join(' ')})`);
+    if (cls.equivalentClassIris.length > 0 || cls.equivalentClassExpressions.length > 0) {
+      const members = [
+        iri(cls.iri),
+        ...cls.equivalentClassIris.map(iri),
+        ...cls.equivalentClassExpressions.map(manchesterToFunctional),
+      ];
+      axioms.push(`EquivalentClasses(${members.join(' ')})`);
     }
     for (const sup of cls.superClassIris) {
       if (sup === OWL_THING) { continue; }
       axioms.push(`SubClassOf(${iri(cls.iri)} ${iri(sup)})`);
+    }
+    for (const sup of cls.superClassExpressions) {
+      axioms.push(`SubClassOf(${iri(cls.iri)} ${manchesterToFunctional(sup)})`);
     }
     for (const dis of cls.disjointClassIris) {
       if (cls.iri < dis) {
@@ -125,8 +133,6 @@ export function generateEntityCluster(entity: OWLEntity, model: OntologyModel): 
 
 /**
  * Serialize an OntologyModel to OWL Functional Syntax (.ofn).
- * Complex class expressions stored as Manchester strings are omitted — the
- * asserted named-class hierarchy is sufficient for reasoner classification.
  */
 export function serializeToFunctional(model: OntologyModel): string {
   const out: string[] = [];
