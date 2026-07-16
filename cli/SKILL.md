@@ -16,6 +16,11 @@ Run:
 ontograph search <file> "<query>" --limit 20
 ```
 
+`<file>` may be omitted (`ontograph search "<query>"`) if the user hasn't named a file — the CLI
+then resolves it from whichever ontology is currently open in the running OntoGraph VS Code
+extension. If that fails with `errorCode: "BRIDGE_UNAVAILABLE"` or `"NO_ACTIVE_FILE"`, ask the user
+which file to use.
+
 Parse the JSON result. It has two entity lists:
 - `exactMatches` — entities whose label/prefLabel/altLabel equals `<query>` exactly
   (case-insensitive). Empty if nothing matches exactly; more than one entry means the query is
@@ -51,6 +56,8 @@ entity-info resolves IRI, local name, and exact label/prefLabel/altLabel itself,
 ```bash
 ontograph entity-info <file> "<iri-or-label>"
 ```
+
+`<file>` is optional here too, with the same VS Code active-file fallback as `search`.
 
 Parse the JSON. Three outcomes:
 

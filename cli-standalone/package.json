@@ -1,6 +1,6 @@
 {
   "name": "@ysgao/ontograph-cli-standalone",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Standalone CLI for OntoGraph OWL ontology reasoning — bundles a Java runtime, zero external dependencies (no VS Code, no system Java)",
   "license": "Apache-2.0",
   "engines": {

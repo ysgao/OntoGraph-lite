@@ -32,11 +32,12 @@ npx @ysgao/ontograph-cli parse ./ontology.ofn
 ## OWL Ontology Operations
 Use the `ontograph` CLI when working with OWL files (.ofn, .omn, .ttl, .owl, .owx):
   ontograph parse <file>                    # entity counts, format, ontology IRI
-  ontograph search <file> <query>           # find entities by label or IRI substring
+  ontograph search [file] <query>           # find entities by label or IRI substring
   ontograph validate <file>                 # structural error check
   ontograph convert <file> --to functional  # normalize to OWL Functional Syntax
   ontograph stats <file>                    # ontology-wide statistics summary
-  ontograph entity-info <file> <iri>        # detailed lookup for one entity
+  ontograph entity-info [file] <iri>        # detailed lookup for one entity
+`search`/`entity-info` resolve an omitted [file] from whatever ontology is open in VS Code.
 All output is JSON on stdout. Exit 0 = success, non-zero = error (errorCode field identifies type).
 ```
 
@@ -85,14 +86,17 @@ Exit codes: `0` success, `1` file not found, `2` parse error.
 
 ---
 
-### `ontograph search <file> <query>`
+### `ontograph search [file] <query>`
 
-Search entities by label or IRI substring.
+Search entities by label or IRI substring. `<file>` is optional — if omitted, the CLI resolves it
+from the ontology file currently open in the running OntoGraph VS Code extension (via the bridge
+socket, same mechanism as `classify`/`check-consistency`/`dl-query`).
 
 ```bash
 ontograph search ./ontology.omn "Finding site"
 ontograph search ./snomed.owl "Body structure" --type class --limit 10
 ontograph search ./ontology.ofn "hasTopping" --type objectProperty
+ontograph search "Finding site"    # uses the file currently open in VS Code
 ```
 
 Flags:
@@ -201,15 +205,18 @@ Output (abridged):
 
 ---
 
-### `ontograph entity-info <file> <iri-or-label>`
+### `ontograph entity-info [file] <iri-or-label>`
 
 Detailed lookup for one entity: labels, annotations, asserted axioms, superconcepts, and direct
-subconcepts. Handles SNOMED CT–scale ontologies.
+subconcepts. Handles SNOMED CT–scale ontologies. `<file>` is optional — if omitted, the CLI
+resolves it from the ontology file currently open in the running OntoGraph VS Code extension (same
+bridge fallback as `search`).
 
 ```bash
 ontograph entity-info ./ontology.ofn "http://example.org/animals#Koala"
 ontograph entity-info ./snomed.owl Koala
 ontograph entity-info ./snomed.owl "Middle ear structure"
+ontograph entity-info Koala    # uses the file currently open in VS Code
 ```
 
 Accepts a full IRI, a bare local name (e.g. `Koala` for `...#Koala`), or an exact entity label
@@ -361,6 +368,7 @@ When a command fails, stdout still contains valid JSON:
 | 10 | `BRIDGE_UNAVAILABLE` | No running OntoGraph extension detected |
 | 11 | `BRIDGE_TIMEOUT` | Extension did not respond in time |
 | 12 | `BRIDGE_ERROR` | Extension returned an error |
+| 13 | `NO_ACTIVE_FILE` | `[file]` omitted from `search`/`entity-info` and no ontology is open in the extension |
 
 ---
 
@@ -374,11 +382,12 @@ Add to your `CLAUDE.md` or `AGENTS.md`:
 ## OWL Ontology Operations
 Use `ontograph` CLI when working with OWL files (.ofn, .omn, .ttl, .owl):
   ontograph parse <file>                    # inspect structure and counts
-  ontograph search <file> <query>           # find entities by label or IRI
+  ontograph search [file] <query>           # find entities by label or IRI
   ontograph validate <file>                 # check for errors
   ontograph convert <file> --to functional  # normalize to Functional Syntax
   ontograph stats <file>                    # ontology-wide statistics summary
-  ontograph entity-info <file> <iri>        # detailed lookup for one entity
+  ontograph entity-info [file] <iri>        # detailed lookup for one entity
+`search`/`entity-info` resolve an omitted [file] from whatever ontology is open in VS Code.
 All output is JSON on stdout. Exit 0 = success, non-zero = error.
 ```
 

@@ -12,6 +12,7 @@ const mockApi = {
   dlQuery: async (expression: string) => ({ expression, superClasses: [], equivalentClasses: [], subClasses: [], instances: [] }),
   getActiveModel: () => null,
   getActiveIndex: () => null,
+  getActiveFilePath: () => '/tmp/active.omn',
 };
 
 function sendRequest(sockPath: string, req: object, timeoutMs = 3000): Promise<object> {
@@ -46,6 +47,18 @@ describe('BridgeServer', () => {
     expect(resp.id).toBe('req1');
     expect(resp.success).toBe(true);
     expect(resp.data.classCount).toBe(5);
+
+    await server.stop();
+  });
+
+  it('accepts NDJSON getActiveFile request and returns the active file path', async () => {
+    const { BridgeServer } = await import('../../src/bridge/BridgeServer');
+    const server = new BridgeServer(SOCK_PATH);
+    await server.start(mockApi as never);
+
+    const resp = await sendRequest(SOCK_PATH, { id: 'req2', method: 'getActiveFile', params: {} }) as { success: boolean; data: { filePath: string | null } };
+    expect(resp.success).toBe(true);
+    expect(resp.data.filePath).toBe('/tmp/active.omn');
 
     await server.stop();
   });

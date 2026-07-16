@@ -4,7 +4,7 @@ import { readLockFile, isAlive } from './lockFile';
 
 export interface BridgeRequest {
   id: string;
-  method: 'classify' | 'checkConsistency' | 'dlQuery';
+  method: 'classify' | 'checkConsistency' | 'dlQuery' | 'getActiveFile';
   params: Record<string, unknown>;
 }
 

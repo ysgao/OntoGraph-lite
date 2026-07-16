@@ -74,4 +74,6 @@ export interface OntoGraphApi {
   dlQuery(expression: string, queryTypes: DLQueryType[]): Promise<ApiDLQueryResult>;
   getActiveModel(): OntologyModel | null;
   getActiveIndex(): OntologyIndex | null;
+  /** Filesystem path of the currently open ontology file, or null if none is open. */
+  getActiveFilePath(): string | null;
 }

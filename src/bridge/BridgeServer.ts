@@ -85,6 +85,7 @@ export class BridgeServer {
       case 'classify': return api.classify();
       case 'checkConsistency': return api.checkConsistency();
       case 'dlQuery': return api.dlQuery(params.expression as string, params.queryTypes as DLQueryType[]);
+      case 'getActiveFile': return { filePath: api.getActiveFilePath() };
       default: throw new Error(`Unknown bridge method: ${method}`);
     }
   }

@@ -773,6 +773,7 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
   const api: OntoGraphApi = {
     getActiveModel: () => activeModel ?? null,
     getActiveIndex: () => activeIndex ?? null,
+    getActiveFilePath: () => activeModel ? vscode.Uri.parse(activeModel.sourceUri).fsPath : null,
 
     async classify() {
       const model = activeModel;

@@ -211,12 +211,14 @@ When working with `.ofn`, `.omn`, `.ttl`, `.owl`, `.owx` files, use `ontograph` 
 
 ```bash
 ontograph parse <file>                    # entity counts, format, ontology IRI
-ontograph search <file> <query>           # find entities by label or IRI substring
+ontograph search [file] <query>           # find entities by label or IRI substring
 ontograph validate <file>                 # structural error check
 ontograph convert <file> --to functional  # normalize to OWL Functional Syntax
 ontograph stats <file>                    # ontology-wide statistics summary
-ontograph entity-info <file> <iri-or-label> # detailed lookup for one entity
+ontograph entity-info [file] <iri-or-label> # detailed lookup for one entity
 ```
+
+`search` and `entity-info` accept an optional `[file]` — if omitted, the CLI asks the running OntoGraph extension (via the bridge socket) for the file currently open in VS Code and uses that. All other commands still require `<file>` explicitly.
 
 All output is JSON on stdout. Parse it directly. Exit 0 = success, non-zero = error (`errorCode` field identifies type).
 
@@ -234,6 +236,8 @@ Two separate npm packages both install a binary named `ontograph`; install only 
 
 ## Recent Changes
 Full detail for each lives under `specs/<id>/` (spec.md/plan.md/tasks.md) — entries below are pointers only.
+- cli-help-text (no spec dir — ad-hoc fix): option descriptions for `search --type`, `dl-query`/standalone `dl-query --types`, `convert --to`, and `classify --reasoner` (cli-standalone) now use comma-separated (not `|`-joined) value lists so Commander's help formatter can word-wrap them, plus each command gets an `.addHelpText('after', ...)` block with concrete syntax and examples. `search`/`entity-info`'s top-level `.description()` was shortened back to one line (detail moved into their own `--help`) so the main `ontograph --help` command table isn't a wall of prose.
+- cli-optional-active-file (no spec dir — ad-hoc fix): `search` and `entity-info`'s `<file>` argument is now optional (`registerCoreCommands.ts` declares them as `<args...>` and resolves 1-vs-2-arg forms manually, since Commander can't express "optional-then-required" positionals); when omitted, the CLI calls a new `getActiveFile` bridge RPC method (`OntoGraphApi.getActiveFilePath()`, dispatched in `src/bridge/BridgeServer.ts`) to ask the running extension for its currently open file, via `cli/src/bridge/activeFile.ts#resolveActiveFilePath`. Errors as `NO_ACTIVE_FILE` if the extension has no ontology open, or the usual `BRIDGE_UNAVAILABLE`/`BRIDGE_TIMEOUT` if the extension isn't reachable. `parse`/`validate`/`convert`/`stats` still require `<file>` explicitly.
 - cli-label-resolution (no spec dir — ad-hoc fix): `entity-info` resolves its argument as IRI → local name → exact label/prefLabel/altLabel (via `OntologyIndex`), erroring `AMBIGUOUS_MATCH`/`NOT_FOUND` with candidate/suggestion lists rather than silently guessing; `search` adds an `exactMatches` field alongside the fuzzy-ranked `results`; `dl-query` (both `cli/` and `cli-standalone/`) resolves label/prefLabel/altLabel entity references in the expression to IRIs client-side before it reaches the reasoner (mirrors `DLQueryPanel`'s `normalizeExpression` pipeline); `entity-info`'s `superClassExpressions`/`equivalentClassExpressions`/`gciExpressions` now render entity labels instead of raw IRIs.
 - 028-standalone-cli-reasoner: new sibling package `cli-standalone/` (`@ysgao/ontograph-cli-standalone`) bundles a Temurin 21 JRE (macOS arm64 only) + the reasoner JAR so `classify`/`check-consistency`/`dl-query` run against a local file with zero VS Code and zero system Java; `cli/` unaffected — both packages share command registration via `cli/src/registerCoreCommands.ts`. → `specs/028-standalone-cli-reasoner/`
 - 027-cli-dlquery-filters: `ontograph dl-query` auto-classifies (only when needed) before querying, accepts `--types` (any of the 6 `DLQueryType` categories, default `subClasses`), and `--filter` (case-insensitive label/IRI substring, client-side). → `specs/027-cli-dlquery-filters/`

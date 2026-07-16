@@ -1,6 +1,6 @@
 {
   "name": "@ysgao/ontograph-cli",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "CLI for OntoGraph OWL ontology operations — for AI tools (Claude Code, Codex) and developers",
   "license": "Apache-2.0",
   "engines": {

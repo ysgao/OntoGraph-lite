@@ -39,6 +39,7 @@ export const EXIT_CODES: Record<string, number> = {
   BRIDGE_UNAVAILABLE: 10,
   BRIDGE_TIMEOUT: 11,
   BRIDGE_ERROR: 12,
+  NO_ACTIVE_FILE: 13,
 };
 
 export function exitCode(errorCode: string): number {

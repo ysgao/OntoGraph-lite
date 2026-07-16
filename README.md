@@ -153,6 +153,8 @@ ontograph parse ./snomed.owl
 # Search entities by label or IRI substring
 ontograph search ./ontology.omn "Finding site"
 ontograph search ./ontology.ofn "Body structure" --type class --limit 10
+# <file> is optional for search/entity-info — omit it to use the file open in VS Code
+ontograph search "Finding site"
 
 # Validate OWL structure
 ontograph validate ./ontology.ttl
