@@ -2,8 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { ParserRegistry } from '@core/parser/ParserRegistry';
 import { OntologyIndex } from '@core/model/OntologyIndex';
-import { OWLEntityUnion } from '@core/model/OntologyModel';
+import { OWLEntityUnion, OntologyModel, getLabel } from '@core/model/OntologyModel';
+import { renderExpression } from '@core/model/AxiomDisplay';
 import { writeResult, writeError, exitCode } from '../../output';
+
+export interface EntityRef {
+  iri: string;
+  label: string | null;
+}
 
 export interface EntityInfoResult {
   iri: string;
@@ -13,10 +19,10 @@ export interface EntityInfoResult {
   annotations: Record<string, string[]>;
 
   // Class-specific
-  superClasses?: string[];
-  directSubClasses?: string[];
-  equivalentClasses?: string[];
-  disjointClasses?: string[];
+  superClasses?: EntityRef[];
+  directSubClasses?: EntityRef[];
+  equivalentClasses?: EntityRef[];
+  disjointClasses?: EntityRef[];
   superClassExpressions?: string[];
   equivalentClassExpressions?: string[];
   gciExpressions?: string[];
@@ -76,7 +82,16 @@ function getLocalName(iri: string): string {
   return sep >= 0 ? iri.slice(sep + 1) : iri;
 }
 
-export async function runEntityInfo(file: string, entityIri: string, _timeout: number): Promise<number> {
+function refFor(iri: string, model: OntologyModel): EntityRef {
+  const entity = model.classes.get(iri)
+    ?? model.objectProperties.get(iri)
+    ?? model.dataProperties.get(iri)
+    ?? model.annotationProperties.get(iri)
+    ?? model.individuals.get(iri);
+  return { iri, label: entity ? getLabel(entity) || null : null };
+}
+
+export async function runEntityInfo(file: string, entityIriOrLabel: string, _timeout: number): Promise<number> {
   const start = Date.now();
   const command = 'entity-info';
   const absPath = path.resolve(file);
@@ -105,15 +120,45 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
   }
 
   // Find entity by IRI (exact match)
-  let entity: OWLEntityUnion | undefined = model.classes.get(entityIri) ||
-    model.objectProperties.get(entityIri) ||
-    model.dataProperties.get(entityIri) ||
-    model.annotationProperties.get(entityIri) ||
-    model.individuals.get(entityIri);
+  let entity: OWLEntityUnion | undefined = model.classes.get(entityIriOrLabel) ||
+    model.objectProperties.get(entityIriOrLabel) ||
+    model.dataProperties.get(entityIriOrLabel) ||
+    model.annotationProperties.get(entityIriOrLabel) ||
+    model.individuals.get(entityIriOrLabel);
 
   if (!entity) {
-    writeError('NOT_FOUND', `Entity not found: ${entityIri}`, command, Date.now() - start);
-    return exitCode('NOT_FOUND');
+    const index = new OntologyIndex(model);
+    entity = index.getByLocalName(entityIriOrLabel);
+
+    if (!entity) {
+      const exactLabelMatches = index.exactMatchByLabel(entityIriOrLabel);
+
+      if (exactLabelMatches.length > 1) {
+        const candidates = exactLabelMatches.map(e => ({ iri: e.iri, type: e.type }));
+        writeError(
+          'AMBIGUOUS_MATCH',
+          `Multiple entities have the label "${entityIriOrLabel}" — re-run with one of the candidate IRIs`,
+          command,
+          Date.now() - start,
+          { candidates },
+        );
+        return exitCode('AMBIGUOUS_MATCH');
+      }
+
+      if (exactLabelMatches.length === 1) {
+        entity = exactLabelMatches[0];
+      } else {
+        const suggestions = index.searchByLabel(entityIriOrLabel, 5).map(e => ({ iri: e.iri, label: getLabel(e) || null }));
+        writeError(
+          'NOT_FOUND',
+          `Entity not found: ${entityIriOrLabel}`,
+          command,
+          Date.now() - start,
+          { suggestions },
+        );
+        return exitCode('NOT_FOUND');
+      }
+    }
   }
 
   const result: EntityInfoResult = {
@@ -134,27 +179,27 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
       }
     }
     if (superIriSet.size > 0) {
-      result.superClasses = [...superIriSet].map(getLocalName);
+      result.superClasses = [...superIriSet].map(iri => refFor(iri, model));
     }
 
     if (entity.equivalentClassIris.length > 0) {
-      result.equivalentClasses = entity.equivalentClassIris.map(getLocalName);
+      result.equivalentClasses = entity.equivalentClassIris.map(iri => refFor(iri, model));
     }
     if (entity.disjointClassIris.length > 0) {
-      result.disjointClasses = entity.disjointClassIris.map(getLocalName);
+      result.disjointClasses = entity.disjointClassIris.map(iri => refFor(iri, model));
     }
     if (entity.superClassExpressions.length > 0) {
-      result.superClassExpressions = entity.superClassExpressions;
+      result.superClassExpressions = entity.superClassExpressions.map(e => renderExpression(e, model, 'label'));
     }
     if (entity.equivalentClassExpressions.length > 0) {
-      result.equivalentClassExpressions = entity.equivalentClassExpressions;
+      result.equivalentClassExpressions = entity.equivalentClassExpressions.map(e => renderExpression(e, model, 'label'));
     }
     if ('gciExpressions' in entity && entity.gciExpressions.length > 0) {
-      result.gciExpressions = entity.gciExpressions;
+      result.gciExpressions = entity.gciExpressions.map(e => renderExpression(e, model, 'label'));
     }
 
     // Direct subconcepts: explicit SubClassOf axioms + named conjuncts in EquivalentClasses expressions
-    const directSubClasses: string[] = [];
+    const directSubClasses: EntityRef[] = [];
     for (const potentialSub of model.classes.values()) {
       if (potentialSub.iri === entity.iri) continue;
       const viaSubClassOf = potentialSub.superClassIris.includes(entity.iri);
@@ -162,7 +207,7 @@ export async function runEntityInfo(file: string, entityIri: string, _timeout: n
         expr => extractNamedConjuncts(expr).includes(entity.iri)
       );
       if (viaSubClassOf || viaEquivalent) {
-        directSubClasses.push(getLocalName(potentialSub.iri));
+        directSubClasses.push(refFor(potentialSub.iri, model));
       }
     }
     if (directSubClasses.length > 0) {

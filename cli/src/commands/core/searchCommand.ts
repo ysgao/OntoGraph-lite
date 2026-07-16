@@ -18,6 +18,10 @@ export interface SearchResult {
   filePath: string;
   query: string;
   totalMatches: number;
+  /** Entities whose label/prefLabel/altLabel exactly equals `query` (case-insensitive) — the
+   *  same resolution `entity-info` uses to convert a typed label straight to an IRI. Non-empty
+   *  length > 1 means `query` is ambiguous as an exact identifier. */
+  exactMatches: EntityMatch[];
   results: EntityMatch[];
 }
 
@@ -53,24 +57,29 @@ export async function runSearch(
 
   const index = new OntologyIndex(model);
   const hits: OWLEntityUnion[] = index.searchByLabel(query, limit * 4);
+  const exactHits: OWLEntityUnion[] = index.exactMatchByLabel(query);
 
   const filtered = typeFilter
     ? hits.filter(e => e.type === typeFilter)
     : hits;
+  const exactFiltered = typeFilter
+    ? exactHits.filter(e => e.type === typeFilter)
+    : exactHits;
 
-  const results: EntityMatch[] = filtered.slice(0, limit).map(e => ({
+  const toMatch = (e: OWLEntityUnion): EntityMatch => ({
     iri: e.iri,
     type: e.type,
     label: getLabel(e) || null,
     score: 1,
     matchedFields: ['label'],
-  }));
+  });
 
   writeResult<SearchResult>({
     filePath: absPath,
     query,
     totalMatches: filtered.length,
-    results,
+    exactMatches: exactFiltered.map(toMatch),
+    results: filtered.slice(0, limit).map(toMatch),
   }, command, Date.now() - start);
   return 0;
 }

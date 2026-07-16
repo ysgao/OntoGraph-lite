@@ -12,13 +12,17 @@ export function writeResult<T>(data: T, command: string, durationMs: number): vo
   process.stdout.write(JSON.stringify(response) + '\n');
 }
 
-export function writeError(
+/** `data` carries structured error detail (e.g. ambiguous-match candidates or
+ *  not-found suggestions) callers can act on programmatically, beyond the
+ *  human-readable `error` string. */
+export function writeError<T = never>(
   errorCode: string,
   error: string,
   command: string,
   durationMs: number,
+  data?: T,
 ): void {
-  const response: CliResponse<never> = { success: false, command, durationMs, error, errorCode };
+  const response: CliResponse<T> = { success: false, command, durationMs, error, errorCode, data };
   process.stdout.write(JSON.stringify(response) + '\n');
 }
 
@@ -31,6 +35,7 @@ export const EXIT_CODES: Record<string, number> = {
   UNSUPPORTED_FORMAT: 3,
   INVALID_ARGS: 4,
   NOT_FOUND: 5,
+  AMBIGUOUS_MATCH: 6,
   BRIDGE_UNAVAILABLE: 10,
   BRIDGE_TIMEOUT: 11,
   BRIDGE_ERROR: 12,

@@ -106,6 +106,12 @@ export class OntologyIndex {
     return this.iriToEntity.get(iri);
   }
 
+  /** Exact IRI local-name lookup (case-insensitive), e.g. "Koala" for `...#Koala`. */
+  getByLocalName(localName: string): OWLEntityUnion | undefined {
+    const iri = this.localNameToIri.get(localName.toLowerCase());
+    return iri ? this.iriToEntity.get(iri) : undefined;
+  }
+
   searchByLabel(query: string, maxResults = 50): OWLEntityUnion[] {
     const tokens = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
     if (tokens.length === 0) { return []; }
