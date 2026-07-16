@@ -198,7 +198,10 @@ export async function runEntityInfo(file: string, entityIriOrLabel: string, _tim
       result.gciExpressions = entity.gciExpressions.map(e => renderExpression(e, model, 'label'));
     }
 
-    // Direct subconcepts: explicit SubClassOf axioms + named conjuncts in EquivalentClasses expressions
+    // Direct subconcepts: explicit SubClassOf axioms + named conjuncts in EquivalentClasses
+    // expressions + named conjuncts in complex SubClassOf superclass expressions (e.g.
+    // SubClassOf(:Sub ObjectIntersectionOf(:NamedSuper ...)) — a named subclass with a
+    // conjunction-elimination-style stated definition rather than a plain SubClassOf).
     const directSubClasses: EntityRef[] = [];
     for (const potentialSub of model.classes.values()) {
       if (potentialSub.iri === entity.iri) continue;
@@ -206,7 +209,10 @@ export async function runEntityInfo(file: string, entityIriOrLabel: string, _tim
       const viaEquivalent = potentialSub.equivalentClassExpressions.some(
         expr => extractNamedConjuncts(expr).includes(entity.iri)
       );
-      if (viaSubClassOf || viaEquivalent) {
+      const viaSuperClassExpression = potentialSub.superClassExpressions.some(
+        expr => extractNamedConjuncts(expr).includes(entity.iri)
+      );
+      if (viaSubClassOf || viaEquivalent || viaSuperClassExpression) {
         directSubClasses.push(refFor(potentialSub.iri, model));
       }
     }
