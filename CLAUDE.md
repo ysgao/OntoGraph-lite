@@ -207,14 +207,17 @@ ontograph entity-info <file> <iri>        # detailed lookup for one entity
 
 All output is JSON on stdout. Parse it directly. Exit 0 = success, non-zero = error (`errorCode` field identifies type).
 
-Bridge commands (require OntoGraph active in VS Code):
+Bridge commands (`classify`, `check-consistency`, `dl-query`) run a reasoner classification, consistency check, or DL query — which reasoner backend they use depends on which package is installed:
+
 ```bash
 ontograph classify             # run reasoner classification
 ontograph check-consistency    # OWL 2 DL consistency check
 ontograph dl-query "<expr>"    # Manchester Syntax DL query
 ```
 
-Install: `npm install -g @ysgao/ontograph-cli`
+Two separate npm packages both install a binary named `ontograph`; install only one:
+- `@ysgao/ontograph-cli` (`cli/`) — bridge commands require OntoGraph **active in VS Code**; talks to the running extension. Install: `npm install -g @ysgao/ontograph-cli`
+- `@ysgao/ontograph-cli-standalone` (`cli-standalone/`) — bundles its own Temurin JRE + reasoner JAR; bridge commands run against a local file with **zero VS Code and zero system Java** (macOS arm64 only). Install: `npm install -g @ysgao/ontograph-cli-standalone`
 
 ## Recent Changes
 Full detail for each lives under `specs/<id>/` (spec.md/plan.md/tasks.md) — entries below are pointers only.
