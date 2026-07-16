@@ -12,7 +12,7 @@ export interface RenderedExpressionEntityRef {
   label: string;
 }
 
-const MANCHESTER_KW = new Set([
+export const MANCHESTER_KW = new Set([
   'some', 'only', 'value', 'min', 'max', 'exactly', 'and', 'or', 'not', 'that', 'Self',
 ]);
 

@@ -45,6 +45,31 @@ describe('dlQueryCommand', () => {
     expect(call[0].params.queryTypes).toEqual(['directSubClasses', 'instances']);
   });
 
+  it('auto-quotes a bare multi-word expression before sending it to the bridge', async () => {
+    const mockData = { expression: "'middle ear structure'", subClasses: [] };
+    vi.spyOn(bridgeClient, 'send').mockResolvedValue({ id: '1', success: true, data: mockData });
+
+    await captureStdout(() => runDlQuery('middle ear structure', 5000));
+
+    const call = (bridgeClient.send as ReturnType<typeof vi.spyOn>).mock.calls[0];
+    expect(call[0].params.expression).toBe("'middle ear structure'");
+  });
+
+  it('appends a single-quote hint to a Manchester parse error on a bare multi-word expression', async () => {
+    vi.spyOn(bridgeClient, 'send').mockResolvedValue({
+      id: '1',
+      success: false,
+      errorCode: 'BRIDGE_ERROR',
+      error: 'Encountered middle at line 1 column 1. Expected one of:\n\tClass name\n',
+    });
+
+    const { captured } = await captureStdout(() => runDlQuery('Animal and middle ear structure', 5000));
+
+    const r = captured as { success: boolean; error: string };
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("Hint: wrap multi-word entity names in single quotes, e.g. 'Animal and middle ear structure'.");
+  });
+
   it('rejects an unrecognized --types value with INVALID_ARGS and never calls the bridge', async () => {
     const sendSpy = vi.spyOn(bridgeClient, 'send');
 

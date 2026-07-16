@@ -60,6 +60,28 @@ describe('runStandaloneDlQuery', () => {
     expect(mockDlQuery).not.toHaveBeenCalled();
   });
 
+  it('auto-quotes a bare multi-word label (no quotes typed) and resolves it to its IRI', async () => {
+    mockDlQuery.mockResolvedValue({ subClasses: [] });
+
+    await captureStdout(() => runStandaloneDlQuery(ANIMALS_OMN, 'Some Forest', 5000));
+
+    const call = mockDlQuery.mock.calls[0];
+    const sentExpression = call[3]; // classExpression is the 4th positional arg
+    expect(sentExpression).toContain('http://example.org/animals#someForest');
+  });
+
+  it('resolves a quoted label (differing from the local name) to its IRI before querying the reasoner', async () => {
+    mockDlQuery.mockResolvedValue({ subClasses: [] });
+
+    await captureStdout(() =>
+      runStandaloneDlQuery(ANIMALS_OMN, "'has habitat' some Forest", 5000));
+
+    const call = mockDlQuery.mock.calls[0];
+    const sentExpression = call[3]; // classExpression is the 4th positional arg
+    expect(sentExpression).toContain('http://example.org/animals#hasHabitat');
+    expect(sentExpression).toContain('http://example.org/animals#Forest');
+  });
+
   it('applies the label filter client-side to the reasoner result', async () => {
     mockDlQuery.mockResolvedValue({
       directSubClasses: ['http://example.org/animals#Koala', 'http://example.org/animals#Wombat'],

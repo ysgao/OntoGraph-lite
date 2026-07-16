@@ -29,6 +29,8 @@ import { applyIncrementalReload } from './sync/incrementalReload';
 import { buildModelSegmentIndexAsync } from './model/SegmentIndex';
 import type { OntologyModel, EntityType } from './model/OntologyModel';
 import { OntologyIndex } from './model/OntologyIndex';
+import { normalizeExpression } from './model/AxiomDisplay';
+import { manchesterToFunctional } from './utils/ExpressionUtils';
 import type { OntoGraphApi, ApiDLQueryResult } from './api';
 import type { DLQueryType } from './views/DLQueryMessages';
 import { BridgeServer } from './bridge/BridgeServer';
@@ -826,14 +828,20 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
       if (!model) { throw new Error('No ontology loaded'); }
       return runDlQueryWithClassifyFirst(model, () => api.classify(), async () => {
         const { content, format } = await resolveOntologyContent(model);
+        const index = activeIndex;
+        // Resolve label/prefLabel/altLabel/local-name entity references to full IRIs before
+        // sending to the reasoner — mirrors DLQueryPanel's pipeline (src/views/DLQueryPanel.ts)
+        // so `ontograph dl-query` gets the same label support as the DL Query webview, instead
+        // of relying solely on Java's rdfs:label-only entity checker (OntologyService.java).
+        const normalized = index ? normalizeExpression(expression, model, index) : expression;
+        const resolvedExpression = /https?:\/\//.test(normalized) ? manchesterToFunctional(normalized) : expression;
         const result = await reasonerBridge.dlQuery(
           format,
           content,
           null,
-          expression,
+          resolvedExpression,
           queryTypes,
         );
-        const index = activeIndex;
         const toRef = (iri: string) => {
           const entity = index?.getByIri(iri);
           const labels = entity?.labels['en'] ?? entity?.labels[''] ?? (entity ? Object.values(entity.labels)[0] : undefined);

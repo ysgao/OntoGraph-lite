@@ -3,6 +3,7 @@ import { writeResult, writeError, exitCode } from '../../output';
 import type { ApiDLQueryResult } from '@core/api';
 import { matchesLabelFilter } from '@core/utils/dlQueryLabelFilter';
 import { parseQueryTypes, InvalidQueryTypeError } from './dlQueryTypes';
+import { autoQuoteBareLabelExpression, withParseHint } from './autoQuoteLabel';
 
 export interface DlQueryOptions {
   types?: string;
@@ -40,21 +41,24 @@ export async function runDlQuery(expression: string, timeout: number, options: D
     throw err;
   }
 
+  const resolvedExpression = autoQuoteBareLabelExpression(expression);
+
   try {
     const resp = await send<ApiDLQueryResult>(
-      { id: String(Date.now()), method: 'dlQuery', params: { expression, queryTypes } },
+      { id: String(Date.now()), method: 'dlQuery', params: { expression: resolvedExpression, queryTypes } },
       timeout,
     );
     if (resp.success) {
       writeResult(applyLabelFilter(resp.data, options.filter), command, Date.now() - start);
       return 0;
     }
-    writeError(resp.errorCode ?? 'BRIDGE_ERROR', resp.error ?? 'Bridge error', command, Date.now() - start);
-    return exitCode(resp.errorCode ?? 'BRIDGE_ERROR');
+    const errorCode = resp.errorCode ?? 'BRIDGE_ERROR';
+    writeError(errorCode, withParseHint(resp.error ?? 'Bridge error', resolvedExpression), command, Date.now() - start);
+    return exitCode(errorCode);
   } catch (err: unknown) {
     const code = (err as { errorCode?: string }).errorCode ?? 'BRIDGE_ERROR';
     const msg = err instanceof Error ? err.message : String(err);
-    writeError(code, msg, command, Date.now() - start);
+    writeError(code, withParseHint(msg, resolvedExpression), command, Date.now() - start);
     return exitCode(code);
   }
 }

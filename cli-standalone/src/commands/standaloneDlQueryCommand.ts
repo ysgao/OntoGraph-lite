@@ -1,11 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import { ParserRegistry } from '@core/parser/ParserRegistry';
+import { OntologyIndex } from '@core/model/OntologyIndex';
+import { normalizeExpression } from '@core/model/AxiomDisplay';
+import { manchesterToFunctional } from '@core/utils/ExpressionUtils';
 import type { OntologyModel } from '@core/model/OntologyModel';
 import type { ApiDLQueryResult, ClassRef } from '@core/api';
 import type { DLQueryType } from '@core/views/DLQueryMessages';
 import { matchesLabelFilter } from '@core/utils/dlQueryLabelFilter';
 import { parseQueryTypes, InvalidQueryTypeError } from '@cli/commands/bridge/dlQueryTypes';
+import { autoQuoteBareLabelExpression, withParseHint } from '@cli/commands/bridge/autoQuoteLabel';
 import { writeResult, writeError, exitCode } from '../output';
 import { createReasonerProcess, PlatformUnsupportedError, RuntimeUnavailableError } from '../reasonerRuntime';
 
@@ -14,9 +18,6 @@ export interface StandaloneDlQueryOptions {
   filter?: string;
 }
 
-/** Resolves a label for `iri` by looking it up across every entity map the model has — this
- *  standalone command has no OntologyIndex (that's an extension-host concept), so it reads
- *  directly from the parsed model's own class/individual maps instead. */
 function makeGetLabel(model: OntologyModel): (iri: string) => string | null {
   return (iri: string): string | null => {
     const entity = model.classes.get(iri) ?? model.individuals.get(iri)
@@ -86,15 +87,24 @@ export async function runStandaloneDlQuery(
     throw err;
   }
 
+  const quotedExpression = autoQuoteBareLabelExpression(expression);
+
   try {
+    // Resolve label/prefLabel/altLabel/local-name entity references to full IRIs before sending
+    // to the reasoner — mirrors DLQueryPanel's pipeline (src/views/DLQueryPanel.ts) since this
+    // standalone command has no VS Code extension host to do it server-side.
+    const index = new OntologyIndex(model);
+    const normalized = normalizeExpression(quotedExpression, model, index);
+    const resolvedExpression = /https?:\/\//.test(normalized) ? manchesterToFunctional(normalized) : quotedExpression;
+
     // Passes the original file path (null content) rather than the read-in text — dlQuery
     // already supports a filePath param, avoiding a redundant temp-file round trip for large
     // ontology files (same rationale as standaloneClassifyCommand's use of classifyFile).
-    const result = await reasonerProcess.dlQuery(model.sourceFormat as string, null, absPath, expression, queryTypes, 'auto');
+    const result = await reasonerProcess.dlQuery(model.sourceFormat as string, null, absPath, resolvedExpression, queryTypes, 'auto');
     const getLabel = makeGetLabel(model);
     const toRef = (iri: string): ClassRef => ({ iri, label: getLabel(iri) });
 
-    const output: ApiDLQueryResult = { expression };
+    const output: ApiDLQueryResult = { expression: quotedExpression };
     for (const type of queryTypes) {
       const refs = result[type].map(toRef);
       output[type] = options.filter ? refs.filter(e => matchesLabelFilter(e, options.filter)) : refs;
@@ -105,7 +115,7 @@ export async function runStandaloneDlQuery(
   } catch (err: unknown) {
     const code = (err as { errorCode?: string }).errorCode ?? 'BRIDGE_ERROR';
     const msg = err instanceof Error ? err.message : String(err);
-    writeError(code, msg, command, Date.now() - start);
+    writeError(code, withParseHint(msg, quotedExpression), command, Date.now() - start);
     return exitCode(code);
   } finally {
     // See standaloneClassifyCommand.ts — without disposing the spawned JVM, this process's
