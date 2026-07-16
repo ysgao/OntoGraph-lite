@@ -31,6 +31,19 @@ node cli/dist/main.js --help        # Try the CLI locally
 
 `cli/package.json` version and the `.version()` string in `cli/src/main.ts` should track the root `package.json` version (they are bumped together, not independently).
 
+**Global `ontograph` command vs local `cli/dist/main.js` — these are two separate files.** If `@ysgao/ontograph-cli` was installed globally (`npm install -g @ysgao/ontograph-cli`), the `ontograph` binary on `PATH` resolves to a real copy under npm's global `node_modules` (e.g. `~/.npm-packages/lib/node_modules/@ysgao/ontograph-cli/dist/main.js`), **not** this repo's `cli/dist/main.js` — they are unrelated unless explicitly linked. Rebuilding this repo (`pnpm --filter ontograph-cli build`) never changes what the global `ontograph` command runs.
+- If the CLI is installed globally and the user is just using it normally (not testing local code changes), tell them to run the plain `ontograph <command>` — don't have them invoke `node cli/dist/main.js` instead; that only proves the local build works, not what their installed binary does.
+- To verify a local code change without publishing: either invoke the local build directly — `node cli/dist/main.js <command>` — or run `cd cli && npm link` once so the global `ontograph` command is symlinked to this repo's build; after that, every `pnpm --filter ontograph-cli build` takes effect immediately under the global command too.
+- To ship a local fix to everyone's global install for real: bump the version (see above), publish (see below), then the user runs `npm install -g @ysgao/ontograph-cli@latest`.
+
+**Testing bridge commands (`classify`/`check-consistency`/`dl-query`) against a debug extension via F5:**
+1. Rebuild the CLI locally first — F5's `preLaunchTask` only builds the extension, not `cli/`: `pnpm --filter ontograph-cli build`.
+2. Press F5 ("Run Extension" in `.vscode/launch.json`) to launch the Extension Development Host. If a debug session is already running, fully stop it (Shift+F5) and relaunch rather than using the in-place "Restart" button — restart can serve stale `dist/`.
+3. In the Extension Development Host window, open a supported ontology file (e.g. `test-ontologies/animals.omn`) to activate OntoGraph and populate the in-memory model.
+4. Confirm the bridge is up: check the "OntoGraph" output channel for `OntoGraph ready...`, and that `~/.ontograph-lite/bridge.json` (macOS/Linux) shows a `pid` matching the Dev Host process. This lock file is global, not per-window — if another VS Code window also has OntoGraph active, whichever instance started most recently owns it.
+5. In a normal terminal (not inside the Dev Host), run the locally-built binary directly (not the global `ontograph` command, unless it's `npm link`ed — see above): `node cli/dist/main.js classify` / `check-consistency` / `dl-query "<expr>"`. File-based commands (`parse`/`search`/`validate`/`convert`/`stats`/`entity-info`) don't need the extension running at all.
+6. `BRIDGE_UNAVAILABLE` usually means the Dev Host window closed, no file is open in it, or the lock file's `pid` is dead (`ps -p <pid>`).
+
 To publish: `cd cli && npm publish --access public`. The npm account's 2FA method is a security key (WebAuthn) — the CLI's `--otp` flow only accepts typed TOTP codes, so publishing from a terminal requires a granular access token (Read+write, "bypass 2FA for write actions" enabled) set as `//registry.npmjs.org/:_authToken` in `~/.npmrc`, not the token from `npm login`.
 
 ### Java Reasoner Server
@@ -202,7 +215,7 @@ ontograph search <file> <query>           # find entities by label or IRI substr
 ontograph validate <file>                 # structural error check
 ontograph convert <file> --to functional  # normalize to OWL Functional Syntax
 ontograph stats <file>                    # ontology-wide statistics summary
-ontograph entity-info <file> <iri>        # detailed lookup for one entity
+ontograph entity-info <file> <iri-or-label> # detailed lookup for one entity
 ```
 
 All output is JSON on stdout. Parse it directly. Exit 0 = success, non-zero = error (`errorCode` field identifies type).
@@ -221,6 +234,7 @@ Two separate npm packages both install a binary named `ontograph`; install only 
 
 ## Recent Changes
 Full detail for each lives under `specs/<id>/` (spec.md/plan.md/tasks.md) — entries below are pointers only.
+- cli-label-resolution (no spec dir — ad-hoc fix): `entity-info` resolves its argument as IRI → local name → exact label/prefLabel/altLabel (via `OntologyIndex`), erroring `AMBIGUOUS_MATCH`/`NOT_FOUND` with candidate/suggestion lists rather than silently guessing; `search` adds an `exactMatches` field alongside the fuzzy-ranked `results`; `dl-query` (both `cli/` and `cli-standalone/`) resolves label/prefLabel/altLabel entity references in the expression to IRIs client-side before it reaches the reasoner (mirrors `DLQueryPanel`'s `normalizeExpression` pipeline); `entity-info`'s `superClassExpressions`/`equivalentClassExpressions`/`gciExpressions` now render entity labels instead of raw IRIs.
 - 028-standalone-cli-reasoner: new sibling package `cli-standalone/` (`@ysgao/ontograph-cli-standalone`) bundles a Temurin 21 JRE (macOS arm64 only) + the reasoner JAR so `classify`/`check-consistency`/`dl-query` run against a local file with zero VS Code and zero system Java; `cli/` unaffected — both packages share command registration via `cli/src/registerCoreCommands.ts`. → `specs/028-standalone-cli-reasoner/`
 - 027-cli-dlquery-filters: `ontograph dl-query` auto-classifies (only when needed) before querying, accepts `--types` (any of the 6 `DLQueryType` categories, default `subClasses`), and `--filter` (case-insensitive label/IRI substring, client-side). → `specs/027-cli-dlquery-filters/`
 - 026-generate-uml-diagram: right-click UML diagram (composition/generalization) + draw.io/SVG/PNG export, no AI/LLM. → `specs/026-generate-uml-diagram/`
