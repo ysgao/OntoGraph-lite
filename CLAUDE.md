@@ -22,6 +22,12 @@ or
 npm run build-all && npm run package
 ```
 
+**`.vscodeignore` must exclude `cli-standalone/**` and `uml-diagram-cli-plan/**`** — `vsce`/`ovsx` package by `.vscodeignore`, not `.gitignore`, so gitignored-but-present local directories (e.g. `uml-diagram-cli-plan/`, a scratch planning dir) or sibling packages published separately (`cli/`, `cli-standalone/` — the latter bundles its own ~220 MB JRE) still get bundled into the VSIX unless explicitly listed here. A correctly-packaged VSIX is ~20-25 MB; if `npm run package` reports 100+ MB, check `.vscodeignore` before publishing.
+
+**Publishing the VSIX** — after `npm run build-all && npm run package` produces `ontograph-lite-<version>.vsix`:
+- VS Code Marketplace: `npx @vscode/vsce publish` (or upload the `.vsix` via the marketplace web UI). Requires a marketplace PAT.
+- Open VSX: `npx ovsx publish ontograph-lite-<version>.vsix`. Requires a Personal Access Token for the `ysgao` namespace from https://open-vsx.org (Profile → Access Tokens). Run `echo "<token>" | npx ovsx login ysgao` once — `ovsx` verifies the PAT against the namespace and stores it in the macOS Keychain (via `keytar`; falls back to a `0600` file at `~/.ovsx` only if the keychain is unavailable), so subsequent `ovsx publish`/`ovsx verify-pat` calls need no `-p` flag. Never write the raw token into a repo file or markdown doc — the keychain (or `~/.ovsx`, which is outside the repo) is the secure store for it, mirroring how the npm token lives in `~/.npmrc`, not in the codebase.
+
 ### CLI Package (`cli/`)
 ```bash
 pnpm --filter ontograph-cli build   # Bundle cli/dist/main.js via esbuild

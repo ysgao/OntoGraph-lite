@@ -19,8 +19,9 @@ esbuild.mjs
 .eslintrc*
 vitest.config*
 **/*.test.ts
-# CLI package — published separately, excluded from VSIX
+# CLI packages — published separately (npm), excluded from VSIX
 cli/**
+cli-standalone/**
 pnpm-lock.yaml
 pnpm-workspace.yaml
 # Internal project docs and tooling
@@ -28,6 +29,7 @@ pnpm-workspace.yaml
 .specify/**
 conductor/**
 specs/**
+uml-diagram-cli-plan/**
 *.md
 .gitignore
 scratch_test.ts
