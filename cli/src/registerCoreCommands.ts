@@ -59,10 +59,10 @@ export function registerCoreCommands(program: Command): void {
     });
 
   program
-    .command('entity-info <file> <iri>')
-    .description('Get full details for a specific entity by IRI')
-    .action(async (file: string, iri: string) => {
+    .command('entity-info <file> <iriOrLabel>')
+    .description('Get full details for a specific entity by IRI or exact label (case-insensitive)')
+    .action(async (file: string, iriOrLabel: string) => {
       const timeout = Number(program.opts().timeout);
-      process.exitCode = await runEntityInfo(file, iri, timeout);
+      process.exitCode = await runEntityInfo(file, iriOrLabel, timeout);
     });
 }

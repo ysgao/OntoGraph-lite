@@ -109,12 +109,19 @@ Output:
     "filePath": "...",
     "query": "Finding site",
     "totalMatches": 3,
+    "exactMatches": [
+      { "iri": "http://snomed.info/id/363698007", "type": "class", "label": "Finding site", "score": 1, "matchedFields": ["label"] }
+    ],
     "results": [
       { "iri": "http://snomed.info/id/363698007", "type": "class", "label": "Finding site", "score": 1, "matchedFields": ["label"] }
     ]
   }
 }
 ```
+
+`exactMatches` holds entities whose label/prefLabel/altLabel equals `query` exactly (case-insensitive)
+— the same resolution `entity-info` uses to convert a typed label straight to an IRI. More than one
+entry means the label is ambiguous as an identifier; `results` is the full fuzzy-ranked list.
 
 ---
 
@@ -194,7 +201,7 @@ Output (abridged):
 
 ---
 
-### `ontograph entity-info <file> <iri-or-local-name>`
+### `ontograph entity-info <file> <iri-or-label>`
 
 Detailed lookup for one entity: labels, annotations, asserted axioms, superconcepts, and direct
 subconcepts. Handles SNOMED CT–scale ontologies.
@@ -202,12 +209,38 @@ subconcepts. Handles SNOMED CT–scale ontologies.
 ```bash
 ontograph entity-info ./ontology.ofn "http://example.org/animals#Koala"
 ontograph entity-info ./snomed.owl Koala
+ontograph entity-info ./snomed.owl "Middle ear structure"
 ```
 
-Accepts a full IRI or a bare local name (resolved via a reverse local-name index). Output shape
-varies by entity type (`class`, `objectProperty`, `dataProperty`, `annotationProperty`,
-`individual`) — see `EntityInfoResult` in `cli/src/commands/core/entityInfoCommand.ts` for the
-full field list.
+Accepts a full IRI, a bare local name (e.g. `Koala` for `...#Koala`), or an exact entity label
+(case-insensitive) — resolved in that order via a reverse local-name/label index. If the label
+matches more than one entity, the command exits non-zero with `errorCode: "AMBIGUOUS_MATCH"` and a
+`candidates` list of matching IRIs to re-run with; if nothing matches, it exits with `NOT_FOUND` and
+a `suggestions` list of the closest labels.
+
+Output (abridged, for a class):
+```json
+{
+  "success": true,
+  "command": "entity-info",
+  "data": {
+    "iri": "http://example.org/animals#Koala",
+    "type": "class",
+    "localName": "Koala",
+    "labels": { "en": ["Koala"] },
+    "superClasses": [{ "iri": "http://example.org/animals#Marsupial", "label": "Marsupial" }],
+    "superClassExpressions": ["has habitat some Forest"]
+  }
+}
+```
+
+`superClasses`/`equivalentClasses`/`disjointClasses`/`directSubClasses` are `{iri, label}` refs
+(`label` is `null` if the entity has none) — never bare local names, so numeric-ID ontologies like
+SNOMED CT stay readable. `superClassExpressions`/`equivalentClassExpressions`/`gciExpressions` are
+Manchester-syntax strings with every embedded IRI already rendered as its label (falling back to a
+short IRI when unlabeled). Output shape varies by entity type (`class`, `objectProperty`,
+`dataProperty`, `annotationProperty`, `individual`) — see `EntityInfoResult` in
+`cli/src/commands/core/entityInfoCommand.ts` for the full field list.
 
 ---
 
@@ -269,10 +302,23 @@ classified yet (or is stale) — no need to run `ontograph classify` beforehand.
 ontograph dl-query "Animal and hasHabitat some Ocean"
 ontograph dl-query "pizza:Pizza and pizza:hasTopping some pizza:MozzarellaTopping"
 ontograph dl-query "ClinicalFinding and findingSite some (BodyStructure and partOf some Heart)"
+ontograph dl-query "'Middle ear structure' and 'part of' some 'Body structure'"
 
 # Restrict which categories come back, and filter results by label/IRI substring
 ontograph dl-query "Body structure" --types directSubClasses,subClasses --filter "liver"
 ```
+
+Entity references can be a full IRI (`<...>` or bare `http://...`), a `prefix:local` CURIE, a bare
+local name, or an exact label/prefLabel/altLabel — multi-word labels normally need `'...'` quotes so
+the parser treats them as one label instead of separate words (e.g. `'Body structure'`). If the
+**entire** expression is just a bare multi-word phrase with no Manchester keywords or punctuation —
+`ontograph dl-query "Body structure"` — the quotes are added for you automatically, since there's
+nothing else the expression could mean. Once real Manchester syntax is involved (`and`/`or`/`some`/
+etc.), quoting stays manual and required, since the tool can no longer tell where a bare label ends
+and an operator begins; an unquoted multi-word label there fails with a hint suggesting the `'...'`
+fix. Labels are resolved to IRIs client-side before the expression reaches the reasoner, so
+`prefLabel`/`altLabel` work even though the underlying Java parser only recognizes `rdfs:label` and
+local names natively.
 
 Flags:
 - `--types <list>` — comma-separated result categories: `directSuperClasses`, `superClasses`,
