@@ -70,6 +70,12 @@ export interface RenderedSegment {
    *  'start' for composition (diamond at the parent/whole end, which is the path's first point),
    *  'end' for generalization (triangle at the parent/supertype end, the path's last point). */
   marker?: 'start' | 'end';
+  /** True for a "far child" segment (a dual-relationship node not at its bus group's shallowest
+   *  row, pushed deep by `renumberDepthsLongestPath` — see `depthNormalization.ts`) — surfaced so
+   *  renderers can visually distinguish a long, multi-row span from an ordinary one-row edge,
+   *  rather than it reading as a layout glitch. Never set on a near-child/bus/parent-stem segment
+   *  or an off-axis bridge. */
+  far?: boolean;
 }
 
 /**
@@ -744,7 +750,7 @@ function computeEdgeSegmentsCore(
         c.x, safeJogY, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey, childIri,
       );
       const points = [{ x: px, y: pyBottom }, { x: px, y: safeJogY }, { x: c.x, y: safeJogY }, ...detour, { x: c.x, y: c.y }];
-      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind });
+      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true });
     }
   }
 
@@ -776,6 +782,10 @@ export interface EdgeRoute {
    *  boxes" bug. Supplying the same explicit via-points as the HTML renderer sidesteps
    *  mxGraph's router entirely. */
   points: Position[];
+  /** Mirrors `RenderedSegment.far` — true when this edge's child is a "far child" (a
+   *  dual-relationship node not at its bus group's shallowest row), false for an ordinary
+   *  near-child or off-axis/bridge edge. */
+  far: boolean;
 }
 
 /**
@@ -878,12 +888,14 @@ function computeEdgeRoutesCore(
           sourceIri: e.parentIri, targetIri: e.childIri,
           exitX, exitY: 1, entryX: 0.5, entryY: 0,
           points: dedupeConsecutive([...farPrefix, { x: px, y: jogY }, { x: c.x, y: jogY }, ...detour]),
+          far: isFar,
         });
       } else {
         routes.set(e.id, {
           sourceIri: e.childIri, targetIri: e.parentIri,
           exitX: 0.5, exitY: 0, entryX: exitX, entryY: 1,
           points: dedupeConsecutive([...[...detour].reverse(), { x: c.x, y: jogY }, { x: px, y: jogY }, ...[...farPrefix].reverse()]),
+          far: isFar,
         });
       }
     }
@@ -908,7 +920,7 @@ function computeEdgeRoutesCore(
       ? [{ x: sx, y: (sy + ty) / 2 }, { x: tx, y: (sy + ty) / 2 }]
       : [{ x: (sx + tx) / 2, y: sy }, { x: (sx + tx) / 2, y: ty }]);
 
-    routes.set(e.id, { sourceIri, targetIri, exitX: frac.exitX, exitY: frac.exitY, entryX: frac.entryX, entryY: frac.entryY, points });
+    routes.set(e.id, { sourceIri, targetIri, exitX: frac.exitX, exitY: frac.exitY, entryX: frac.entryX, entryY: frac.entryY, points, far: false });
   }
 
   return routes;

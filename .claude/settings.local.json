@@ -85,7 +85,17 @@
       "Bash(curl -s \"https://api.adoptium.net/v3/assets/latest/21/hotspot?image_type=jre&os=mac&architecture=aarch64\" --max-time 15)",
       "Bash(/Users/yoga/JavaApp/OntoGraph-lite/cli-standalone/dist/runtime/jre/Contents/Home/bin/java -version)",
       "Bash(time node cli-standalone/dist/main.js classify test-ontologies/anatomy.owl --reasoner elk)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(npm view *)",
+      "Bash(mkdir -p /Users/yoga/JavaApp/OntoGraph-lite/specs/029-delete-entity-subtypes)",
+      "Bash(cp /Users/yoga/.specify/templates/spec-template.md /Users/yoga/JavaApp/OntoGraph-lite/specs/029-delete-entity-subtypes/spec.md)",
+      "Bash(mkdir -p /Users/yoga/JavaApp/OntoGraph-lite/specs/029-delete-entity-subtypes/checklists)",
+      "Bash(echo '{ *)",
+      "Bash(awk '/\"views\":/,0' package.json)",
+      "Bash(awk '/^function|^export function|^export async function|^async function/{exit} {print NR\": \"$0}' /Users/yoga/JavaApp/OntoGraph-lite/src/views/EntityEditorPanel.ts)",
+      "Bash(npx tsc *)",
+      "Bash(NODE_PATH=./node_modules node /private/tmp/claude-501/-Users-yoga-JavaApp-OntoGraph-lite/712eeea8-9ee5-45a2-8c3e-1819f2136177/scratchpad/analyze-drawio.js uml-diagram-cli-plan/Middle-ear-structure-uml.drawio)",
+      "Bash(UML_DEBUG=1 npx vite-node src/uml/_check2.ts)"
     ]
   },
   "skillOverrides": {

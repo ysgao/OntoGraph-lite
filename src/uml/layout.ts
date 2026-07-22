@@ -183,6 +183,41 @@ export function computeLayout(
     }
   }
 
+  // Only LEAVES are guaranteed a unique, separated cross value (via nextSlot above) — an
+  // internal node's cross is a bare average of its children with no collision check at all. A
+  // node with 2+ parents (a dual-relationship/shared child, common past a couple of hops in a
+  // real ontology) is visited only once, via whichever parent's traversal reaches it first; its
+  // OTHER parent(s) then average toward that already-fixed position, which can sit far from
+  // that other parent's own children (in slot-index terms) — pulling the other parent's box
+  // into a completely unrelated sibling's territory. This is a REAL bounding-box overlap, not
+  // merely "too close" (confirmed with a concrete repro in layout.test.ts). Overlap can only
+  // ever occur between nodes at the SAME depth: the flow-axis spacing (ROW_HEIGHT/COLUMN_WIDTH)
+  // already exceeds the node's own extent on that axis by a wide margin, so two different-depth
+  // boxes can never overlap regardless of cross position. A single per-depth-row clamp is
+  // therefore both necessary AND sufficient to eliminate all bounding-box overlap here — no
+  // cross-depth or general 2D check is needed. Deliberately does NOT shift descendants to keep a
+  // corrected node "tidy" (centered over its own subtree): once a shared child exists the graph
+  // is a DAG, not a tree, so two parents of the same shared child can never both stay perfectly
+  // centered on it anyway — shifting descendants only relocates that tension, it doesn't resolve
+  // it. A node landing slightly off-center from its subtree after this pass is a cosmetic cost
+  // accepted in exchange for a real correctness fix.
+  const byDepth = new Map<number, string[]>();
+  for (const n of nodes) {
+    const d = depthByIri.get(n.iri) ?? 0;
+    let list = byDepth.get(d);
+    if (!list) { list = []; byDepth.set(d, list); }
+    list.push(n.iri);
+  }
+  for (const iris of byDepth.values()) {
+    const sorted = [...iris].sort((a, b) => cross.get(a)! - cross.get(b)!);
+    for (let i = 1; i < sorted.length; i++) {
+      const min = cross.get(sorted[i - 1])! + crossSpacing;
+      // Epsilon guard against spurious bumps from float drift in averaged values landing within
+      // rounding error of the exact minimum (e.g. 294.9999999999997 vs a required 295).
+      if (cross.get(sorted[i])! < min - 1e-6) { cross.set(sorted[i], min); }
+    }
+  }
+
   // Centering ancestors on root can push their cross value below the left margin (e.g. a single
   // ancestor centered on a root whose own cross is small, or several ancestors straddling it) —
   // shift every node's cross value forward just enough to clear the margin, same non-negative

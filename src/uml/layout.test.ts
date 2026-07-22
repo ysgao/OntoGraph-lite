@@ -125,7 +125,7 @@ describe('computeLayout', () => {
       expect(layout.get('b')!.x).toBeLessThan(layout.get('c')!.x);
     });
 
-    it('keeps a 3-way shared child fully connected as one cluster', () => {
+    it('keeps a 3-way shared child fully connected as one cluster, without letting the 3 parents collapse onto the same x', () => {
       const nodes = [
         node('root', 0, true),
         node('p1', 1), node('p2', 1), node('p3', 1),
@@ -138,10 +138,15 @@ describe('computeLayout', () => {
 
       const layout = computeLayout(nodes, edges);
       const xs = [layout.get('p1')!.x, layout.get('p2')!.x, layout.get('p3')!.x].sort((a, b) => a - b);
-      // All three already adjacent by construction (only one group) — just confirm the shared
-      // child ends up centered on their average (tidy-tree invariant still holds).
-      const avg = (xs[0] + xs[1] + xs[2]) / 3;
-      expect(layout.get('shared')!.x).toBeCloseTo(avg);
+      // Before the same-depth collision pass: each parent's ONLY child is the same 'shared' node,
+      // so all three averaged to the IDENTICAL x — a real, fully-overlapping box collision the
+      // old assertion (checking only that 'shared' sits near their average) never caught. Now
+      // each must be at least one crossSpacing apart from its neighbor.
+      expect(xs[1] - xs[0]).toBeGreaterThanOrEqual(170 - 1e-6); // SLOT_WIDTH
+      expect(xs[2] - xs[1]).toBeGreaterThanOrEqual(170 - 1e-6);
+      // 'shared' is a lone node at depth 2 (no sibling to collide with), so it keeps its original
+      // pre-separation position — the accepted "not perfectly re-centered" cosmetic trade-off.
+      expect(layout.get('shared')!.x).toBeCloseTo(xs[0]);
     });
   });
 
@@ -196,6 +201,79 @@ describe('computeLayout', () => {
       for (const n of nodes) {
         expect(layout.get(n.iri)!.x).toBeGreaterThanOrEqual(0);
       }
+    });
+  });
+
+  describe('same-depth collision avoidance (internal-node overlap)', () => {
+    // Only leaves get a guaranteed-unique, separated slot via the nextSlot counter — an internal
+    // node's cross is a bare average of its children with no collision check. A shared child
+    // (2+ parents) is positioned once, via whichever parent reaches it first; its OTHER parent
+    // then averages toward that fixed position, which can sit far (in slot-index terms) from
+    // that other parent's own children — pulling it into an unrelated sibling's territory.
+    it('keeps two unrelated depth-1 siblings at least crossSpacing apart even when one is pulled toward a shared grandchild reached through a cousin branch', () => {
+      // root -> A, B, C (declared order). A -> A1..A4 (four leaves). A2 -> Shared (A's
+      // grandchild). B -> Shared too (Shared's SECOND parent, reached only after A's subtree
+      // already fixed its position). C -> C1. `reorderBySharedChildren` cannot help here: it
+      // only clusters DIRECT siblings of the SAME parent that share a CHILD — B and A are not
+      // siblings of a common parent with a shared child (A's child is A2, not Shared itself).
+      const nodes = [
+        node('root', 0, true),
+        node('A', 1), node('B', 1), node('C', 1),
+        node('A1', 2), node('A2', 2), node('A3', 2), node('A4', 2), node('C1', 2),
+        node('Shared', 3),
+      ];
+      const edges = [
+        edge('root', 'A'), edge('root', 'B'), edge('root', 'C'),
+        edge('A', 'A1'), edge('A', 'A2'), edge('A', 'A3'), edge('A', 'A4'),
+        edge('C', 'C1'),
+        edge('A2', 'Shared'),
+        edge('B', 'Shared'),
+      ];
+
+      const layout = computeLayout(nodes, edges);
+
+      const aX = layout.get('A')!.x;
+      const bX = layout.get('B')!.x;
+      // Before the fix: B's cross equals Shared's cross (295), landing inside A's own
+      // [300, 460] leaf range (half node width 80 either side of A's 380) — a real overlap.
+      expect(Math.abs(aX - bX)).toBeGreaterThanOrEqual(170); // SLOT_WIDTH
+    });
+
+    it('holds a general minimum-separation invariant across every same-depth pair, including the pre-existing shared-child sibling fixture', () => {
+      const nodes = [
+        node('root', 0, true),
+        node('node4', 1), node('node5', 1), node('node6', 1),
+        node('subnode8', 2), node('leaf5', 2),
+      ];
+      const edges = [
+        edge('root', 'node4'), edge('root', 'node5'), edge('root', 'node6'),
+        edge('node4', 'subnode8'),
+        edge('node5', 'leaf5'),
+        edge('node6', 'subnode8'),
+      ];
+
+      const layout = computeLayout(nodes, edges);
+      const byDepth = new Map<number, number[]>();
+      for (const n of nodes) {
+        const list = byDepth.get(n.depth) ?? [];
+        list.push(layout.get(n.iri)!.x);
+        byDepth.set(n.depth, list);
+      }
+      for (const xs of byDepth.values()) {
+        const sorted = [...xs].sort((a, b) => a - b);
+        for (let i = 1; i < sorted.length; i++) {
+          expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(170 - 1e-6); // SLOT_WIDTH
+        }
+      }
+
+      // The pre-existing adjacency invariant (node4/node6 adjacent, nothing between them) still
+      // holds after the collision pass.
+      const x4 = layout.get('node4')!.x;
+      const x5 = layout.get('node5')!.x;
+      const x6 = layout.get('node6')!.x;
+      const lo = Math.min(x4, x6);
+      const hi = Math.max(x4, x6);
+      expect(x5 < lo || x5 > hi).toBe(true);
     });
   });
 

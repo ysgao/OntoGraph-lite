@@ -129,6 +129,38 @@ describe('renderDrawio', () => {
     expect(xml).not.toMatch(/excluded/i);
   });
 
+  it('dashes a "far child" (dual-relationship) edge but not an ordinary near-child edge', () => {
+    // Mirrors diagramGeometry.test.ts's far-child fixture: parentB's composition child farChild
+    // is ALSO ostium's generalization child, landing 2 rows below parentB instead of 1.
+    const nodes = [
+      node('urn:parentA', 'Pharyngotympanic tube', 252.5, 280),
+      node('urn:parentB', 'Tympanic cavity', 465, 280, { isRoot: true }),
+      node('urn:siblingOfFar', 'Mucous membrane', 125, 420),
+      node('urn:ostium', 'Ostium', 380, 420),
+      node('urn:nearChild', 'Cochlear window', 635, 420),
+      node('urn:farChild', 'Tympanic ostium', 295, 560),
+    ];
+    const edges: DiagramEdge[] = [
+      { id: 'e1', parentIri: 'urn:parentA', childIri: 'urn:siblingOfFar', kind: 'composition' },
+      { id: 'e2', parentIri: 'urn:parentA', childIri: 'urn:ostium', kind: 'composition' },
+      { id: 'e3', parentIri: 'urn:parentB', childIri: 'urn:nearChild', kind: 'composition' },
+      { id: 'e4', parentIri: 'urn:parentB', childIri: 'urn:farChild', kind: 'composition' },
+      { id: 'e5', parentIri: 'urn:ostium', childIri: 'urn:farChild', kind: 'generalization' },
+    ];
+    const xml = renderDrawio(nodes, edges, []);
+
+    expect(xml).toContain('dashed=1;dashPattern=6 4;');
+
+    // Composition edges route source=parent, target=child: parentB(n1)->farChild(n5) is the far
+    // one (farChild is ALSO ostium's generalization child, landing 2 rows below parentB); the
+    // parentB(n1)->nearChild(n4) edge sits at the group's ordinary, shallowest row.
+    const farCellMatch = /<mxCell id="e\d+" style="([^"]*)"[^>]*source="n1" target="n5"/.exec(xml);
+    expect(farCellMatch?.[1]).toContain('dashed=1;dashPattern=6 4;');
+
+    const nearCellMatch = /<mxCell id="e\d+" style="([^"]*)"[^>]*source="n1" target="n4"/.exec(xml);
+    expect(nearCellMatch?.[1]).not.toContain('dashed=1;dashPattern=6 4;');
+  });
+
   it('gives every mxCell an explicit exitX/exitY/entryX/entryY — never a floating connector', () => {
     const nodes = [node('urn:root', 'Root', 0, 0, { isRoot: true }), node('urn:child', 'Child', 0, 140)];
     const edges: DiagramEdge[] = [

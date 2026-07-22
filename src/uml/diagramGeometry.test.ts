@@ -587,6 +587,15 @@ describe('far-child (dual-relationship) bus routing', () => {
     ]);
   });
 
+  it('computeEdgeRoutes: flags the far child\'s route as far, and leaves the near child (and other ordinary edges) as not-far', () => {
+    const { pos, edges } = buildFixture();
+    const routes = computeEdgeRoutes(pos, edges, W, H);
+
+    expect(routes.get('parentB|farChild|composition')!.far).toBe(true);
+    expect(routes.get('parentB|nearChild|composition')!.far).toBe(false);
+    expect(routes.get('parentA|ostium|composition')!.far).toBe(false);
+  });
+
   it('computeEdgeSegments: the shared webview bus line only spans the near children — the far child gets its own independent segment, no shared bus / no marker', () => {
     const { pos, edges } = buildFixture();
     const segments = computeEdgeSegments(pos, edges, W, H);
@@ -599,5 +608,17 @@ describe('far-child (dual-relationship) bus routing', () => {
     expect(parentBSegments.some(s => s.d === 'M465,414 L635,414')).toBe(true);
     // The far child's own independent path, entirely separate from the above.
     expect(parentBSegments.some(s => s.d === 'M465,336 L465,550 L295,550 L295,560')).toBe(true);
+  });
+
+  it('computeEdgeSegments: flags the far child\'s segment as far, and the near child/bus/stem segments as not-far', () => {
+    const { pos, edges } = buildFixture();
+    const segments = computeEdgeSegments(pos, edges, W, H);
+
+    const farSegment = segments.find(s => s.d === 'M465,336 L465,550 L295,550 L295,560');
+    expect(farSegment?.far).toBe(true);
+
+    const nearSegments = segments.filter(s => s.d === 'M465,336 L465,414' || s.d === 'M465,414 L635,414');
+    expect(nearSegments.length).toBeGreaterThan(0);
+    expect(nearSegments.every(s => !s.far)).toBe(true);
   });
 });

@@ -100,7 +100,10 @@ export function renderDiagramFragment(
     const marker = seg.marker === 'start' ? 'marker-start="url(#diamond)"'
       : seg.marker === 'end' ? 'marker-end="url(#triangle)"'
         : '';
-    return `<path d="${seg.d}" fill="none" stroke="${strokeVar}" stroke-width="1.6" ${marker} />`;
+    // A "far" (dual-relationship) edge spans several rows/columns by construction — dashing it
+    // signals that length is an intentional secondary relationship, not a layout glitch.
+    const dash = seg.far ? 'stroke-dasharray="6 4" ' : '';
+    return `<path d="${seg.d}" fill="none" stroke="${strokeVar}" stroke-width="1.6" ${dash}${marker} />`;
   }).join('');
 
   let maxX = 0;
@@ -165,7 +168,8 @@ export function renderStandaloneSvg(
     const marker = seg.marker === 'start' ? 'marker-start="url(#diamond)"'
       : seg.marker === 'end' ? 'marker-end="url(#triangle)"'
         : '';
-    return `<path d="${seg.d}" fill="none" stroke="${stroke}" stroke-width="1.6" ${marker} />`;
+    const dash = seg.far ? 'stroke-dasharray="6 4" ' : '';
+    return `<path d="${seg.d}" fill="none" stroke="${stroke}" stroke-width="1.6" ${dash}${marker} />`;
   }).join('');
 
   let maxX = 0;

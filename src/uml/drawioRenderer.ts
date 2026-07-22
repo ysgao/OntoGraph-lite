@@ -54,14 +54,17 @@ function nodeStyle(n: DiagramNode, branchColors: Map<string, NodeColor>): string
     + `align=center;verticalAlign=middle;${extra}`;
 }
 
-function edgeStyle(kind: 'composition' | 'generalization', points: ConnectionPoints): string {
+function edgeStyle(kind: 'composition' | 'generalization', points: ConnectionPoints, far = false): string {
   // No `edgeStyle=` key here (deliberately): mxGraph's `orthogonalEdgeStyle` computes its own
   // route between the fixed exit/entry points with no notion of sibling boxes, and would
   // happily draw a line straight through an unrelated node — the reported "edges overlap the
   // class boxes" bug. Leaving edgeStyle unset makes mxGraph draw straight segments through the
   // explicit `<Array as="points">` waypoints this renderer supplies instead (see renderDrawio),
   // which are the same elbow points the HTML/SVG renderer uses to route around boxes.
-  const base = 'rounded=0;html=1;fontSize=10;fontColor=#4B564F;';
+  // `far` (a dual-relationship edge spanning several rows/columns, see EdgeRoute.far) gets the
+  // same dash style `nodeStyle()` uses for `hasHiddenRelations`, for visual-language consistency
+  // between "this box has more hidden relations" and "this edge is a distant/secondary one".
+  const base = 'rounded=0;html=1;fontSize=10;fontColor=#4B564F;' + (far ? 'dashed=1;dashPattern=6 4;' : '');
   // startSize/endSize=10 (down from an earlier 16) matches draw.io's own, noticeably smaller
   // default arrowhead size — mirrored by htmlRenderer.ts's SVG_DEFS marker scale-down so the
   // webview/SVG export and this drawio export read as the same diagram.
@@ -118,7 +121,7 @@ export function renderDrawio(
 
     const waypoints = route.points.map(p => `<mxPoint x="${p.x}" y="${p.y}" />`).join('');
     cells.push(
-      `<mxCell id="e${eid}" style="${edgeStyle(e.kind, route)}" edge="1" parent="1" `
+      `<mxCell id="e${eid}" style="${edgeStyle(e.kind, route, route.far)}" edge="1" parent="1" `
       + `source="${sourceId}" target="${targetId}"><mxGeometry relative="1" as="geometry">`
       + `<Array as="points">${waypoints}</Array></mxGeometry></mxCell>`,
     );
