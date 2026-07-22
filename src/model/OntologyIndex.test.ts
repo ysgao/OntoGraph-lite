@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { OntologyIndex } from './OntologyIndex';
+import { OntologyIndex, getDirectSubtypes, getTransitiveSubtypes } from './OntologyIndex';
 import { createEmptyModel } from './OntologyModel';
-import type { OWLClass, OntologyModel } from './OntologyModel';
+import type { OWLClass, OWLObjectProperty, OWLDataProperty, OWLAnnotationProperty, OntologyModel } from './OntologyModel';
 
 const SKOS_PREF = 'http://www.w3.org/2004/02/skos/core#prefLabel';
 const SKOS_ALT  = 'http://www.w3.org/2004/02/skos/core#altLabel';
@@ -32,6 +32,52 @@ function buildIndex(setup: (m: OntologyModel) => void): OntologyIndex {
   const model = createEmptyModel('file:///test.ofn');
   setup(model);
   return new OntologyIndex(model);
+}
+
+function buildModel(setup: (m: OntologyModel) => void): OntologyModel {
+  const model = createEmptyModel('file:///test.ofn');
+  setup(model);
+  return model;
+}
+
+function makeClassWithHierarchy(iri: string, opts: {
+  superClassIris?: string[];
+  equivalentClassExpressions?: string[];
+  superClassExpressions?: string[];
+} = {}): OWLClass {
+  return {
+    iri,
+    type: 'class',
+    labels: {},
+    annotations: {},
+    superClassIris: opts.superClassIris ?? [],
+    equivalentClassIris: [],
+    disjointClassIris: [],
+    superClassExpressions: opts.superClassExpressions ?? [],
+    equivalentClassExpressions: opts.equivalentClassExpressions ?? [],
+    gciExpressions: [],
+  };
+}
+
+function makeObjectProperty(iri: string, superPropertyIris: string[] = []): OWLObjectProperty {
+  return {
+    iri, type: 'objectProperty', labels: {}, annotations: {},
+    superPropertyIris, domainIris: [], rangeIris: [],
+  };
+}
+
+function makeDataProperty(iri: string, superPropertyIris: string[] = []): OWLDataProperty {
+  return {
+    iri, type: 'dataProperty', labels: {}, annotations: {},
+    superPropertyIris, domainIris: [], rangeIris: [],
+  };
+}
+
+function makeAnnotationProperty(iri: string, superPropertyIris: string[] = []): OWLAnnotationProperty {
+  return {
+    iri, type: 'annotationProperty', labels: {}, annotations: {},
+    superPropertyIris, domainIris: [], rangeIris: [],
+  };
 }
 
 // ── US1: Cross-field token matching (T001, T002) ─────────────────────────────
@@ -342,5 +388,128 @@ describe('US3 — revised local-name behaviour', () => {
     // At least one of them is present
     const hasOne = results.includes('http://ns1.org/123') || results.includes('http://ns2.org/123');
     expect(hasOne).toBe(true);
+  });
+});
+
+// ── 029-delete-entity-subtypes: getDirectSubtypes / getTransitiveSubtypes ────
+
+describe('getDirectSubtypes — classes', () => {
+  it('finds a subclass via plain SubClassOf', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/A', makeClassWithHierarchy('http://ex.org/A'));
+      m.classes.set('http://ex.org/B', makeClassWithHierarchy('http://ex.org/B', { superClassIris: ['http://ex.org/A'] }));
+    });
+    expect(getDirectSubtypes('http://ex.org/A', model)).toEqual(['http://ex.org/B']);
+  });
+
+  it('finds a subclass via a named conjunct in an EquivalentClasses expression', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/A', makeClassWithHierarchy('http://ex.org/A'));
+      m.classes.set('http://ex.org/B', makeClassWithHierarchy('http://ex.org/B', {
+        equivalentClassExpressions: ['http://ex.org/A and http://ex.org/hasQuality some http://ex.org/Red'],
+      }));
+    });
+    expect(getDirectSubtypes('http://ex.org/A', model)).toEqual(['http://ex.org/B']);
+  });
+
+  it('finds a subclass via a named conjunct in a complex SubClassOf superclass expression', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/A', makeClassWithHierarchy('http://ex.org/A'));
+      m.classes.set('http://ex.org/B', makeClassWithHierarchy('http://ex.org/B', {
+        superClassExpressions: ['http://ex.org/A and http://ex.org/hasQuality some http://ex.org/Red'],
+      }));
+    });
+    expect(getDirectSubtypes('http://ex.org/A', model)).toEqual(['http://ex.org/B']);
+  });
+
+  it('returns every direct subclass under multiple inheritance, from both parents', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/A', makeClassWithHierarchy('http://ex.org/A'));
+      m.classes.set('http://ex.org/C', makeClassWithHierarchy('http://ex.org/C', {
+        superClassIris: ['http://ex.org/A', 'http://ex.org/B'],
+      }));
+    });
+    expect(getDirectSubtypes('http://ex.org/A', model)).toEqual(['http://ex.org/C']);
+  });
+
+  it('returns [] for a leaf class with no subtypes', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/Leaf', makeClassWithHierarchy('http://ex.org/Leaf'));
+    });
+    expect(getDirectSubtypes('http://ex.org/Leaf', model)).toEqual([]);
+  });
+
+  it('returns [] for an IRI not present in the model', () => {
+    const model = buildModel(() => {});
+    expect(getDirectSubtypes('http://ex.org/Missing', model)).toEqual([]);
+  });
+});
+
+describe('getDirectSubtypes — properties', () => {
+  it('finds a sub-object-property via superPropertyIris', () => {
+    const model = buildModel(m => {
+      m.objectProperties.set('http://ex.org/partOf', makeObjectProperty('http://ex.org/partOf'));
+      m.objectProperties.set('http://ex.org/properPartOf', makeObjectProperty('http://ex.org/properPartOf', ['http://ex.org/partOf']));
+    });
+    expect(getDirectSubtypes('http://ex.org/partOf', model)).toEqual(['http://ex.org/properPartOf']);
+  });
+
+  it('finds a sub-data-property via superPropertyIris', () => {
+    const model = buildModel(m => {
+      m.dataProperties.set('http://ex.org/hasValue', makeDataProperty('http://ex.org/hasValue'));
+      m.dataProperties.set('http://ex.org/hasWeight', makeDataProperty('http://ex.org/hasWeight', ['http://ex.org/hasValue']));
+    });
+    expect(getDirectSubtypes('http://ex.org/hasValue', model)).toEqual(['http://ex.org/hasWeight']);
+  });
+
+  it('finds a sub-annotation-property via superPropertyIris', () => {
+    const model = buildModel(m => {
+      m.annotationProperties.set('http://ex.org/note', makeAnnotationProperty('http://ex.org/note'));
+      m.annotationProperties.set('http://ex.org/editorialNote', makeAnnotationProperty('http://ex.org/editorialNote', ['http://ex.org/note']));
+    });
+    expect(getDirectSubtypes('http://ex.org/note', model)).toEqual(['http://ex.org/editorialNote']);
+  });
+
+  it('returns [] for an individual (no subtype concept)', () => {
+    const model = buildModel(m => {
+      m.individuals.set('http://ex.org/Fido', {
+        iri: 'http://ex.org/Fido', type: 'individual', labels: {}, annotations: {},
+        classIris: [], objectPropertyAssertions: [], dataPropertyAssertions: [],
+      });
+    });
+    expect(getDirectSubtypes('http://ex.org/Fido', model)).toEqual([]);
+  });
+});
+
+describe('getTransitiveSubtypes', () => {
+  it('returns the full multi-level descendant closure', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/A', makeClassWithHierarchy('http://ex.org/A'));
+      m.classes.set('http://ex.org/B', makeClassWithHierarchy('http://ex.org/B', { superClassIris: ['http://ex.org/A'] }));
+      m.classes.set('http://ex.org/C', makeClassWithHierarchy('http://ex.org/C', { superClassIris: ['http://ex.org/B'] }));
+      m.classes.set('http://ex.org/D', makeClassWithHierarchy('http://ex.org/D', { superClassIris: ['http://ex.org/B'] }));
+    });
+    const closure = getTransitiveSubtypes('http://ex.org/A', model);
+    expect(new Set(closure)).toEqual(new Set(['http://ex.org/B', 'http://ex.org/C', 'http://ex.org/D']));
+  });
+
+  it('does not revisit a descendant reachable through multiple paths', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/A', makeClassWithHierarchy('http://ex.org/A'));
+      m.classes.set('http://ex.org/B1', makeClassWithHierarchy('http://ex.org/B1', { superClassIris: ['http://ex.org/A'] }));
+      m.classes.set('http://ex.org/B2', makeClassWithHierarchy('http://ex.org/B2', { superClassIris: ['http://ex.org/A'] }));
+      m.classes.set('http://ex.org/C', makeClassWithHierarchy('http://ex.org/C', {
+        superClassIris: ['http://ex.org/B1', 'http://ex.org/B2'],
+      }));
+    });
+    const closure = getTransitiveSubtypes('http://ex.org/A', model);
+    expect(closure.filter(iri => iri === 'http://ex.org/C').length).toBe(1);
+  });
+
+  it('returns [] for a leaf', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/Leaf', makeClassWithHierarchy('http://ex.org/Leaf'));
+    });
+    expect(getTransitiveSubtypes('http://ex.org/Leaf', model)).toEqual([]);
   });
 });

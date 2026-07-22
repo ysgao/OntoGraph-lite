@@ -3,6 +3,101 @@ import type { OntologyModel, OWLEntityUnion } from './OntologyModel';
 const SKOS_PREF_LABEL = 'http://www.w3.org/2004/02/skos/core#prefLabel';
 const SKOS_ALT_LABEL = 'http://www.w3.org/2004/02/skos/core#altLabel';
 
+/**
+ * Top-level named-class IRIs from a flat and-conjunction Manchester expression.
+ * A named-class conjunct is a bare IRI (no spaces); restrictions like
+ * "propIri some fillerIri" contain spaces and are excluded.
+ */
+export function extractNamedConjuncts(expr: string): string[] {
+  let depth = 0;
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < expr.length; i++) {
+    if (expr[i] === '(') { depth++; continue; }
+    if (expr[i] === ')') { depth--; continue; }
+    if (depth === 0 && expr.slice(i, i + 5) === ' and ') {
+      parts.push(expr.slice(start, i).trim());
+      start = i + 5;
+      i += 4;
+    }
+  }
+  parts.push(expr.slice(start).trim());
+  return parts.filter(p => p.startsWith('http') && !p.includes(' '));
+}
+
+function entityByIri(model: OntologyModel, iri: string): OWLEntityUnion | undefined {
+  return model.classes.get(iri)
+    ?? model.objectProperties.get(iri)
+    ?? model.dataProperties.get(iri)
+    ?? model.annotationProperties.get(iri)
+    ?? model.individuals.get(iri);
+}
+
+/**
+ * Direct subtype IRIs of `iri`: for a class, subclasses via plain `SubClassOf`,
+ * or via a named conjunct in an `EquivalentClasses`/complex-`SubClassOf`
+ * expression (conjunction-elimination case — a named subclass whose stated
+ * definition names its parent as one conjunct rather than a plain SubClassOf).
+ * For an object/data/annotation property, sub-properties via `superPropertyIris`.
+ * Individuals have no subtype concept and always return [].
+ */
+export function getDirectSubtypes(iri: string, model: OntologyModel): string[] {
+  const entity = entityByIri(model, iri);
+  if (!entity) { return []; }
+
+  if (entity.type === 'class') {
+    const direct: string[] = [];
+    for (const potentialSub of model.classes.values()) {
+      if (potentialSub.iri === iri) { continue; }
+      const viaSubClassOf = potentialSub.superClassIris.includes(iri);
+      const viaEquivalent = potentialSub.equivalentClassExpressions.some(
+        expr => extractNamedConjuncts(expr).includes(iri)
+      );
+      const viaSuperClassExpression = potentialSub.superClassExpressions.some(
+        expr => extractNamedConjuncts(expr).includes(iri)
+      );
+      if (viaSubClassOf || viaEquivalent || viaSuperClassExpression) {
+        direct.push(potentialSub.iri);
+      }
+    }
+    return direct;
+  }
+
+  if (entity.type === 'objectProperty' || entity.type === 'dataProperty' || entity.type === 'annotationProperty') {
+    const map = entity.type === 'objectProperty' ? model.objectProperties
+      : entity.type === 'dataProperty' ? model.dataProperties
+      : model.annotationProperties;
+    const direct: string[] = [];
+    for (const potentialSub of map.values()) {
+      if (potentialSub.iri === iri) { continue; }
+      if (potentialSub.superPropertyIris.includes(iri)) { direct.push(potentialSub.iri); }
+    }
+    return direct;
+  }
+
+  return [];
+}
+
+/**
+ * Full transitive-descendant closure of `iri` (direct subtypes, their subtypes,
+ * and so on), computed by repeated application of {@link getDirectSubtypes}.
+ * Cycle-safe via a visited set (a well-formed ontology has no subtype cycles,
+ * but a malformed one must not hang this traversal).
+ */
+export function getTransitiveSubtypes(iri: string, model: OntologyModel): string[] {
+  const visited = new Set<string>();
+  const queue = [...getDirectSubtypes(iri, model)];
+  while (queue.length > 0) {
+    const next = queue.shift()!;
+    if (visited.has(next)) { continue; }
+    visited.add(next);
+    for (const child of getDirectSubtypes(next, model)) {
+      if (!visited.has(child)) { queue.push(child); }
+    }
+  }
+  return [...visited];
+}
+
 export class OntologyIndex {
   private iriToEntity = new Map<string, OWLEntityUnion>();
   private labelToIris = new Map<string, string[]>();

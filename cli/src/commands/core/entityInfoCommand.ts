@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { ParserRegistry } from '@core/parser/ParserRegistry';
-import { OntologyIndex } from '@core/model/OntologyIndex';
+import { OntologyIndex, getDirectSubtypes, extractNamedConjuncts } from '@core/model/OntologyIndex';
 import { OWLEntityUnion, OntologyModel, getLabel } from '@core/model/OntologyModel';
 import { renderExpression } from '@core/model/AxiomDisplay';
 import { writeResult, writeError, exitCode } from '../../output';
@@ -48,26 +48,6 @@ export interface EntityInfoResult {
   classIris?: string[];
   objectPropertyAssertions?: { propertyIri: string; targetIri: string }[];
   dataPropertyAssertions?: { propertyIri: string; value: string; datatype?: string | undefined }[];
-}
-
-// Returns top-level named-class IRIs from a flat and-conjunction expression.
-// A named-class conjunct is a bare IRI (no spaces); restrictions like
-// "propIri some fillerIri" contain spaces and are excluded.
-function extractNamedConjuncts(expr: string): string[] {
-  let depth = 0;
-  const parts: string[] = [];
-  let start = 0;
-  for (let i = 0; i < expr.length; i++) {
-    if (expr[i] === '(') { depth++; continue; }
-    if (expr[i] === ')') { depth--; continue; }
-    if (depth === 0 && expr.slice(i, i + 5) === ' and ') {
-      parts.push(expr.slice(start, i).trim());
-      start = i + 5;
-      i += 4;
-    }
-  }
-  parts.push(expr.slice(start).trim());
-  return parts.filter(p => p.startsWith('http') && !p.includes(' '));
 }
 
 function getLocalName(iri: string): string {
@@ -202,20 +182,7 @@ export async function runEntityInfo(file: string, entityIriOrLabel: string, _tim
     // expressions + named conjuncts in complex SubClassOf superclass expressions (e.g.
     // SubClassOf(:Sub ObjectIntersectionOf(:NamedSuper ...)) — a named subclass with a
     // conjunction-elimination-style stated definition rather than a plain SubClassOf).
-    const directSubClasses: EntityRef[] = [];
-    for (const potentialSub of model.classes.values()) {
-      if (potentialSub.iri === entity.iri) continue;
-      const viaSubClassOf = potentialSub.superClassIris.includes(entity.iri);
-      const viaEquivalent = potentialSub.equivalentClassExpressions.some(
-        expr => extractNamedConjuncts(expr).includes(entity.iri)
-      );
-      const viaSuperClassExpression = potentialSub.superClassExpressions.some(
-        expr => extractNamedConjuncts(expr).includes(entity.iri)
-      );
-      if (viaSubClassOf || viaEquivalent || viaSuperClassExpression) {
-        directSubClasses.push(refFor(potentialSub.iri, model));
-      }
-    }
+    const directSubClasses = getDirectSubtypes(entity.iri, model).map(iri => refFor(iri, model));
     if (directSubClasses.length > 0) {
       result.directSubClasses = directSubClasses;
     }
