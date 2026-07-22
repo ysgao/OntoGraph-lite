@@ -197,6 +197,11 @@
         "icon": "$(copy)"
       },
       {
+        "command": "ontograph.deleteEntity",
+        "title": "OntoGraph: Delete Entity...",
+        "icon": "$(remove)"
+      },
+      {
         "command": "ontograph.showEntityInfo",
         "title": "OntoGraph: Show Entity Info",
         "icon": "$(info)"
@@ -295,6 +300,36 @@
           "group": "navigation@3"
         },
         {
+          "command": "ontograph.deleteEntity",
+          "when": "view == ontograph.classes",
+          "group": "navigation@4"
+        },
+        {
+          "command": "ontograph.deleteEntity",
+          "when": "view == ontograph.inferredClasses",
+          "group": "navigation@4"
+        },
+        {
+          "command": "ontograph.deleteEntity",
+          "when": "view == ontograph.objectProperties",
+          "group": "navigation@4"
+        },
+        {
+          "command": "ontograph.deleteEntity",
+          "when": "view == ontograph.dataProperties",
+          "group": "navigation@4"
+        },
+        {
+          "command": "ontograph.deleteEntity",
+          "when": "view == ontograph.annotationProperties",
+          "group": "navigation@4"
+        },
+        {
+          "command": "ontograph.deleteEntity",
+          "when": "view == ontograph.individuals",
+          "group": "navigation@4"
+        },
+        {
           "command": "ontograph.navigateBack",
           "when": "view =~ /^ontograph\\./",
           "group": "navigation@-3",
@@ -322,6 +357,11 @@
           "command": "ontograph.generateUmlDiagram",
           "when": "view =~ /^ontograph\\.(classes|inferredClasses|individuals)/ && viewItem =~ /^owlEntity/",
           "group": "2_navigate"
+        },
+        {
+          "command": "ontograph.deleteEntity",
+          "when": "view =~ /^ontograph\\./ && viewItem =~ /^owlEntity/",
+          "group": "3_destructive"
         }
       ],
       "commandPalette": [
@@ -331,6 +371,10 @@
         },
         {
           "command": "ontograph.showEntityInfo",
+          "when": "false"
+        },
+        {
+          "command": "ontograph.deleteEntity",
           "when": "false"
         }
       ]

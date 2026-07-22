@@ -68,6 +68,11 @@ let dirtyQueryResolve: ((isDirty: boolean) => void) | null = null;
 /** Returns the IRI currently shown in the Entity Editor (empty string if none). */
 export function getLastIri(): string { return lastIri; }
 
+/** Closes the Entity Editor panel if it is currently showing `iri` — used when `iri` is deleted. */
+export function closeEntityEditorIfShowing(iri: string): void {
+  if (panel && lastIri === iri) { panel.dispose(); }
+}
+
 /**
  * Queries the open Entity Editor webview for its dirty state.
  * Returns false immediately if no panel is open.

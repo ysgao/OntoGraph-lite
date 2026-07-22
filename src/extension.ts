@@ -13,6 +13,7 @@ import { classifyOntology } from './commands/classifyOntology';
 import { checkConsistency } from './commands/checkConsistency';
 import { exportOntology } from './commands/exportOntology';
 import { addEntity, createEntity } from './commands/addEntity';
+import { deleteEntity } from './commands/deleteEntity';
 import { openGraphView } from './commands/openVisualization';
 import { generateUmlDiagram, exportUmlDiagramDrawio, exportUmlDiagramSvg, exportUmlDiagramPng } from './commands/generateUmlDiagram';
 import { showEntityInfo, guardedShowEntityInfo, getLastIri, queryEntityEditorDirty, refreshEntityEditorIfOpen, setReasonerBridge, setRefreshAllViews } from './views/EntityEditorPanel';
@@ -588,6 +589,24 @@ export function activate(context: vscode.ExtensionContext): OntoGraphApi {
         vscode.env.clipboard.writeText(iri);
         vscode.window.setStatusBarMessage(`Copied: ${iri}`, 3000);
       }
+    }),
+
+    vscode.commands.registerCommand('ontograph.deleteEntity', (item?: { iri?: string }) => {
+      // No `item` when invoked from a view's toolbar button (rather than a
+      // right-click) — fall back to whichever tree view currently has a
+      // selection, mirroring the `addClass`/`addObjectProperty`/etc. pattern.
+      const iri = item?.iri
+        ?? classView.selection[0]?.iri
+        ?? inferredView.selection[0]?.iri
+        ?? objectPropView.selection[0]?.iri
+        ?? dataPropView.selection[0]?.iri
+        ?? annotationPropView.selection[0]?.iri
+        ?? individualView.selection[0]?.iri;
+      if (!iri) {
+        void vscode.window.showWarningMessage('OntoGraph: Select an entity to delete.');
+        return;
+      }
+      void deleteEntity(iri, activeModel, activeIndex, (model) => refreshAllViews(model));
     }),
 
     vscode.commands.registerCommand('ontograph.showEntityInfo', (item?: { iri?: string }) => {
