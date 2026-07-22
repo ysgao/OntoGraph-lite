@@ -3,6 +3,11 @@
 All notable changes to OntoGraph Lite are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+- **Delete Entity** — right-click "Delete Entity" (or the new `$(remove)` "-" toolbar button) on any class/object-property/data-property/annotation-property/individual tree item removes it from the ontology. Entities with direct subtypes prompt a choice between "delete entity only" (default — reparents direct subclasses/sub-properties to the deleted entity's own superclasses/super-properties) and "delete entity and all subtypes" (cascade — removes the full transitive closure). A confirmation dialog always states the affected-entity count before any change is made, and warns if the entity is still referenced elsewhere (e.g. as a property's domain/range). Functional syntax (`.ofn`) only in this release.
+
 ## [0.3.0] — 2026-07-15
 
 ### Added
