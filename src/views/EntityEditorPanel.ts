@@ -9,7 +9,7 @@ import type {
   OWLIndividual,
 } from '../model/OntologyModel';
 import { createEmptyModel, getLabel } from '../model/OntologyModel';
-import { OntologyIndex } from '../model/OntologyIndex';
+import { OntologyIndex, findEntitiesReferencingIri } from '../model/OntologyIndex';
 import { collectLogicalLines, sortManchesterConjuncts } from '../utils/ManchesterFormatting';
 import type { ReasonerBridge } from '../reasoner/ReasonerBridge';
 import { normalizeExpression, renderExpressionWithEntityRefs, type AxiomDisplayStyle } from '../model/AxiomDisplay';
@@ -26,7 +26,7 @@ import {
   type EditSummary,
 } from '../model/SegmentIndex';
 import { highlightSyncedRanges, clearSyncHighlight } from './syncHighlight';
-import { EntityEditHistory } from './EntityEditHistory';
+import { EntityEditHistory, invalidateEntries } from './EntityEditHistory';
 import type {
   EntityEditorExtToWebview,
   EntityEditorWebviewToExt,
@@ -38,6 +38,7 @@ import type {
   ValidationResultMessage,
   SaveDraftErrorMessage,
   IriRenameResultMessage,
+  LabelRenameResultMessage,
   DirtyStateMessage,
 } from './EntityEditorMessages';
 
@@ -810,8 +811,43 @@ function handleMessage(
         }
       }
 
-      if (msg.labels !== undefined)      { entity.labels = msg.labels; }
+      const previousLabels = entity.labels;
+      let labelConflictError: string | undefined;
+      if (msg.labels !== undefined) {
+        const conflict = checkLabelRenameConflict(index, entity.iri, msg.labels);
+        if (conflict.conflict) {
+          const conflictEntity = index.getByIri(conflict.conflictingIri);
+          const conflictLabel = conflictEntity ? getLabel(conflictEntity) : conflict.conflictingIri;
+          labelConflictError = `The label "${conflict.conflictingLabel}" is already used by "${conflictLabel}".`;
+        } else {
+          entity.labels = msg.labels;
+        }
+      }
       if (msg.annotations !== undefined) { entity.annotations = msg.annotations; }
+
+      // Drop stale cached history for every other entity whose axioms
+      // reference this one by IRI, so their next load re-renders with the
+      // current label instead of serving text cached before this rename.
+      if (msg.labels !== undefined && !labelConflictError) {
+        invalidateHistoryAfterLabelChange(model, entity.iri, previousLabels, msg.labels);
+      }
+
+      // A rejected label change still lets the rest of this save apply (axioms,
+      // annotations). Refresh the webview with the corrected (reverted-label)
+      // state first, then report the rejection so the banner isn't immediately
+      // cleared by the refresh.
+      if (labelConflictError) {
+        sendLoadEntity(p, model, entity.iri, true);
+        const resultMsg: LabelRenameResultMessage = {
+          type: 'labelRenameResult',
+          success: false,
+          error: labelConflictError,
+        };
+        void p.webview.postMessage(resultMsg as EntityEditorExtToWebview);
+        // Also surface as a native VS Code notification — reliably visible even
+        // if the user isn't looking at the in-panel banner (e.g. focus elsewhere).
+        void vscode.window.showWarningMessage(`OntoGraph: label not saved — ${labelConflictError}`);
+      }
 
       // Update draft map: store new invalid drafts, or clear if all valid.
       if (newDrafts.length > 0) {
@@ -1130,6 +1166,50 @@ export function buildEntityPayload(model: OntologyModel, iri: string): EntitySna
   }
 
   return payload;
+}
+
+/**
+ * Checks whether setting `newLabels` on the entity at `entityIri` would make
+ * its label(s) duplicate a different, existing entity's label — checking
+ * every label string across every language present in `newLabels` (not just
+ * a single primary value), case-insensitively, per the same domain
+ * `OntologyIndex.exactMatchByLabel` already uses elsewhere in the app.
+ * Renaming an entity to its own current label is never a conflict.
+ */
+export function checkLabelRenameConflict(
+  index: OntologyIndex,
+  entityIri: string,
+  newLabels: OWLEntity['labels'],
+): { conflict: true; conflictingIri: string; conflictingLabel: string } | { conflict: false } {
+  for (const values of Object.values(newLabels)) {
+    for (const label of values) {
+      const match = index.exactMatchByLabel(label).find(e => e.iri !== entityIri);
+      if (match) {
+        return { conflict: true, conflictingIri: match.iri, conflictingLabel: label };
+      }
+    }
+  }
+  return { conflict: false };
+}
+
+/**
+ * After a label change on the entity at `entityIri`, drops any other
+ * entity's cached editor history (`historyMap`) that references `entityIri`
+ * in its own axioms — so the next time that entity is loaded, `sendLoadEntity`
+ * falls back to a fresh `buildEntityPayload` render showing the current label
+ * instead of serving stale rendered text captured before the rename. No-op if
+ * the label did not actually change. See specs/030-sync-labels-in-axioms.
+ */
+export function invalidateHistoryAfterLabelChange(
+  model: OntologyModel,
+  entityIri: string,
+  previousLabels: OWLEntity['labels'],
+  newLabels: OWLEntity['labels'],
+  historyMap: Map<string, EntityEditHistory> = entityHistoryMap,
+): void {
+  if (JSON.stringify(previousLabels) === JSON.stringify(newLabels)) { return; }
+  const referencing = findEntitiesReferencingIri(model, entityIri);
+  invalidateEntries(historyMap, referencing.map(e => e.iri));
 }
 
 function sendLoadEntity(p: vscode.WebviewPanel, model: OntologyModel, iri: string, bypassHistory = false): void {

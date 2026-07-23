@@ -95,7 +95,11 @@
       "Bash(awk '/^function|^export function|^export async function|^async function/{exit} {print NR\": \"$0}' /Users/yoga/JavaApp/OntoGraph-lite/src/views/EntityEditorPanel.ts)",
       "Bash(npx tsc *)",
       "Bash(NODE_PATH=./node_modules node /private/tmp/claude-501/-Users-yoga-JavaApp-OntoGraph-lite/712eeea8-9ee5-45a2-8c3e-1819f2136177/scratchpad/analyze-drawio.js uml-diagram-cli-plan/Middle-ear-structure-uml.drawio)",
-      "Bash(UML_DEBUG=1 npx vite-node src/uml/_check2.ts)"
+      "Bash(UML_DEBUG=1 npx vite-node src/uml/_check2.ts)",
+      "Bash(~/.specify/extensions/git/scripts/bash/auto-commit.sh after_specify *)",
+      "Bash(echo \"---EXIT $?\")",
+      "Bash(~/.specify/extensions/git/scripts/bash/auto-commit.sh after_plan)",
+      "Bash(~/.specify/extensions/git/scripts/bash/auto-commit.sh after_tasks)"
     ]
   },
   "skillOverrides": {

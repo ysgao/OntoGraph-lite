@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { EntityEditHistory } from './EntityEditHistory.js';
+import { EntityEditHistory, invalidateEntries } from './EntityEditHistory.js';
 import type { EntitySnapshot } from './EntityEditorMessages.js';
 
 function snap(label: string): EntitySnapshot {
@@ -13,6 +13,10 @@ function snap(label: string): EntitySnapshot {
     iriLabels: {},
     expressionEntityRefs: {},
   };
+}
+
+function snapFor(iri: string, label: string): EntitySnapshot {
+  return { ...snap(label), iri };
 }
 
 describe('EntityEditHistory – initial state', () => {
@@ -172,5 +176,38 @@ describe('EntityEditHistory – clear', () => {
     h.clear(snap('fresh'));
     h.recordSave(snap('S2'));
     expect(h.undo()?.snapshot.label).toBe('fresh');
+  });
+});
+
+describe('invalidateEntries', () => {
+  const B = 'http://example.org/B';
+  const C = 'http://example.org/C';
+  const D = 'http://example.org/D';
+
+  it('removes only the given IRIs from the map, leaving others untouched', () => {
+    const map = new Map<string, EntityEditHistory>();
+    map.set(B, new EntityEditHistory(snapFor(B, 'B0')));
+    map.set(C, new EntityEditHistory(snapFor(C, 'C0')));
+    map.set(D, new EntityEditHistory(snapFor(D, 'D0')));
+
+    invalidateEntries(map, [B, D]);
+
+    expect(map.has(B)).toBe(false);
+    expect(map.has(D)).toBe(false);
+    expect(map.has(C)).toBe(true);
+  });
+
+  it('is a no-op for an IRI not present in the map', () => {
+    const map = new Map<string, EntityEditHistory>();
+    map.set(C, new EntityEditHistory(snapFor(C, 'C0')));
+    expect(() => invalidateEntries(map, ['http://example.org/NotPresent'])).not.toThrow();
+    expect(map.has(C)).toBe(true);
+  });
+
+  it('handles an empty iterable', () => {
+    const map = new Map<string, EntityEditHistory>();
+    map.set(C, new EntityEditHistory(snapFor(C, 'C0')));
+    invalidateEntries(map, []);
+    expect(map.has(C)).toBe(true);
   });
 });

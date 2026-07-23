@@ -59,12 +59,15 @@ import {
   renderExpressionsWithRefs,
   splitNormalizedExpressions,
   buildEntityPayload,
+  invalidateHistoryAfterLabelChange,
+  checkLabelRenameConflict,
 } from './EntityEditorPanel.js';
 import { EntityEditHistory } from './EntityEditHistory.js';
 import type { EntitySnapshot } from './EntityEditorMessages.js';
 import { createEmptyModel } from '../model/OntologyModel.js';
 import type { EntitySegment, OWLClass, OWLObjectProperty } from '../model/OntologyModel.js';
 import { OntologyIndex } from '../model/OntologyIndex.js';
+import { normalizeExpression } from '../model/AxiomDisplay.js';
 
 const RDFS_COMMENT = 'http://www.w3.org/2000/01/rdf-schema#comment';
 
@@ -591,5 +594,268 @@ describe('entityHistoryMap isolation (T016)', () => {
     hist.recordSave(makeSnap('A1_new'));
     expect(hist.undo()?.snapshot.label).toBe('A0_fresh');
     expect(hist.canUndo).toBe(false);
+  });
+});
+
+describe('invalidateHistoryAfterLabelChange (US1 — spec 030-sync-labels-in-axioms)', () => {
+  beforeEach(() => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn().mockReturnValue(undefined),
+    } as unknown as ReturnType<typeof vscode.workspace.getConfiguration>);
+  });
+
+  function buildAB() {
+    const model = createEmptyModel('http://example.org/test');
+    const a: OWLClass = {
+      iri: 'http://example.org/test#A', type: 'class',
+      labels: { en: ['Animal'] }, annotations: {},
+      superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
+      superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [],
+    };
+    const hasPart: OWLObjectProperty = {
+      iri: 'http://example.org/test#hasPart', type: 'objectProperty',
+      labels: { en: ['has part'] }, annotations: {},
+      superPropertyIris: [], domainIris: [], rangeIris: [],
+    };
+    const b: OWLClass = {
+      iri: 'http://example.org/test#B', type: 'class',
+      labels: { en: ['B'] }, annotations: {},
+      superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
+      superClassExpressions: [`${hasPart.iri} some ${a.iri}`],
+      equivalentClassExpressions: [], gciExpressions: [],
+    };
+    model.classes.set(a.iri, a);
+    model.classes.set(b.iri, b);
+    model.objectProperties.set(hasPart.iri, hasPart);
+    return { model, a, b };
+  }
+
+  it('shows the current label for a referencing entity after a rename, even from a stale cache (T006)', () => {
+    const { model, a, b } = buildAB();
+    const historyMap = new Map<string, EntityEditHistory>();
+    // Simulate B having been viewed (and its display cached) before A's rename.
+    const beforeRename = buildEntityPayload(model, b.iri)!;
+    expect(beforeRename.superClassExpressions?.[0]).toContain('Animal');
+    historyMap.set(b.iri, new EntityEditHistory(beforeRename));
+
+    const previousLabels = a.labels;
+    a.labels = { en: ['Creature'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previousLabels, a.labels, historyMap);
+
+    // B's stale cache entry must be gone so the next load re-renders fresh.
+    expect(historyMap.has(b.iri)).toBe(false);
+    const afterRename = historyMap.get(b.iri)?.currentSnapshot ?? buildEntityPayload(model, b.iri);
+    expect(afterRename?.superClassExpressions?.[0]).toContain('Creature');
+    expect(afterRename?.superClassExpressions?.[0]).not.toContain('Animal');
+  });
+
+  it('leaves an unrelated entity\'s cached history untouched (selective invalidation)', () => {
+    const { model, a, b } = buildAB();
+    const c: OWLClass = {
+      iri: 'http://example.org/test#C', type: 'class',
+      labels: { en: ['C'] }, annotations: {},
+      superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
+      superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [],
+    };
+    model.classes.set(c.iri, c);
+    const historyMap = new Map<string, EntityEditHistory>();
+    historyMap.set(b.iri, new EntityEditHistory(buildEntityPayload(model, b.iri)!));
+    const cSnapshot = buildEntityPayload(model, c.iri)!;
+    historyMap.set(c.iri, new EntityEditHistory(cSnapshot));
+
+    const previousLabels = a.labels;
+    a.labels = { en: ['Creature'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previousLabels, a.labels, historyMap);
+
+    expect(historyMap.has(b.iri)).toBe(false);
+    expect(historyMap.get(c.iri)?.currentSnapshot).toBe(cSnapshot);
+  });
+
+  it('is a no-op when the label did not actually change', () => {
+    const { model, a, b } = buildAB();
+    const historyMap = new Map<string, EntityEditHistory>();
+    const bSnapshot = buildEntityPayload(model, b.iri)!;
+    historyMap.set(b.iri, new EntityEditHistory(bSnapshot));
+
+    invalidateHistoryAfterLabelChange(model, a.iri, a.labels, a.labels, historyMap);
+
+    expect(historyMap.has(b.iri)).toBe(true);
+    expect(historyMap.get(b.iri)?.currentSnapshot).toBe(bSnapshot);
+  });
+
+  it('propagates through a repeated rename chain (Animal -> Beast -> Creature), never leaving an intermediate stale value (T007)', () => {
+    const { model, a, b } = buildAB();
+    const historyMap = new Map<string, EntityEditHistory>();
+    historyMap.set(b.iri, new EntityEditHistory(buildEntityPayload(model, b.iri)!));
+
+    let previous = a.labels;
+    a.labels = { en: ['Beast'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previous, a.labels, historyMap);
+    // B's cache was invalidated; simulate a re-view (re-cache) before the next rename.
+    historyMap.set(b.iri, new EntityEditHistory(buildEntityPayload(model, b.iri)!));
+
+    previous = a.labels;
+    a.labels = { en: ['Creature'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previous, a.labels, historyMap);
+
+    expect(historyMap.has(b.iri)).toBe(false);
+    const finalPayload = historyMap.get(b.iri)?.currentSnapshot ?? buildEntityPayload(model, b.iri);
+    expect(finalPayload?.superClassExpressions?.[0]).toContain('Creature');
+    expect(finalPayload?.superClassExpressions?.[0]).not.toContain('Beast');
+    expect(finalPayload?.superClassExpressions?.[0]).not.toContain('Animal');
+  });
+
+  it('does not corrupt or lose B\'s axiom referencing A when B is re-saved after A\'s rename (T008)', () => {
+    const { model, a, b } = buildAB();
+    a.labels = { en: ['Creature'] };
+    const index = new OntologyIndex(model);
+    // B is reloaded fresh (post-invalidation) and its currently-displayed text is
+    // what would be re-normalized back to IRIs on the next save.
+    const freshPayload = buildEntityPayload(model, b.iri)!;
+    const displayedExpr = freshPayload.superClassExpressions![0];
+    expect(displayedExpr).toContain('Creature');
+
+    const renormalized = normalizeExpression(displayedExpr, model, index);
+    expect(renormalized).toContain(a.iri);
+  });
+
+  it('propagates a reverted (undone) label rename the same way as a forward rename (T008b)', () => {
+    const { model, a, b } = buildAB();
+    const historyMap = new Map<string, EntityEditHistory>();
+    historyMap.set(b.iri, new EntityEditHistory(buildEntityPayload(model, b.iri)!));
+
+    // Forward rename: Animal -> Creature.
+    let previous = a.labels;
+    a.labels = { en: ['Creature'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previous, a.labels, historyMap);
+    historyMap.set(b.iri, new EntityEditHistory(buildEntityPayload(model, b.iri)!));
+
+    // Undo: label reverts to Animal. An undo/redo round-trip re-enters the same
+    // `save` handler via an auto-save, so the same invalidation call fires here too.
+    previous = a.labels;
+    a.labels = { en: ['Animal'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previous, a.labels, historyMap);
+
+    expect(historyMap.has(b.iri)).toBe(false);
+    const afterUndo = historyMap.get(b.iri)?.currentSnapshot ?? buildEntityPayload(model, b.iri);
+    expect(afterUndo?.superClassExpressions?.[0]).toContain('Animal');
+    expect(afterUndo?.superClassExpressions?.[0]).not.toContain('Creature');
+  });
+
+  // US2 (spec 030-sync-labels-in-axioms): navigation across several entities,
+  // with a rename happening in between, must never require a manual refresh,
+  // and must never leave a stale canUndo/canRedo state on the entity whose
+  // cache was invalidated. `showEntityInfo`'s `needsHistoryInit` branch
+  // (`!entityHistoryMap.has(iri)`) is what drives this — these tests confirm
+  // the exact condition and values that branch relies on.
+
+  it('after navigating away and renaming A, revisiting B needs a fresh history init (no manual refresh required) (T012)', () => {
+    const { model, a, b } = buildAB();
+    const c: OWLClass = {
+      iri: 'http://example.org/test#C', type: 'class',
+      labels: { en: ['C'] }, annotations: {},
+      superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
+      superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [],
+    };
+    model.classes.set(c.iri, c);
+    const historyMap = new Map<string, EntityEditHistory>();
+
+    // View B — cached.
+    historyMap.set(b.iri, new EntityEditHistory(buildEntityPayload(model, b.iri)!));
+    // Navigate away to view C — cached too, unrelated to A.
+    historyMap.set(c.iri, new EntityEditHistory(buildEntityPayload(model, c.iri)!));
+
+    // Rename A (referenced by B, not by C) — no manual refresh action taken anywhere.
+    const previousLabels = a.labels;
+    a.labels = { en: ['Creature'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previousLabels, a.labels, historyMap);
+
+    // Navigating back to B: showEntityInfo computes needsHistoryInit = !entityHistoryMap.has(iri).
+    const needsHistoryInitForB = !historyMap.has(b.iri);
+    expect(needsHistoryInitForB).toBe(true);
+    const bPayloadOnRevisit = buildEntityPayload(model, b.iri)!;
+    expect(bPayloadOnRevisit.superClassExpressions?.[0]).toContain('Creature');
+
+    // C was untouched by the rename — no history-init needed, no disruption.
+    expect(historyMap.has(c.iri)).toBe(true);
+  });
+
+  it('reports canUndo=false/canRedo=false (not stale) for an entity whose history was just invalidated (T013)', () => {
+    const { model, a, b } = buildAB();
+    const historyMap = new Map<string, EntityEditHistory>();
+    const bHistory = new EntityEditHistory(buildEntityPayload(model, b.iri)!);
+    // Give B some undo history before the rename, to prove it doesn't leak through.
+    bHistory.recordSave(buildEntityPayload(model, b.iri)!);
+    historyMap.set(b.iri, bHistory);
+    expect(bHistory.canUndo).toBe(true);
+
+    const previousLabels = a.labels;
+    a.labels = { en: ['Creature'] };
+    invalidateHistoryAfterLabelChange(model, a.iri, previousLabels, a.labels, historyMap);
+
+    // showEntityInfo's needsHistoryInit branch: map entry gone -> fresh EntityEditHistory,
+    // posts canUndo=false/canRedo=false explicitly (never the old bHistory's canUndo=true).
+    expect(historyMap.has(b.iri)).toBe(false);
+    const freshHistory = new EntityEditHistory(buildEntityPayload(model, b.iri)!);
+    expect(freshHistory.canUndo).toBe(false);
+    expect(freshHistory.canRedo).toBe(false);
+  });
+});
+
+describe('checkLabelRenameConflict (US3 — spec 030-sync-labels-in-axioms)', () => {
+  function buildAC() {
+    const model = createEmptyModel('http://example.org/test');
+    const a: OWLClass = {
+      iri: 'http://example.org/test#A', type: 'class',
+      labels: { en: ['Animal'] }, annotations: {},
+      superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
+      superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [],
+    };
+    const c: OWLClass = {
+      iri: 'http://example.org/test#C', type: 'class',
+      labels: { en: ['Wing'] }, annotations: {},
+      superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
+      superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [],
+    };
+    model.classes.set(a.iri, a);
+    model.classes.set(c.iri, c);
+    const index = new OntologyIndex(model);
+    return { model, a, c, index };
+  }
+
+  it('rejects a rename that would duplicate another entity\'s existing label (T016)', () => {
+    const { a, c, index } = buildAC();
+    const result = checkLabelRenameConflict(index, a.iri, { en: ['Wing'] });
+    expect(result.conflict).toBe(true);
+    if (result.conflict) {
+      expect(result.conflictingIri).toBe(c.iri);
+      expect(result.conflictingLabel).toBe('Wing');
+    }
+  });
+
+  it('rejects case-insensitively (T018a)', () => {
+    const { a, index } = buildAC();
+    const result = checkLabelRenameConflict(index, a.iri, { en: ['WING'] });
+    expect(result.conflict).toBe(true);
+  });
+
+  it('does not treat renaming an entity to its own current label as a conflict (T018b)', () => {
+    const { a, index } = buildAC();
+    const result = checkLabelRenameConflict(index, a.iri, { en: ['Animal'] });
+    expect(result.conflict).toBe(false);
+  });
+
+  it('accepts a rename to a genuinely unused label', () => {
+    const { a, index } = buildAC();
+    const result = checkLabelRenameConflict(index, a.iri, { en: ['Creature'] });
+    expect(result.conflict).toBe(false);
+  });
+
+  it('checks every label string across every language in a multi-value/multi-language payload', () => {
+    const { a, index } = buildAC();
+    // 'Wing' (conflicting) appears as a second value under a different language.
+    const result = checkLabelRenameConflict(index, a.iri, { en: ['Creature'], fr: ['Wing'] });
+    expect(result.conflict).toBe(true);
+    expect(result.conflict && result.conflictingLabel).toBe('Wing');
   });
 });

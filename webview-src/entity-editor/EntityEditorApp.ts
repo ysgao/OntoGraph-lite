@@ -106,6 +106,13 @@ interface IriRenameResultMessage {
   error?: string;
 }
 
+interface LabelRenameResultMessage {
+  type: 'labelRenameResult';
+  success: boolean;
+  newLabel?: string;
+  error?: string;
+}
+
 interface QueryDirtyMessage { type: 'queryDirty' }
 interface RequestSaveMessage { type: 'requestSave' }
 
@@ -1613,6 +1620,20 @@ function removeDraftErrorBanner(): void {
   document.getElementById('draft-error-banner')?.remove();
 }
 
+function showLabelConflictBanner(message: string): void {
+  const content = document.getElementById('content');
+  if (!content) { return; }
+  removeLabelConflictBanner();
+  const banner = document.createElement('div');
+  banner.id = 'label-conflict-banner';
+  banner.textContent = message;
+  content.insertAdjacentElement('beforebegin', banner);
+}
+
+function removeLabelConflictBanner(): void {
+  document.getElementById('label-conflict-banner')?.remove();
+}
+
 function applyDraftInvalidClass(sectionKey: string, index: number): void {
   const editors = editorMap[sectionKey];
   if (!editors) { return; }
@@ -1885,7 +1906,8 @@ function injectStyles(): void {
       border-color: #f44336;
       border-radius: 3px;
     }
-    #draft-error-banner {
+    #draft-error-banner,
+    #label-conflict-banner {
       background: rgba(244, 67, 54, 0.12);
       border: 1px solid rgba(244, 67, 54, 0.4);
       border-radius: 4px;
@@ -2018,7 +2040,7 @@ function updateUndoRedoState(canUndo: boolean, canRedo: boolean): void {
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | UndoRedoStateMessage | AutoSaveMessage | IriRenameResultMessage | QueryDirtyMessage | RequestSaveMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
+  const msg = event.data as LoadEntityMessage | CompletionResultMessage | ValidationResultMessage | UndoRedoStateMessage | AutoSaveMessage | IriRenameResultMessage | LabelRenameResultMessage | QueryDirtyMessage | RequestSaveMessage | { type: 'saveDraftError'; invalidExpressions: Array<{ sectionKey: string; index: number; text: string }> };
 
   if (msg.type === 'queryDirty') {
     const isDirty = JSON.stringify(getCurrentState()) !== lastSavedStateString;
@@ -2061,6 +2083,14 @@ window.addEventListener('message', (event: MessageEvent) => {
     return;
   }
 
+  if (msg.type === 'labelRenameResult') {
+    const result = msg as LabelRenameResultMessage;
+    if (!result.success) {
+      showLabelConflictBanner(result.error ?? 'Label rename rejected: label already in use.');
+    }
+    return;
+  }
+
   if (msg.type === 'iriRenameResult') {
     const result = msg as IriRenameResultMessage;
     const iriInput = document.getElementById('entity-iri') as HTMLInputElement | null;
@@ -2077,6 +2107,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
 
   if (msg.type === 'loadEntity') {
+    removeLabelConflictBanner();
     renderEntity(msg);
     if (msg.draftExpressions && msg.draftExpressions.length > 0) {
       // Drafts were appended after valid expressions — compute their editor indices.
