@@ -8,6 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - **Delete Entity** — right-click "Delete Entity" (or the new `$(remove)` "-" toolbar button) on any class/object-property/data-property/annotation-property/individual tree item removes it from the ontology. Entities with direct subtypes prompt a choice between "delete entity only" (default — reparents direct subclasses/sub-properties to the deleted entity's own superclasses/super-properties) and "delete entity and all subtypes" (cascade — removes the full transitive closure). A confirmation dialog always states the affected-entity count before any change is made, and warns if the entity is still referenced elsewhere (e.g. as a property's domain/range). Functional syntax (`.ofn`) only in this release.
 
+### Fixed
+- **Entity label renames now stay in sync across all axioms.** Renaming an entity's label in the Entity Editor Panel could leave *other* entities' cached axiom displays showing the old label — and, in rare cases, saving that stale display could fail to resolve the reference or silently attach it to the wrong entity. A rename now invalidates the cached editor history of every other entity whose axioms reference the renamed entity, so the next time they're viewed they always show the current label and always save back to the correct underlying entity. Renaming an entity to a label already used by a different entity is now rejected outright with a clear error, so two entities can never share a label. Applies to every format the Entity Editor Panel already supports for label edits (`.ofn`, `.omn`, `.ttl`).
+
 ## [0.3.0] — 2026-07-15
 
 ### Added

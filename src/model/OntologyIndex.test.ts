@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { OntologyIndex, getDirectSubtypes, getTransitiveSubtypes } from './OntologyIndex';
+import { OntologyIndex, getDirectSubtypes, getTransitiveSubtypes, findEntitiesReferencingIri } from './OntologyIndex';
 import { createEmptyModel } from './OntologyModel';
-import type { OWLClass, OWLObjectProperty, OWLDataProperty, OWLAnnotationProperty, OntologyModel } from './OntologyModel';
+import type { OWLClass, OWLObjectProperty, OWLDataProperty, OWLAnnotationProperty, OWLIndividual, OntologyModel } from './OntologyModel';
 
 const SKOS_PREF = 'http://www.w3.org/2004/02/skos/core#prefLabel';
 const SKOS_ALT  = 'http://www.w3.org/2004/02/skos/core#altLabel';
@@ -511,5 +511,133 @@ describe('getTransitiveSubtypes', () => {
       m.classes.set('http://ex.org/Leaf', makeClassWithHierarchy('http://ex.org/Leaf'));
     });
     expect(getTransitiveSubtypes('http://ex.org/Leaf', model)).toEqual([]);
+  });
+});
+
+describe('findEntitiesReferencingIri', () => {
+  const WING = 'http://ex.org/Wing';
+
+  it('finds a class referencing the IRI via a SubClassOf-style expression', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/Bird', makeClassWithHierarchy('http://ex.org/Bird', {
+        superClassExpressions: ['http://ex.org/hasPart some ' + WING],
+      }));
+      m.classes.set('http://ex.org/Unrelated', makeClassWithHierarchy('http://ex.org/Unrelated'));
+    });
+    const found = findEntitiesReferencingIri(model, WING);
+    expect(found.map(e => e.iri)).toEqual(['http://ex.org/Bird']);
+  });
+
+  it('finds a class referencing the IRI via a GCI axiom expression', () => {
+    const model = buildModel(m => {
+      const cls = makeClassWithHierarchy('http://ex.org/Bird');
+      cls.gciExpressions.push('http://ex.org/hasPart some ' + WING);
+      m.classes.set(cls.iri, cls);
+    });
+    const found = findEntitiesReferencingIri(model, WING);
+    expect(found.map(e => e.iri)).toEqual(['http://ex.org/Bird']);
+  });
+
+  it('finds a property referencing the IRI via domain/range', () => {
+    const model = buildModel(m => {
+      const prop = makeObjectProperty('http://ex.org/hasWing');
+      prop.rangeIris.push(WING);
+      m.objectProperties.set(prop.iri, prop);
+    });
+    const found = findEntitiesReferencingIri(model, WING);
+    expect(found.map(e => e.iri)).toEqual(['http://ex.org/hasWing']);
+  });
+
+  it('does not return an unrelated entity that does not reference the IRI', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/Unrelated', makeClassWithHierarchy('http://ex.org/Unrelated', {
+        superClassExpressions: ['http://ex.org/hasPart some http://ex.org/Beak'],
+      }));
+    });
+    expect(findEntitiesReferencingIri(model, WING)).toEqual([]);
+  });
+
+  it('does not false-positive on an IRI that is a substring of a longer IRI', () => {
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/Bird', makeClassWithHierarchy('http://ex.org/Bird', {
+        superClassExpressions: ['http://ex.org/hasPart some http://ex.org/WingSpan'],
+      }));
+    });
+    expect(findEntitiesReferencingIri(model, WING)).toEqual([]);
+  });
+
+  it('tolerates being called with an IRI for an entity that no longer exists in the model, still finding stale referencing entities', () => {
+    const DELETED = 'http://ex.org/DeletedEntity';
+    const model = buildModel(m => {
+      m.classes.set('http://ex.org/Bird', makeClassWithHierarchy('http://ex.org/Bird', {
+        superClassExpressions: ['http://ex.org/hasPart some ' + DELETED],
+      }));
+      // DELETED is intentionally absent from m.classes — simulates a rename/invalidation
+      // check running against an IRI that was since deleted from the model.
+    });
+    expect(() => findEntitiesReferencingIri(model, DELETED)).not.toThrow();
+    expect(findEntitiesReferencingIri(model, DELETED).map(e => e.iri)).toEqual(['http://ex.org/Bird']);
+  });
+
+  it('finds an individual referencing the IRI via classIris and property assertions', () => {
+    const model = buildModel(m => {
+      const ind: OWLIndividual = {
+        iri: 'http://ex.org/Tweety', type: 'individual', labels: {}, annotations: {},
+        classIris: [WING],
+        objectPropertyAssertions: [],
+        dataPropertyAssertions: [],
+      };
+      m.individuals.set(ind.iri, ind);
+    });
+    const found = findEntitiesReferencingIri(model, WING);
+    expect(found.map(e => e.iri)).toEqual(['http://ex.org/Tweety']);
+  });
+
+  it('finds a data property referencing the IRI via domain/range', () => {
+    const model = buildModel(m => {
+      const prop = makeDataProperty('http://ex.org/hasWeight');
+      prop.rangeIris.push(WING);
+      m.dataProperties.set(prop.iri, prop);
+    });
+    expect(findEntitiesReferencingIri(model, WING).map(e => e.iri)).toEqual(['http://ex.org/hasWeight']);
+  });
+
+  it('finds an annotation property referencing the IRI via domain/range', () => {
+    const model = buildModel(m => {
+      const prop = makeAnnotationProperty('http://ex.org/note');
+      prop.domainIris.push(WING);
+      m.annotationProperties.set(prop.iri, prop);
+    });
+    expect(findEntitiesReferencingIri(model, WING).map(e => e.iri)).toEqual(['http://ex.org/note']);
+  });
+
+  it('finds an object property referencing the IRI via inverseOfIri, equivalent/disjoint properties, and property chains', () => {
+    const invModel = buildModel(m => {
+      const prop = makeObjectProperty('http://ex.org/isPartOf');
+      prop.inverseOfIri = WING;
+      m.objectProperties.set(prop.iri, prop);
+    });
+    expect(findEntitiesReferencingIri(invModel, WING).map(e => e.iri)).toEqual(['http://ex.org/isPartOf']);
+
+    const equivModel = buildModel(m => {
+      const prop = makeObjectProperty('http://ex.org/isPartOf');
+      prop.equivalentPropertyIris = [WING];
+      m.objectProperties.set(prop.iri, prop);
+    });
+    expect(findEntitiesReferencingIri(equivModel, WING).map(e => e.iri)).toEqual(['http://ex.org/isPartOf']);
+
+    const disjointModel = buildModel(m => {
+      const prop = makeObjectProperty('http://ex.org/isPartOf');
+      prop.disjointPropertyIris = [WING];
+      m.objectProperties.set(prop.iri, prop);
+    });
+    expect(findEntitiesReferencingIri(disjointModel, WING).map(e => e.iri)).toEqual(['http://ex.org/isPartOf']);
+
+    const chainModel = buildModel(m => {
+      const prop = makeObjectProperty('http://ex.org/isPartOf');
+      prop.propertyChains = [['http://ex.org/hasPart', WING]];
+      m.objectProperties.set(prop.iri, prop);
+    });
+    expect(findEntitiesReferencingIri(chainModel, WING).map(e => e.iri)).toEqual(['http://ex.org/isPartOf']);
   });
 });

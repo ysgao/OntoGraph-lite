@@ -1,4 +1,5 @@
 import type { OntologyModel, OWLEntityUnion } from './OntologyModel';
+import { expressionContainsIri } from './AxiomDisplay';
 
 const SKOS_PREF_LABEL = 'http://www.w3.org/2004/02/skos/core#prefLabel';
 const SKOS_ALT_LABEL = 'http://www.w3.org/2004/02/skos/core#altLabel';
@@ -96,6 +97,67 @@ export function getTransitiveSubtypes(iri: string, model: OntologyModel): string
     }
   }
   return [...visited];
+}
+
+/**
+ * Every entity whose own axiom-bearing fields (class/property expressions,
+ * IRIs, or individual assertions) reference `iri` anywhere. Does not require
+ * `iri` to resolve to an existing entity — a deleted entity's IRI can still
+ * safely be scanned for (it simply won't match anything new).
+ *
+ * Used to find which entities' cached editor display must be invalidated
+ * after a label rename, mirroring the field list `updateIriReferencesInModel`
+ * (src/views/EntityEditorPanel.ts) already scans for IRI renames.
+ */
+export function findEntitiesReferencingIri(model: OntologyModel, iri: string): OWLEntityUnion[] {
+  const found: OWLEntityUnion[] = [];
+
+  for (const cls of model.classes.values()) {
+    if (
+      cls.superClassIris.includes(iri)
+      || cls.equivalentClassIris.includes(iri)
+      || cls.disjointClassIris.includes(iri)
+      || cls.superClassExpressions.some(e => expressionContainsIri(e, iri))
+      || cls.equivalentClassExpressions.some(e => expressionContainsIri(e, iri))
+      || cls.gciExpressions.some(e => expressionContainsIri(e, iri))
+    ) {
+      found.push(cls);
+    }
+  }
+  for (const prop of model.objectProperties.values()) {
+    if (
+      prop.superPropertyIris.includes(iri)
+      || prop.domainIris.includes(iri)
+      || prop.rangeIris.includes(iri)
+      || prop.inverseOfIri === iri
+      || (prop.equivalentPropertyIris?.includes(iri) ?? false)
+      || (prop.disjointPropertyIris?.includes(iri) ?? false)
+      || (prop.propertyChains?.some(chain => chain.includes(iri)) ?? false)
+    ) {
+      found.push(prop);
+    }
+  }
+  for (const prop of model.dataProperties.values()) {
+    if (prop.superPropertyIris.includes(iri) || prop.domainIris.includes(iri) || prop.rangeIris.includes(iri)) {
+      found.push(prop);
+    }
+  }
+  for (const prop of model.annotationProperties.values()) {
+    if (prop.superPropertyIris.includes(iri) || prop.domainIris.includes(iri) || prop.rangeIris.includes(iri)) {
+      found.push(prop);
+    }
+  }
+  for (const ind of model.individuals.values()) {
+    if (
+      ind.classIris.includes(iri)
+      || ind.objectPropertyAssertions.some(a => a.propertyIri === iri || a.targetIri === iri)
+      || ind.dataPropertyAssertions.some(a => a.propertyIri === iri)
+    ) {
+      found.push(ind);
+    }
+  }
+
+  return found;
 }
 
 export class OntologyIndex {

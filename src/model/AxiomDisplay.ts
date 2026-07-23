@@ -74,6 +74,15 @@ export function renderIri(
 // Matches bare full IRIs (http:// or https://) stored in expression strings
 const BARE_IRI = /https?:\/\/[^\s(),{}]+/g;
 
+/** True if the stored expression's bare-IRI form contains `iri` as an exact token (not a substring of a longer IRI). */
+export function expressionContainsIri(expr: string, iri: string): boolean {
+  BARE_IRI.lastIndex = 0;
+  for (const match of expr.matchAll(BARE_IRI)) {
+    if (match[0] === iri) { return true; }
+  }
+  return false;
+}
+
 /**
  * Render a stored expression (containing full bare IRIs) in the chosen display style.
  * Returns plain text (no HTML).
