@@ -131,6 +131,19 @@ const BUS_LANE_SPREAD = 12;
  *  far enough to visually merge with the child boxes it's routing towards. */
 const BUS_LANE_CLEARANCE = 6;
 
+/** Minimum visible length (px) reserved for the FINAL bus-to-child stem — the ceiling either
+ *  push loop in `computeBusGroupPlacements` may drive a bus line's height down to
+ *  (`childTopY - MIN_FINAL_STEM`, not just `childTopY - BUS_LANE_CLEARANCE`). Both push loops
+ *  keep pushing every round a crossing is detected, with no notion of "pushed far enough" — in a
+ *  wide, busy diagram (many bus groups' spans legitimately overlapping several rows deep) that
+ *  reliably drives busY all the way to whatever ceiling is available, which at only
+ *  `BUS_LANE_CLEARANCE` (6px) produced a barely-visible final stem (reported, and confirmed
+ *  against the real middle-ear-structure sample: busY landing exactly 6px above the child row at
+ *  the 3rd/4th level, where the most bus groups accumulate). Reserving a bigger floor here trades
+ *  a small amount of push headroom (still ~20px, per `BUS_GAP`'s own doc comment on the row-gap
+ *  budget) for a stem that always reads as a stem, not a degenerate near-zero-length line. */
+const MIN_FINAL_STEM = 20;
+
 /** Safety bound on `computeBusGroupPlacements`'s "does my bus cross an unrelated group's stem"
  *  push-down pass — bounded for the same reason `MAX_DETOUR_WIDEN_ROUNDS` is: one push can newly
  *  clear one crossing while exposing (or creating) another elsewhere, so a few rounds may be
@@ -269,7 +282,7 @@ function computeBusGroupPlacements(
     bucket.forEach((item, i) => {
       const lane = laneByIndex.get(i)!;
       const shifted = item.naturalBusY + lane * BUS_LANE_SPREAD;
-      busYByKey.set(item.key, Math.min(shifted, item.childTopY - BUS_LANE_CLEARANCE));
+      busYByKey.set(item.key, Math.min(shifted, item.childTopY - MIN_FINAL_STEM));
     });
   }
 
@@ -329,7 +342,7 @@ function computeBusGroupPlacements(
 
       if (!stemCrossing) { continue; }
 
-      const pushed = Math.min(busY + BUS_LANE_SPREAD, n.childTopY - BUS_LANE_CLEARANCE);
+      const pushed = Math.min(busY + BUS_LANE_SPREAD, n.childTopY - MIN_FINAL_STEM);
       if (pushed > busY) {
         busYByKey.set(n.key, pushed);
         anyPushed = true;

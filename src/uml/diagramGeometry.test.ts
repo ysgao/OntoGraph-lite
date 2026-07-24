@@ -207,11 +207,11 @@ describe('computeEdgeRoutes — bus-lane collision avoidance across DIFFERENT cl
     // territory (x=500) at that same height. Lane separation alone pushes parentY to a second
     // lane (110); the bus-vs-stem push then ALSO has to move parentFar further still, since its
     // span keeps crossing parentY's own stems (parent-stem, then child-stem) as it climbs — it
-    // ends up capped at its own child's ceiling (childTopY(140) - BUS_LANE_CLEARANCE(6) = 134)
+    // ends up capped at its own child's ceiling (childTopY(140) - MIN_FINAL_STEM(20) = 120)
     // without fully escaping, which is this specific case's inherent limit (parentFar's own
     // child sits at the same row parentY's whole structure occupies) rather than a bug: the two
     // buses are still NOT at the same height, which is what actually matters visually.
-    expect(farBusY).toBe(134);
+    expect(farBusY).toBe(120);
     expect(yBusY).toBe(110);
     expect(farBusY).not.toBe(yBusY);
 
@@ -387,9 +387,9 @@ describe('computeEdgeSegments — bus-lane collision avoidance is visible in the
     const busYs = new Set(markerYs.filter(y => y !== 56)); // 56 = every parent's shared pyBottom
     // parentNear/parentFar (98, shared child, unaffected) and parentY (110, lane-separated).
     // parentFar's own bus-vs-stem push (crossing parentY's stems as its wide span sweeps past
-    // parentY's column) then pushes it further still, to 134 — see the routes-level test with
+    // parentY's column) then pushes it further still, to 120 — see the routes-level test with
     // the identical fixture for why that specific value is this case's inherent ceiling.
-    expect(busYs).toEqual(new Set([98, 110, 134]));
+    expect(busYs).toEqual(new Set([98, 110, 120]));
   });
 });
 
@@ -506,15 +506,18 @@ describe('computeEdgeRoutes', () => {
     // parentA's OWN bus, in turn, gets pushed by the SAME bus-vs-stem check (its span crosses
     // parentC's own child-facing stem, which reaches all the way down to childD's row) — moving
     // parentA's obstacle band deeper, which is why childD's detour clears it at a taller enterY
-    // (256) than the original (pre-bus-push) fix alone would have needed.
+    // (242) than the original (pre-bus-push) fix alone would have needed. The exact height
+    // depends on MIN_FINAL_STEM (the floor `computeBusGroupPlacements` reserves above a bus's own
+    // child row), not just BUS_LANE_SPREAD.
     expect(route.points).toEqual([
       { x: 1500, y: 98 }, { x: 700, y: 98 },
-      { x: 700, y: 256 }, { x: 210, y: 256 }, { x: 210, y: 346 }, { x: 700, y: 346 },
+      { x: 700, y: 242 }, { x: 210, y: 242 }, { x: 210, y: 346 }, { x: 700, y: 346 },
     ]);
 
-    // The detour still clears parentA's ORIGINAL bus band (y in [230,246], x in [300,1700]) too.
+    // The detour still clears parentA's own bus band (busY 260 +/- BUS_OBSTACLE_MARGIN(8), x in
+    // [300,1700]) too.
     for (const p of route.points) {
-      if (p.y > 230 && p.y < 246) { expect(p.x < 300 || p.x > 1700).toBe(true); }
+      if (p.y > 252 && p.y < 268) { expect(p.x < 300 || p.x > 1700).toBe(true); }
     }
   });
 
@@ -574,9 +577,12 @@ describe('far-child (dual-relationship) bus routing', () => {
     const { pos, edges } = buildFixture();
     const routes = computeEdgeRoutes(pos, edges, W, H);
 
-    // The near child is completely unaffected — still a plain single-hop bus reach.
+    // The near child is completely unaffected in KIND of routing — still a plain single-hop bus
+    // reach — though its exact busY now reflects MIN_FINAL_STEM(20)'s more generous floor above
+    // its own child row (420 - 20 = 400) rather than the old BUS_LANE_CLEARANCE(6)-based ceiling
+    // (420 - 6 = 414), which left only a 6px final stem here before this fix.
     expect(routes.get('parentB|nearChild|composition')!.points).toEqual([
-      { x: 465, y: 414 }, { x: 635, y: 414 },
+      { x: 465, y: 400 }, { x: 635, y: 400 },
     ]);
 
     // The far child descends straight down at parentB's OWN x (465) past ostium's incoming stem
@@ -600,12 +606,13 @@ describe('far-child (dual-relationship) bus routing', () => {
     const { pos, edges } = buildFixture();
     const segments = computeEdgeSegments(pos, edges, W, H);
 
-    const parentBSegments = segments.filter(s => s.d.includes('465,336') || s.d.includes('465,414') || s.d.includes('465,550'));
-    // Marker-carrying parent stem still exits at parentB's own x, straight down to its ordinary busY.
-    expect(parentBSegments.some(s => s.marker === 'start' && s.d === 'M465,336 L465,414')).toBe(true);
+    const parentBSegments = segments.filter(s => s.d.includes('465,336') || s.d.includes('465,400') || s.d.includes('465,550'));
+    // Marker-carrying parent stem still exits at parentB's own x, straight down to its ordinary
+    // busY (400 = childTopY(420) - MIN_FINAL_STEM(20)).
+    expect(parentBSegments.some(s => s.marker === 'start' && s.d === 'M465,336 L465,400')).toBe(true);
     // No bus line needed for a single near child (busMinX === busMaxX, both 635... wait px=465,
-    // nearChild=635, so there IS a one-child bus spanning 465-635 at busY=414).
-    expect(parentBSegments.some(s => s.d === 'M465,414 L635,414')).toBe(true);
+    // nearChild=635, so there IS a one-child bus spanning 465-635 at busY=400).
+    expect(parentBSegments.some(s => s.d === 'M465,400 L635,400')).toBe(true);
     // The far child's own independent path, entirely separate from the above.
     expect(parentBSegments.some(s => s.d === 'M465,336 L465,550 L295,550 L295,560')).toBe(true);
   });
@@ -617,7 +624,7 @@ describe('far-child (dual-relationship) bus routing', () => {
     const farSegment = segments.find(s => s.d === 'M465,336 L465,550 L295,550 L295,560');
     expect(farSegment?.far).toBe(true);
 
-    const nearSegments = segments.filter(s => s.d === 'M465,336 L465,414' || s.d === 'M465,414 L635,414');
+    const nearSegments = segments.filter(s => s.d === 'M465,336 L465,400' || s.d === 'M465,400 L635,400');
     expect(nearSegments.length).toBeGreaterThan(0);
     expect(nearSegments.every(s => !s.far)).toBe(true);
   });
