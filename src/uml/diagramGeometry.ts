@@ -109,9 +109,11 @@ const PARENT_STEM_SPREAD = 24;
  *  instead keeps it inside the fixed gap between the parent's row and the very next row — a band
  *  no node ever starts within, however many rows the edge as a whole spans.
  *
- *  Set to exactly half of `ROW_HEIGHT - NODE_HEIGHT` (`layout.ts`'s 140 - 56 = 84) — the same
- *  value the ORIGINAL proportional-midpoint formula produced for a normal one-row gap, so the
- *  common case looks identical to before. A smaller value (first tried: 20) left the
+ *  Set to exactly half of `BASE_ROW_HEIGHT - NODE_HEIGHT` (`layout.ts`'s 140 - 56 = 84) — the
+ *  same value the ORIGINAL proportional-midpoint formula produced for a normal one-row gap, so a
+ *  single-lane transition looks identical to before. `layout.ts`'s BASE gap is in turn sized as
+ *  `NODE_EXTENT + 2 * BUS_GAP`, so a one-lane transition places its bus at `parentBottom + BUS_GAP`
+ *  with an equal `BUS_GAP`-sized final stem below it. A smaller value (first tried: 20) left the
  *  parent-to-bus stem barely longer than the diamond/triangle marker itself, making the marker
  *  look like it sat directly on the horizontal bus line with no visible connecting line. */
 const BUS_GAP = 42;
@@ -120,35 +122,20 @@ function busYFor(pyBottom: number, childTopY: number): number {
   return pyBottom + Math.min(BUS_GAP, (childTopY - pyBottom) / 2);
 }
 
-/** How far apart (px) to separate colliding bus LANES vertically — see `computeBusGroupPlacements`.
- *  Distinct from `PARENT_STEM_SPREAD`, which spreads exit points horizontally for groups under
- *  the SAME parent; this instead separates the horizontal bus line itself for groups under
- *  DIFFERENT parents whose spans would otherwise cross. */
+/** How far apart (px) to stack successive same-transition bus LANES — `computeBusGroupPlacements`
+ *  places the Nth bus in a transition band at `naturalBusY + N * BUS_LANE_SPREAD`. Distinct from
+ *  `PARENT_STEM_SPREAD`, which spreads exit points horizontally for groups under the SAME parent;
+ *  this separates the horizontal bus lines themselves. `layout.ts`'s `LANE_STEP` (the extra
+ *  flow-gap it adds per lane) MUST be >= this so the full lane stack always fits in the band. */
 const BUS_LANE_SPREAD = 12;
 
-/** How much clearance (px) a lane-shifted bus line must keep above the child row it's about to
- *  enter — without this, enough colliding lanes at one busY bucket could push the bus line down
- *  far enough to visually merge with the child boxes it's routing towards. */
-const BUS_LANE_CLEARANCE = 6;
-
-/** Minimum visible length (px) reserved for the FINAL bus-to-child stem — the ceiling either
- *  push loop in `computeBusGroupPlacements` may drive a bus line's height down to
- *  (`childTopY - MIN_FINAL_STEM`, not just `childTopY - BUS_LANE_CLEARANCE`). Both push loops
- *  keep pushing every round a crossing is detected, with no notion of "pushed far enough" — in a
- *  wide, busy diagram (many bus groups' spans legitimately overlapping several rows deep) that
- *  reliably drives busY all the way to whatever ceiling is available, which at only
- *  `BUS_LANE_CLEARANCE` (6px) produced a barely-visible final stem (reported, and confirmed
- *  against the real middle-ear-structure sample: busY landing exactly 6px above the child row at
- *  the 3rd/4th level, where the most bus groups accumulate). Reserving a bigger floor here trades
- *  a small amount of push headroom (still ~20px, per `BUS_GAP`'s own doc comment on the row-gap
- *  budget) for a stem that always reads as a stem, not a degenerate near-zero-length line. */
+/** Minimum visible length (px) reserved for the FINAL bus-to-child stem — `computeBusGroupPlacements`
+ *  clamps a lane's height to at most `childTopY - MIN_FINAL_STEM` as a pure safety net. With
+ *  `layout.ts` now sizing every transition's gap to its exact lane count, the clamp never actually
+ *  fires (each lane's natural stacked height already leaves at least this much clearance); it only
+ *  exists to keep a stem visible if some future caller ever under-sizes the gap, rather than
+ *  letting a bus land on top of the child row. */
 const MIN_FINAL_STEM = 20;
-
-/** Safety bound on `computeBusGroupPlacements`'s "does my bus cross an unrelated group's stem"
- *  push-down pass — bounded for the same reason `MAX_DETOUR_WIDEN_ROUNDS` is: one push can newly
- *  clear one crossing while exposing (or creating) another elsewhere, so a few rounds may be
- *  needed to settle, but this is still a hard backstop against pathological input. */
-const MAX_BUS_PUSH_ROUNDS = 20;
 
 interface BusGroupSpec {
   parentIri: string;
@@ -244,9 +231,10 @@ function computeBusGroupPlacements(
     };
   });
 
-  // Groups landing at a DIFFERENT natural height can't visually collide with each other — bucket
-  // by exact natural busY so lane assignment only ever compares groups that would otherwise share
-  // a height.
+  // Bucket by natural height — each bucket is one transition band. Every bus group whose parent
+  // sits at the same layer shares the same `naturalBusY`, because `busYFor` caps at
+  // `parentBottom + BUS_GAP` once the transition gap is at least `2 * BUS_GAP` deep, which
+  // `layout.ts`'s BASE gap always guarantees.
   const byNaturalBusY = new Map<number, Natural[]>();
   for (const n of naturals) {
     let bucket = byNaturalBusY.get(n.naturalBusY);
@@ -254,127 +242,25 @@ function computeBusGroupPlacements(
     bucket.push(n);
   }
 
-  // Every pair of groups sharing a natural-height bucket is the FIRST pass's responsibility to
-  // resolve — whether it decides they conflict (assigning different lanes) or not (spans that
-  // only TOUCH, not strictly overlap — fine to share a lane/height). Either way, the second
-  // (push) pass below must not re-litigate it: re-checking a same-bucket pair there means one
-  // group's own PARENT stem trunk (which runs from the shared row all the way down to its OWN
-  // lane height) — or, worse, one group's CHILD stem, which reaches all the way to the child row,
-  // a much wider vertical band than any lane gap — nearly always still overlaps its bucket-mates'
-  // stems, since they all share the same starting row. That is a geometric artifact of sharing a
-  // row, not a real unresolved crossing: reacting to it pushes every mutually-related group in
-  // lockstep, round after round, until all collapse onto the identical shared ceiling (reported
-  // against the real middle-ear-structure sample: four different parents' bus lines all landing
-  // at the exact same height despite the lane pass having already given them distinct ones).
-  const bucketResolvedPairs = new Set<string>();
-  const pairKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
-
+  // Within each band, give EVERY bus its OWN lane — a distinct height, `BUS_LANE_SPREAD` apart —
+  // so no two buses ever share a horizontal line. This is the whole point of the layered redesign:
+  // `layout.ts` sizes each transition's flow-gap to exactly this lane count (one lane per
+  // (parent, kind) group), so the full stack always fits and the `Math.min(…, childTopY -
+  // MIN_FINAL_STEM)` clamp below is a pure safety net that never actually fires when the gap was
+  // sized correctly. No conflict graph and no reactive push-down pass are needed or wanted: two
+  // buses at different heights can still visually CROSS (one horizontal, one vertical) — ordinary
+  // orthogonal routing — but they can no longer MERGE into one indistinguishable collinear line,
+  // which was the reported bug (a dense layer's buses all collapsing onto a single shared height
+  // because the greedy conflict-coloring + reactive push ran out of headroom and clamped them
+  // together). Lane order is deterministic (leftmost `minX` first, ties broken by key) so the
+  // assignment is stable across runs (spec FR-009).
   const busYByKey = new Map<string, number>();
   for (const bucket of byNaturalBusY.values()) {
-    const n = bucket.length;
-    const conflicts: boolean[][] = Array.from({ length: n }, () => new Array(n).fill(false));
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const a = bucket[i], b = bucket[j];
-        bucketResolvedPairs.add(pairKey(a.key, b.key));
-        const sharesChild = [...a.childIris].some(c => b.childIris.has(c));
-        const spansOverlap = a.minX < b.maxX && b.minX < a.maxX;
-        if (!sharesChild && spansOverlap) { conflicts[i][j] = conflicts[j][i] = true; }
-      }
-    }
-
-    const order = bucket.map((_, i) => i).sort((x, y) => bucket[x].minX - bucket[y].minX);
-    const laneByIndex = new Map<number, number>();
-    for (const i of order) {
-      const usedLanes = new Set<number>();
-      for (let j = 0; j < n; j++) {
-        if (conflicts[i][j] && laneByIndex.has(j)) { usedLanes.add(laneByIndex.get(j)!); }
-      }
-      let lane = 0;
-      while (usedLanes.has(lane)) { lane++; }
-      laneByIndex.set(i, lane);
-    }
-
-    bucket.forEach((item, i) => {
-      const lane = laneByIndex.get(i)!;
+    const ordered = [...bucket].sort((a, b) => a.minX - b.minX || (a.key < b.key ? -1 : 1));
+    ordered.forEach((item, lane) => {
       const shifted = item.naturalBusY + lane * BUS_LANE_SPREAD;
       busYByKey.set(item.key, Math.min(shifted, item.childTopY - MIN_FINAL_STEM));
     });
-  }
-
-  // The lane pass above only ever compares groups sharing the exact same NATURAL busY (same
-  // row-transition) — but the horizontal bus line itself can be far wider than that: a bus
-  // reaching a distant child sweeps across x at ITS OWN height regardless of what other groups'
-  // rows are, and an unrelated group's vertical STEM spans a Y-RANGE (not a single point), so it
-  // can still contain this bus's height even when the two groups' natural busY VALUES differ
-  // entirely (reported: a wide composition bus crossed several unrelated classes' own
-  // parent-facing marker stems, none of which shared its natural bus height at all). Push a
-  // group's busY further from its parent, in the same increments the lane pass uses, whenever its
-  // span crosses ANOTHER group's stem — re-checking every group each round, since one push can
-  // newly clear (or newly create) a crossing elsewhere. A shared child is exempt, same as
-  // everywhere else: two DIFFERENT parents converging cleanly on one child is the intended look.
-  // Only a group with a REAL bus (more than one x) ever gets pushed here — a degenerate,
-  // single-child group has no horizontal line to cross anything with, so it's always the
-  // stationary "obstacle" side, never the "mover" side, which is what keeps this loop from ever
-  // having two groups chase each other's height back and forth (see `BUS_LANE_CLEARANCE`'s use
-  // below for the OTHER half of why this stays stable).
-  const childIrisByKey = new Map(groups.map(g => [keyOf(g), new Set(g.childIris)]));
-  for (let round = 0; round < MAX_BUS_PUSH_ROUNDS; round++) {
-    const stems: Array<{ left: number; right: number; top: number; bottom: number; key: string; childIri?: string }> = [];
-    for (const n of naturals) {
-      const busY = busYByKey.get(n.key)!;
-      const parentPos = positions.get(groups.find(g => keyOf(g) === n.key)!.parentIri)!;
-      const pyBottom = parentPos.y + nodeHeight;
-      stems.push({ left: n.px - STEM_OBSTACLE_MARGIN, right: n.px + STEM_OBSTACLE_MARGIN, top: Math.min(busY, pyBottom), bottom: Math.max(busY, pyBottom), key: n.key });
-      for (const childIri of childIrisByKey.get(n.key) ?? []) {
-        const c = positions.get(childIri)!;
-        stems.push({ left: c.x - STEM_OBSTACLE_MARGIN, right: c.x + STEM_OBSTACLE_MARGIN, top: Math.min(busY, c.y), bottom: Math.max(busY, c.y), key: n.key, childIri });
-      }
-    }
-    let anyPushed = false;
-    for (const n of naturals) {
-      if (n.minX === n.maxX) { continue; } // no horizontal bus line to cross anything with
-      const busY = busYByKey.get(n.key)!;
-
-      // A PARENT stem's own bottom bound is, by construction, that OTHER group's own busY
-      // exactly (`Math.max(busY, pyBottom)` — pyBottom is fixed, so the stem's own upper reach
-      // IS its busY). Without a clearance margin here, "push until just past this stem" walks my
-      // busY to exactly equal that group's height — recreating the same-height collision the
-      // lane pass exists to prevent, since a strict `>` check treats landing exactly on the
-      // boundary as "already clear." The margin forces a genuine gap instead of a knife-edge one,
-      // and — critically — that group is a stationary target here (a group with no crossing of
-      // its own, e.g. a degenerate single-child span, never gets pushed by this loop at all), so
-      // there's nothing to chase: only the wide/crossing side ever moves.
-      const stemCrossing = stems.some(s => s.key !== n.key
-        // Exempt the OTHER group's stem — parent-facing OR any specific child-facing one — the
-        // moment the two GROUPS share ANY child, not just when this particular stem happens to be
-        // tagged with a childIri that's shared: a group's own parent-stem carries no childIri at
-        // all, so checking only the tagged stem missed the common "two groups sharing a child
-        // also share a bus" case entirely (a false-positive push between them, since converging on
-        // a shared child cleanly is the intended look, not a crossing).
-        && ![...(childIrisByKey.get(s.key) ?? [])].some(c => n.childIris.has(c))
-        // Exempt a same-bucket pair's CHILD stems specifically (not its parent stem) — a child
-        // stem reaches all the way down to its own row, a far wider vertical band than any
-        // lane-height gap, so for two groups that already share a row (and so share a starting
-        // point for every stem), this check otherwise treats practically any nearby lane height
-        // as "still crossing" a bucket-mate's child stem, cascading every mutually-related group
-        // in that row to the same shared ceiling (reported against the real middle-ear-structure
-        // sample). A bucket-mate's PARENT stem (or its horizontal bus) is NOT exempted here — a
-        // wide bridging bus can still genuinely need pushing clear of another bucket-mate's own
-        // parent-facing stem, which `bucketResolvedPairs`'s lane assignment alone doesn't resolve.
-        && !(s.childIri !== undefined && bucketResolvedPairs.has(pairKey(n.key, s.key)))
-        && s.left < n.maxX && s.right > n.minX
-        && (s.top - BUS_LANE_CLEARANCE) < busY && (s.bottom + BUS_LANE_CLEARANCE) > busY);
-
-      if (!stemCrossing) { continue; }
-
-      const pushed = Math.min(busY + BUS_LANE_SPREAD, n.childTopY - MIN_FINAL_STEM);
-      if (pushed > busY) {
-        busYByKey.set(n.key, pushed);
-        anyPushed = true;
-      }
-    }
-    if (!anyPushed) { break; }
   }
 
   const placements = new Map<string, BusGroupPlacement>();
@@ -522,7 +408,7 @@ interface FanInGroup { childIri: string; kind: 'composition' | 'generalization';
  */
 function computeFanInGroups(
   candidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number; edgeId?: string }>,
-  positions: Map<string, Position>,
+  placements: Map<string, BusGroupPlacement>,
 ): Map<string, FanInGroup> {
   const byKey = new Map<string, FanInParent[]>();
   const meta = new Map<string, { childIri: string; kind: 'composition' | 'generalization' }>();
@@ -538,9 +424,18 @@ function computeFanInGroups(
     const distinctParents = new Set(parents.map(p => p.parentIri));
     if (distinctParents.size < 2) { continue; }
     const { childIri, kind } = meta.get(key)!;
-    const childY = positions.get(childIri)!.y;
-    const maxPyBottom = Math.max(...parents.map(p => p.pyBottom));
-    groups.set(key, { childIri, kind, parents, busY: busYFor(maxPyBottom, childY) });
+    // Place the shared fan-in bus at the SHALLOWEST lane among its constituent parents' own
+    // (parent, kind) bus groups. Each of those groups was assigned a UNIQUE lane by
+    // `computeBusGroupPlacements`, so reusing one of them puts this bus at a real, singly-owned
+    // height — no other bus (fan-out or fan-in) shares it. Deriving from the placement lanes,
+    // rather than recomputing the natural height, is what keeps a fan-in bus from colliding with
+    // the fan-out lane that would otherwise sit at that same natural height. The constituents'
+    // other lanes simply go unused (harmless — `layout.ts` already sized the gap for all of them).
+    const busYs = parents
+      .map(p => placements.get(`${p.parentIri}|${kind}`)?.busY)
+      .filter((v): v is number => v !== undefined);
+    if (busYs.length === 0) { continue; } // defensive: constituents are always in `placements`
+    groups.set(key, { childIri, kind, parents, busY: Math.min(...busYs) });
   }
   return groups;
 }
@@ -829,19 +724,26 @@ function computeEdgeSegmentsCore(
   const stemObstacles = collectStemObstacles(groupList, placements, positions, nodeHeight);
 
   // Fan-in bus discovery (spec: "only share a bus when nodes have the same target and same edge
-  // kind") — see `computeFanInGroups`'s doc comment for the single-near-child scoping rationale.
+  // kind") — see `computeFanInGroups`'s doc comment. A candidate is a group with EXACTLY ONE
+  // child reached by an ADJACENT edge (one layer down, no dummy chain). Both conditions matter:
+  // requiring a single child keeps a parent that also has its own exclusive children on its normal
+  // fan-out bus; requiring adjacency stops a MULTI-layer single-child edge (which must route
+  // through its reserved dummy columns) from being merged into a shared bus with an unrelated
+  // parent at a different layer — doing so would run the shared bus's stem straight through
+  // whatever sits at the layers in between.
   const fanInCandidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number }> = [];
   for (const [groupKey, g] of busGroups) {
-    const minChildY = Math.min(...g.childIris.map(c => positions.get(c)!.y));
-    const nearChildIris = g.childIris.filter(c => positions.get(c)!.y === minChildY);
-    if (nearChildIris.length === 1) {
-      fanInCandidates.push({
-        parentIri: g.parentIri, childIri: nearChildIris[0], kind: g.kind,
-        px: placements.get(groupKey)!.px, pyBottom: positions.get(g.parentIri)!.y + nodeHeight,
-      });
-    }
+    if (g.childIris.length !== 1) { continue; }
+    const childIri = g.childIris[0];
+    const edgeId = g.edgeIdByChild.get(childIri);
+    const adjacent = edgeId !== undefined && (farEdgeRoutes?.get(edgeId)?.length ?? 0) === 0;
+    if (!adjacent) { continue; }
+    fanInCandidates.push({
+      parentIri: g.parentIri, childIri, kind: g.kind,
+      px: placements.get(groupKey)!.px, pyBottom: positions.get(g.parentIri)!.y + nodeHeight,
+    });
   }
-  const fanInGroups = computeFanInGroups(fanInCandidates, positions);
+  const fanInGroups = computeFanInGroups(fanInCandidates, placements);
   const fanInConsumed = new Set<string>();
   for (const group of fanInGroups.values()) {
     for (const p of group.parents) { fanInConsumed.add(`${p.parentIri}|${group.childIri}|${group.kind}`); }
@@ -861,10 +763,20 @@ function computeEdgeSegmentsCore(
     // its near children. A near child already claimed by a fan-in group (this parent's ONLY near
     // child, shared with another parent of the same kind) is excluded too — it renders once,
     // below, as part of that fan-in bus instead of this fan-out one.
-    const minChildY = Math.min(...g.childIris.map(c => positions.get(c)!.y));
-    const nearChildIris = g.childIris.filter(c => positions.get(c)!.y === minChildY
+    // Split on whether the edge spans MORE than one layer (i.e. has a dummy chain), NOT on
+    // whether the child is the group's shallowest. A group whose only child is two layers down
+    // has no "adjacent" child at all, but that child still needs its multi-layer dummy route —
+    // classifying it as "near" (as an is-it-the-shallowest test would) and drawing it a straight
+    // stem sends the stem clean through whatever sits at the intervening layer. An edge with
+    // dummies always routes through its reserved dummy columns; an edge without (truly adjacent,
+    // exactly one layer down) gets a straight stem off the shared bus.
+    const spansMultiLayer = (childIri: string): boolean => {
+      const id = g.edgeIdByChild.get(childIri);
+      return id !== undefined && (farEdgeRoutes?.get(id)?.length ?? 0) > 0;
+    };
+    const nearChildIris = g.childIris.filter(c => !spansMultiLayer(c)
       && !fanInConsumed.has(`${g.parentIri}|${c}|${g.kind}`));
-    const farChildIris = g.childIris.filter(c => positions.get(c)!.y !== minChildY);
+    const farChildIris = g.childIris.filter(c => spansMultiLayer(c));
 
     if (nearChildIris.length === 0 && farChildIris.length === 0) { continue; }
 
@@ -892,10 +804,15 @@ function computeEdgeSegmentsCore(
 
     for (const childIri of nearChildIris) {
       const c = positions.get(childIri)!;
-      const detour = computeStemDetour(
-        c.x, busY, c.y, new Set([g.parentIri, childIri]), positions, nodeWidth, nodeHeight, stemObstacles, groupKey, childIri,
-      );
-      const points = [{ x: c.x, y: busY }, ...detour, { x: c.x, y: c.y }];
+      // A NEAR child sits at the very next layer, so its stem (from the bus down to the child's
+      // top) crosses no intervening row — there is simply nothing between two adjacent layers for
+      // it to hit — so it always descends straight, no detour. (`computeStemDetour` is only for
+      // FAR children, whose stems genuinely span intervening rows; running it here would consult
+      // OTHER groups' naive straight-line stem obstacles — including far edges that are actually
+      // routed elsewhere via dummies — and detour around those phantom lines, which is exactly the
+      // garbage routing that appeared once variable per-transition spacing let a lane-0 near stem
+      // grow past the old length-based skip threshold.)
+      const points = [{ x: c.x, y: busY }, { x: c.x, y: c.y }];
       segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind });
     }
 
@@ -1059,21 +976,22 @@ function computeEdgeRoutesCore(
   const placements = computeBusGroupPlacements(groupSpecs, positions, nodeHeight);
   const stemObstacles = collectStemObstacles(groupSpecs, placements, positions, nodeHeight);
 
-  // Fan-in bus discovery — see `computeFanInGroups`'s doc comment; mirrors
-  // `computeEdgeSegmentsCore`'s identical pass.
+  // Fan-in bus discovery — see `computeFanInGroups`'s doc comment and the matching pass in
+  // `computeEdgeSegmentsCore`: exactly one child, reached by an adjacent (single-layer, no dummy
+  // chain) edge.
   const fanInCandidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number; edgeId?: string }> = [];
   for (const [groupKey, g] of busGroups) {
-    const minChildY = Math.min(...g.groupEdges.map(e => positions.get(e.childIri)!.y));
-    const nearEdges = g.groupEdges.filter(e => positions.get(e.childIri)!.y === minChildY);
-    if (nearEdges.length === 1) {
-      fanInCandidates.push({
-        parentIri: g.parentIri, childIri: nearEdges[0].childIri, kind: g.kind,
-        px: placements.get(groupKey)!.px, pyBottom: positions.get(g.parentIri)!.y + nodeHeight,
-        edgeId: nearEdges[0].id,
-      });
-    }
+    if (g.groupEdges.length !== 1) { continue; }
+    const only = g.groupEdges[0];
+    const adjacent = (farEdgeRoutes?.get(only.id)?.length ?? 0) === 0;
+    if (!adjacent) { continue; }
+    fanInCandidates.push({
+      parentIri: g.parentIri, childIri: only.childIri, kind: g.kind,
+      px: placements.get(groupKey)!.px, pyBottom: positions.get(g.parentIri)!.y + nodeHeight,
+      edgeId: only.id,
+    });
   }
-  const fanInGroups = computeFanInGroups(fanInCandidates, positions);
+  const fanInGroups = computeFanInGroups(fanInCandidates, placements);
   const fanInConsumed = new Set<string>();
   for (const group of fanInGroups.values()) {
     for (const p of group.parents) { fanInConsumed.add(`${p.parentIri}|${group.childIri}|${group.kind}`); }
@@ -1085,34 +1003,27 @@ function computeEdgeRoutesCore(
     const pyBottom = parentPos.y + nodeHeight;
     const exitX = 0.5 + (px - parentPos.x) / nodeWidth;
 
-    // See the matching comment in `computeEdgeSegmentsCore` — a "far" child (dual-relationship,
-    // FR-011, not at the group's own shallowest row) is routed independently: descend at the
-    // parent's own exit column past whatever's in the way before jogging toward it, rather than
-    // jogging immediately at the group's ordinary busY height alongside its same-row siblings.
-    const minChildY = Math.min(...g.groupEdges.map(e => positions.get(e.childIri)!.y));
-
+    // Split on whether the edge spans MORE than one layer (has a dummy chain), not on whether the
+    // child is the group's shallowest row — see the matching comment in `computeEdgeSegmentsCore`.
     for (const e of g.groupEdges) {
       if (fanInConsumed.has(`${g.parentIri}|${e.childIri}|${g.kind}`)) { continue; } // rendered below, as part of its fan-in group instead
       const c = positions.get(e.childIri)!;
-      const isFar = c.y !== minChildY;
-      const dummyPoints = isFar ? farEdgeRoutes?.get(e.id) : undefined;
+      const dummyPoints = farEdgeRoutes?.get(e.id);
+      const spansMultiLayer = (dummyPoints?.length ?? 0) > 0;
 
       let forwardPoints: Position[]; // parent-exit-anchor -> ... -> (just before target entry)
-      if (dummyPoints && dummyPoints.length > 0) {
+      if (spansMultiLayer && dummyPoints) {
         // Structural routing (spec FR-002): route through the edge's dummy-node chain, which
         // already reserves real, guaranteed-clear space at every intermediate layer.
         const expanded = elbowExpand([{ x: px, y: pyBottom }, ...dummyPoints, { x: c.x, y: c.y }]);
         forwardPoints = expanded.slice(0, -1);
       } else {
-        const excludeIris = new Set([g.parentIri, e.childIri]);
-        const jogY = isFar
-          ? computeSafeJogY(px, c.x, pyBottom, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey)
-          : busY;
-        const detour = computeStemDetour(
-          c.x, jogY, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey, e.childIri,
-        );
-        const farPrefix = isFar ? [{ x: px, y: pyBottom }] : [];
-        forwardPoints = dedupeConsecutive([...farPrefix, { x: px, y: jogY }, { x: c.x, y: jogY }, ...detour]);
+        // Truly adjacent child (exactly one layer down): straight bus-to-child stem, no detour —
+        // nothing sits between two adjacent layers for the stem to hit, so consulting obstacle/
+        // stem detours here would only chase phantom lines (e.g. far edges routed elsewhere via
+        // dummies). Every genuinely multi-layer edge has a dummy chain (`insertDummyNodes` creates
+        // one for any gap > 1), so this branch only ever handles real one-layer edges.
+        forwardPoints = dedupeConsecutive([{ x: px, y: busY }, { x: c.x, y: busY }]);
       }
 
       if (g.kind === 'composition') {
@@ -1120,14 +1031,14 @@ function computeEdgeRoutesCore(
           sourceIri: e.parentIri, targetIri: e.childIri,
           exitX, exitY: 1, entryX: 0.5, entryY: 0,
           points: forwardPoints,
-          far: isFar,
+          far: spansMultiLayer,
         });
       } else {
         routes.set(e.id, {
           sourceIri: e.childIri, targetIri: e.parentIri,
           exitX: 0.5, exitY: 0, entryX: exitX, entryY: 1,
           points: [...forwardPoints].reverse(),
-          far: isFar,
+          far: spansMultiLayer,
         });
       }
     }

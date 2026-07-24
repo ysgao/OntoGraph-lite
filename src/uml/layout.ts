@@ -14,32 +14,26 @@ export interface LayoutPosition {
  *  (`diagramGeometry.ts` already depends on this module's output; the reverse would be a cycle). */
 export interface Position { x: number; y: number; }
 
-// Spacing along the DEPTH axis (rows in TB, columns in LR) — must clear the node's own extent
-// along that axis plus enough gap for a bus stem (`diagramGeometry.ts`'s BUS_GAP). TB's depth
-// axis is screen-vertical, so it's sized against NODE_HEIGHT (56); LR's is screen-horizontal,
-// sized against NODE_WIDTH (160) — hence the two constants differ rather than one being reused.
-const ROW_HEIGHT = 140;
+// Base spacing along the DEPTH axis (rows in TB, columns in LR) for a transition that needs only
+// ONE bus lane — must clear the node's own extent along that axis (NODE_HEIGHT 56 in TB /
+// NODE_WIDTH 160 in LR) plus twice `diagramGeometry.ts`'s BUS_GAP (42), so that a single-lane
+// transition places its bus at exactly `parentBottom + BUS_GAP` with an equal `BUS_GAP`-sized
+// final stem down to the child — i.e. it looks identical to the pre-variable-spacing layout for
+// the common shallow case. TB: 56 + 2*42 = 140; LR: 160 + 2*42 = 244, rounded up to 260 for a
+// little slack. Denser transitions grow beyond this base by `LANE_STEP` per extra lane (see
+// `flowByLayer` below) — this is what lets `diagramGeometry.ts` give every bus in a layer its own
+// distinct height, rather than the whole layer sharing a single fixed gap sized for the worst
+// case (which made shallow transitions needlessly tall and dense ones too cramped to separate).
+const BASE_ROW_HEIGHT = 140;
+const BASE_COLUMN_WIDTH = 260;
 
-// COLUMN_WIDTH is wider than the TB/ROW_HEIGHT analogy alone would suggest: it also has to leave
-// `computeBusGroupPlacements`'s bus-lane separation enough headroom to give conflicting parents in
-// one layer distinct heights, not just as many as happen to fit before a shared ceiling. LR is
-// this feature's default direction (`generateUmlDiagram.ts`), and a real, densely-fanned-out
-// layer there can have well over a dozen sibling parents (confirmed against the real
-// middle-ear-structure sample: individual layers with 12-15 parent groups and 19-38 conflicting
-// pairs). This value was raised from the original 260 in two steps (400, then 700) — each step
-// measurably reduced, but did not fully eliminate, the number of genuinely-conflicting pairs
-// still forced onto an identical height, confirmed by cross-checking each still-shared height for
-// an actual span overlap AND absence of a shared child (both must hold for it to be a real bug
-// rather than legitimate sharing). A residual handful of conflicts in the densest layers (15+
-// mutually-related groups sharing one natural bucket) persist regardless of how much headroom is
-// given — see the `MIN_FINAL_STEM`/lane-push comments in `diagramGeometry.ts` for why: those
-// specific cases are a structural limitation of the current reactive push heuristic, not a
-// capacity problem, and need a more thorough redesign (proper interval/width-aware coloring
-// across an entire layer at once) to resolve completely. Widening `ROW_HEIGHT` by the same
-// proportion was tried too, but reintroduced a real node/edge overlap elsewhere in that same
-// sample — TB isn't this feature's default direction and has no equivalent verified need, so it's
-// left unchanged rather than widened speculatively.
-const COLUMN_WIDTH = 700;
+// Extra depth-axis spacing added per bus lane beyond the first. MUST be >= `diagramGeometry.ts`'s
+// `BUS_LANE_SPREAD` (12) — that module stacks each successive same-transition bus at
+// `naturalBusY + laneIndex * BUS_LANE_SPREAD`, so the transition gap has to grow by at least that
+// much per lane or the deepest lanes would be clamped back onto the child row. Kept a touch
+// larger (14 vs 12) so the deepest lane always keeps a visible final stem with a couple of px to
+// spare, rather than landing exactly on the clamp boundary.
+const LANE_STEP = 14;
 
 // Spacing along the CROSS axis (columns of siblings in TB, rows of siblings in LR) — sized
 // against the node's extent on THAT axis instead: TB's cross axis is screen-horizontal (against
@@ -102,11 +96,28 @@ function computeInternal(
   edges: DiagramEdge[],
   direction: LayoutDirection,
 ): InternalLayoutResult {
-  const flowSpacing = direction === 'LR' ? COLUMN_WIDTH : ROW_HEIGHT;
+  const baseFlow = direction === 'LR' ? BASE_COLUMN_WIDTH : BASE_ROW_HEIGHT;
   const crossSpacing = direction === 'LR' ? SLOT_HEIGHT : SLOT_WIDTH;
   const dummyCrossSpacing = direction === 'LR' ? DUMMY_SLOT_HEIGHT : DUMMY_SLOT_WIDTH;
 
   const depthByIri = new Map(nodes.map(n => [n.iri, n.depth]));
+
+  // Bus-lane count per parent layer — the number of distinct (parent, kind) bus groups whose
+  // parent sits at that layer. Each such group is one horizontal bus that `diagramGeometry.ts`
+  // gives its own lane/height in the transition band just below the parent's layer, so this count
+  // sizes that transition's flow-gap (see `flowByLayer`). Computed from edge structure alone (no
+  // positions), and deliberately an UPPER bound on the lanes actually drawn: fan-in
+  // (`diagramGeometry.ts`) may later merge several single-child groups converging on one shared
+  // child into a single bus, which only ever REDUCES the count — so a gap sized to this always has
+  // room to spare, never too little.
+  const laneKeysByParentLayer = new Map<number, Set<string>>();
+  for (const e of edges) {
+    const parentLayer = depthByIri.get(e.parentIri);
+    if (parentLayer === undefined) { continue; }
+    let set = laneKeysByParentLayer.get(parentLayer);
+    if (!set) { set = new Set(); laneKeysByParentLayer.set(parentLayer, set); }
+    set.add(`${e.parentIri}|${e.kind}`);
+  }
 
   // A parent frequently has BOTH composition and generalization children at once (e.g. an
   // anatomical whole with a part-of breakdown AND laterality-qualified subtypes) — clustering
@@ -175,6 +186,25 @@ function computeInternal(
   for (const n of nodes) { allLayers.add(n.depth); }
   for (const d of dummies) { allLayers.add(d.layer); }
   const sortedLayers = [...allLayers].sort((a, b) => a - b);
+
+  // --- Per-transition flow coordinate (variable, lane-count-driven) ---
+  // Instead of a single fixed gap between every pair of adjacent layers, each transition's gap is
+  // sized to how many bus lanes it needs: `baseFlow` (room for one lane) plus `LANE_STEP` per
+  // extra lane. A shallow layer whose parents fan out into just one or two buses gets a small
+  // gap; a densely-fanned-out layer gets a proportionally larger one, so `diagramGeometry.ts` has
+  // room to give each of its buses a distinct height. Cumulative from the shallowest layer (which
+  // may be a negative-depth ancestor) at flow 0, so every resulting coordinate is non-negative
+  // without a separate offset pass.
+  const flowByLayer = new Map<number, number>();
+  if (sortedLayers.length > 0) {
+    flowByLayer.set(sortedLayers[0], 0);
+    for (let i = 1; i < sortedLayers.length; i++) {
+      const upperLayer = sortedLayers[i - 1];
+      const lanes = laneKeysByParentLayer.get(upperLayer)?.size ?? 0;
+      const gap = baseFlow + Math.max(0, lanes - 1) * LANE_STEP;
+      flowByLayer.set(sortedLayers[i], flowByLayer.get(upperLayer)! + gap);
+    }
+  }
 
   const layerOrder = new Map<number, string[]>();
   const placed = new Set<string>();
@@ -247,15 +277,11 @@ function computeInternal(
   }
 
   // A direct ancestor of the root is given a negative depth so it never shares a row/column with
-  // the root's own descendants — but the flow coordinate must still be non-negative (rendered as
-  // an absolute-positioned pixel offset), so shift every row/column forward by however far below
-  // zero the minimum depth's would otherwise be.
-  const minDepth = Math.min(0, ...nodes.map(n => n.depth));
-  const flowOffset = -minDepth * flowSpacing;
-
+  // the root's own descendants; `flowByLayer` already starts the shallowest (most negative) layer
+  // at flow 0, so every resulting flow coordinate is non-negative without a separate offset pass.
   const realPositions = new Map<string, LayoutPosition>();
   for (const n of nodes) {
-    const flow = n.depth * flowSpacing + flowOffset;
+    const flow = flowByLayer.get(n.depth) ?? 0;
     const crossVal = cross.get(n.iri) ?? LEFT_MARGIN;
     const pos = direction === 'LR' ? { x: flow, y: crossVal } : { x: crossVal, y: flow };
     realPositions.set(n.iri, { ...pos, depth: n.depth });
@@ -266,7 +292,7 @@ function computeInternal(
     const dummyIds = chain.slice(1, -1);
     const points = dummyIds.map((id) => {
       const layer = dummyById.get(id)!.layer;
-      const flow = layer * flowSpacing + flowOffset;
+      const flow = flowByLayer.get(layer) ?? 0;
       const crossVal = cross.get(id) ?? LEFT_MARGIN;
       return direction === 'LR' ? { x: flow, y: crossVal } : { x: crossVal, y: flow };
     });
