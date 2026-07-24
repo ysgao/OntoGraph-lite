@@ -254,6 +254,21 @@ function computeBusGroupPlacements(
     bucket.push(n);
   }
 
+  // Every pair of groups sharing a natural-height bucket is the FIRST pass's responsibility to
+  // resolve — whether it decides they conflict (assigning different lanes) or not (spans that
+  // only TOUCH, not strictly overlap — fine to share a lane/height). Either way, the second
+  // (push) pass below must not re-litigate it: re-checking a same-bucket pair there means one
+  // group's own PARENT stem trunk (which runs from the shared row all the way down to its OWN
+  // lane height) — or, worse, one group's CHILD stem, which reaches all the way to the child row,
+  // a much wider vertical band than any lane gap — nearly always still overlaps its bucket-mates'
+  // stems, since they all share the same starting row. That is a geometric artifact of sharing a
+  // row, not a real unresolved crossing: reacting to it pushes every mutually-related group in
+  // lockstep, round after round, until all collapse onto the identical shared ceiling (reported
+  // against the real middle-ear-structure sample: four different parents' bus lines all landing
+  // at the exact same height despite the lane pass having already given them distinct ones).
+  const bucketResolvedPairs = new Set<string>();
+  const pairKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
   const busYByKey = new Map<string, number>();
   for (const bucket of byNaturalBusY.values()) {
     const n = bucket.length;
@@ -261,6 +276,7 @@ function computeBusGroupPlacements(
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const a = bucket[i], b = bucket[j];
+        bucketResolvedPairs.add(pairKey(a.key, b.key));
         const sharesChild = [...a.childIris].some(c => b.childIris.has(c));
         const spansOverlap = a.minX < b.maxX && b.minX < a.maxX;
         if (!sharesChild && spansOverlap) { conflicts[i][j] = conflicts[j][i] = true; }
@@ -337,6 +353,16 @@ function computeBusGroupPlacements(
         // also share a bus" case entirely (a false-positive push between them, since converging on
         // a shared child cleanly is the intended look, not a crossing).
         && ![...(childIrisByKey.get(s.key) ?? [])].some(c => n.childIris.has(c))
+        // Exempt a same-bucket pair's CHILD stems specifically (not its parent stem) — a child
+        // stem reaches all the way down to its own row, a far wider vertical band than any
+        // lane-height gap, so for two groups that already share a row (and so share a starting
+        // point for every stem), this check otherwise treats practically any nearby lane height
+        // as "still crossing" a bucket-mate's child stem, cascading every mutually-related group
+        // in that row to the same shared ceiling (reported against the real middle-ear-structure
+        // sample). A bucket-mate's PARENT stem (or its horizontal bus) is NOT exempted here — a
+        // wide bridging bus can still genuinely need pushing clear of another bucket-mate's own
+        // parent-facing stem, which `bucketResolvedPairs`'s lane assignment alone doesn't resolve.
+        && !(s.childIri !== undefined && bucketResolvedPairs.has(pairKey(n.key, s.key)))
         && s.left < n.maxX && s.right > n.minX
         && (s.top - BUS_LANE_CLEARANCE) < busY && (s.bottom + BUS_LANE_CLEARANCE) > busY);
 

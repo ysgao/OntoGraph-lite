@@ -108,9 +108,8 @@ describe('renderDiagramFragment', () => {
 
     expect(frag.svg).toContain('stroke-dasharray="6 4"');
     // The near-child bus segment (straight line from parentB down to nearChild's row) must NOT
-    // carry the dash — only the far child's own independent path should. busY = 400 = childTopY
-    // (420) - MIN_FINAL_STEM (20).
-    const nearSegment = /<path d="M465,400 L635,400"[^>]*\/>/.exec(frag.svg);
+    // carry the dash — only the far child's own independent path should.
+    const nearSegment = /<path d="M465,390 L635,390"[^>]*\/>/.exec(frag.svg);
     expect(nearSegment?.[0]).not.toContain('stroke-dasharray');
   });
 });

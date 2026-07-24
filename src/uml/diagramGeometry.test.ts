@@ -579,10 +579,11 @@ describe('far-child (dual-relationship) bus routing', () => {
 
     // The near child is completely unaffected in KIND of routing — still a plain single-hop bus
     // reach — though its exact busY now reflects MIN_FINAL_STEM(20)'s more generous floor above
-    // its own child row (420 - 20 = 400) rather than the old BUS_LANE_CLEARANCE(6)-based ceiling
-    // (420 - 6 = 414), which left only a 6px final stem here before this fix.
+    // its own child row (well clear of the old BUS_LANE_CLEARANCE(6)-based ceiling, which left
+    // only a 6px final stem here before that fix) combined with this fixture's own bus-lane push
+    // against ostium's stem.
     expect(routes.get('parentB|nearChild|composition')!.points).toEqual([
-      { x: 465, y: 400 }, { x: 635, y: 400 },
+      { x: 465, y: 390 }, { x: 635, y: 390 },
     ]);
 
     // The far child descends straight down at parentB's OWN x (465) past ostium's incoming stem
@@ -606,13 +607,12 @@ describe('far-child (dual-relationship) bus routing', () => {
     const { pos, edges } = buildFixture();
     const segments = computeEdgeSegments(pos, edges, W, H);
 
-    const parentBSegments = segments.filter(s => s.d.includes('465,336') || s.d.includes('465,400') || s.d.includes('465,550'));
-    // Marker-carrying parent stem still exits at parentB's own x, straight down to its ordinary
-    // busY (400 = childTopY(420) - MIN_FINAL_STEM(20)).
-    expect(parentBSegments.some(s => s.marker === 'start' && s.d === 'M465,336 L465,400')).toBe(true);
+    const parentBSegments = segments.filter(s => s.d.includes('465,336') || s.d.includes('465,390') || s.d.includes('465,550'));
+    // Marker-carrying parent stem still exits at parentB's own x, straight down to its ordinary busY.
+    expect(parentBSegments.some(s => s.marker === 'start' && s.d === 'M465,336 L465,390')).toBe(true);
     // No bus line needed for a single near child (busMinX === busMaxX, both 635... wait px=465,
-    // nearChild=635, so there IS a one-child bus spanning 465-635 at busY=400).
-    expect(parentBSegments.some(s => s.d === 'M465,400 L635,400')).toBe(true);
+    // nearChild=635, so there IS a one-child bus spanning 465-635).
+    expect(parentBSegments.some(s => s.d === 'M465,390 L635,390')).toBe(true);
     // The far child's own independent path, entirely separate from the above.
     expect(parentBSegments.some(s => s.d === 'M465,336 L465,550 L295,550 L295,560')).toBe(true);
   });
@@ -624,7 +624,7 @@ describe('far-child (dual-relationship) bus routing', () => {
     const farSegment = segments.find(s => s.d === 'M465,336 L465,550 L295,550 L295,560');
     expect(farSegment?.far).toBe(true);
 
-    const nearSegments = segments.filter(s => s.d === 'M465,336 L465,400' || s.d === 'M465,400 L635,400');
+    const nearSegments = segments.filter(s => s.d === 'M465,336 L465,390' || s.d === 'M465,390 L635,390');
     expect(nearSegments.length).toBeGreaterThan(0);
     expect(nearSegments.every(s => !s.far)).toBe(true);
   });
@@ -701,5 +701,51 @@ describe('fan-in bus: 2+ distinct parents sharing one child of the same kind', (
     // parentA (whose ONLY child is the shared one) still gets its own marker independently.
     const parentAMarker = segments.filter(s => s.marker && s.d.startsWith('M100,'));
     expect(parentAMarker).toHaveLength(1);
+  });
+});
+
+describe('computeEdgeRoutes — bus-lane separation across 3+ mutually-overlapping groups in one row (regression)', () => {
+  it('gives each of four different parents a bus line that stays visually distinct from the others, rather than cascading to one shared height', () => {
+    // Mirrors the real middle-ear-structure shape (Ossicle of ear / Malleus / Stapes / Incus, all
+    // in one row): every adjacent pair's span overlaps, so the OLD round-based push loop kept
+    // pushing ALL of them in lockstep — including a pair (ossicle/incus) whose spans only TOUCH,
+    // not strictly overlap, a false "crossing" created by this loop's own obstacle margin — until
+    // every one collapsed onto the exact same clamped ceiling height.
+    const pos = positions({
+      ossicle: { x: 1060, y: 600 }, malleus: { x: 1230, y: 600 },
+      stapes: { x: 1400, y: 600 }, incus: { x: 1570, y: 600 },
+      bone_ossicle: { x: 380, y: 800 },
+      lig_malleus: { x: 550, y: 800 }, bone_malleus: { x: 720, y: 800 },
+      bone_stapes: { x: 890, y: 800 },
+      lig_incus: { x: 1060, y: 800 }, bone_incus: { x: 1230, y: 800 },
+    });
+    const edges = [
+      edge('ossicle', 'bone_ossicle', 'composition'),
+      edge('malleus', 'lig_malleus', 'composition'), edge('malleus', 'bone_malleus', 'composition'),
+      edge('stapes', 'bone_stapes', 'composition'),
+      edge('incus', 'lig_incus', 'composition'), edge('incus', 'bone_incus', 'composition'),
+    ];
+    const routes = computeEdgeRoutes(pos, edges, W, H);
+
+    const busYOf = (childIri: string): number => routes.get(edges.find(e => e.childIri === childIri)!.id)!.points[0].y;
+    const heights = {
+      ossicle: busYOf('bone_ossicle'),
+      malleus: busYOf('lig_malleus'),
+      stapes: busYOf('bone_stapes'),
+      incus: busYOf('lig_incus'),
+    };
+
+    // Malleus and Stapes each genuinely overlap EVERY other group's span (no shared child), so
+    // all three of {ossicle, malleus, stapes, incus} pairs involving either of them must land at
+    // distinct heights. Ossicle and Incus's spans only TOUCH at one point (not a strict overlap),
+    // so it's fine — expected, even — for them to share a height; that's not a visual collision.
+    expect(heights.malleus).not.toBe(heights.ossicle);
+    expect(heights.malleus).not.toBe(heights.stapes);
+    expect(heights.malleus).not.toBe(heights.incus);
+    expect(heights.stapes).not.toBe(heights.ossicle);
+    expect(heights.stapes).not.toBe(heights.incus);
+
+    // None of them collapsed onto the shared ceiling (childTopY(800) - MIN_FINAL_STEM(20) = 780).
+    for (const y of Object.values(heights)) { expect(y).toBeLessThan(780); }
   });
 });
