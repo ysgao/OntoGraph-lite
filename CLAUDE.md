@@ -262,5 +262,5 @@ Full detail for each lives under `specs/<id>/` (spec.md/plan.md/tasks.md) — en
 - In-memory only — `Map<entityIri, EntityEditHistory>` on the extension host; no persistence (014-entity-editor-undo-redo)
 
 <!-- SPECKIT START -->
-Plan: specs/030-sync-labels-in-axioms/plan.md
+Plan: specs/031-layered-graph-layout/plan.md
 <!-- SPECKIT END -->
