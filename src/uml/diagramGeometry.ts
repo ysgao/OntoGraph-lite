@@ -466,6 +466,59 @@ function collectStemObstacles(
   return obstacles;
 }
 
+/** One parent contributing to a fan-in bus (see `computeFanInGroups`) — its own exit x (after
+ *  `PARENT_STEM_SPREAD`, same as a fan-out group's `px`) and bottom edge. `edgeId` is populated
+ *  only by `computeEdgeRoutesCore` (which needs it to key its per-edge `EdgeRoute` map);
+ *  `computeEdgeSegmentsCore` has no per-edge output to key, so it's left undefined there. */
+interface FanInParent { parentIri: string; px: number; pyBottom: number; edgeId?: string; }
+
+/** A shared child reached by 2+ DISTINCT parents of the SAME kind, each via an edge that is that
+ *  parent's ONLY near child (see `computeFanInGroups`'s doc comment for why single-near-child
+ *  groups specifically). */
+interface FanInGroup { childIri: string; kind: 'composition' | 'generalization'; parents: FanInParent[]; busY: number; }
+
+/**
+ * Groups "single near child" bus groups (candidates) by their shared child + kind, keeping only
+ * groups with 2+ DISTINCT parents — i.e. a node genuinely reachable from multiple parents of the
+ * SAME relationship kind (multiple wholes sharing one part, or multiple supertypes for one
+ * subtype/multiple inheritance), not merely the common case of one parent with one child.
+ *
+ * Scoped deliberately to candidates whose OWN bus group has no OTHER near child: a parent that
+ * has both the shared child AND its own exclusive children keeps its existing fan-OUT bus
+ * unchanged (its edge to the shared child renders as part of that bus, same as before) rather
+ * than attempting to split one parent's rendering across two different bus shapes at once.
+ *
+ * Without this, two (or more) different parents converging on one child were previously rendered
+ * as entirely independent paths that merely happened to end at the same point — visually
+ * coincidental, not a deliberate shared bus, and NOT visually merged at all unless their exit
+ * x-positions happened to line up (e.g. only worked for the root's own direct ancestors, which
+ * `layout.ts` centers on the root's x by construction).
+ */
+function computeFanInGroups(
+  candidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number; edgeId?: string }>,
+  positions: Map<string, Position>,
+): Map<string, FanInGroup> {
+  const byKey = new Map<string, FanInParent[]>();
+  const meta = new Map<string, { childIri: string; kind: 'composition' | 'generalization' }>();
+  for (const c of candidates) {
+    const key = `${c.childIri}|${c.kind}`;
+    let list = byKey.get(key);
+    if (!list) { list = []; byKey.set(key, list); meta.set(key, { childIri: c.childIri, kind: c.kind }); }
+    list.push({ parentIri: c.parentIri, px: c.px, pyBottom: c.pyBottom, edgeId: c.edgeId });
+  }
+
+  const groups = new Map<string, FanInGroup>();
+  for (const [key, parents] of byKey) {
+    const distinctParents = new Set(parents.map(p => p.parentIri));
+    if (distinctParents.size < 2) { continue; }
+    const { childIri, kind } = meta.get(key)!;
+    const childY = positions.get(childIri)!.y;
+    const maxPyBottom = Math.max(...parents.map(p => p.pyBottom));
+    groups.set(key, { childIri, kind, parents, busY: busYFor(maxPyBottom, childY) });
+  }
+  return groups;
+}
+
 /** Safety bound on `computeStemDetour`'s widening loop — generous enough to escape a genuinely
  *  dense cluster of sibling obstacles (each round can surface at most one previously-undiscovered
  *  obstacle, so a tightly packed row of several classes can legitimately need more than a
@@ -749,6 +802,25 @@ function computeEdgeSegmentsCore(
   const placements = computeBusGroupPlacements(groupList, positions, nodeHeight);
   const stemObstacles = collectStemObstacles(groupList, placements, positions, nodeHeight);
 
+  // Fan-in bus discovery (spec: "only share a bus when nodes have the same target and same edge
+  // kind") — see `computeFanInGroups`'s doc comment for the single-near-child scoping rationale.
+  const fanInCandidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number }> = [];
+  for (const [groupKey, g] of busGroups) {
+    const minChildY = Math.min(...g.childIris.map(c => positions.get(c)!.y));
+    const nearChildIris = g.childIris.filter(c => positions.get(c)!.y === minChildY);
+    if (nearChildIris.length === 1) {
+      fanInCandidates.push({
+        parentIri: g.parentIri, childIri: nearChildIris[0], kind: g.kind,
+        px: placements.get(groupKey)!.px, pyBottom: positions.get(g.parentIri)!.y + nodeHeight,
+      });
+    }
+  }
+  const fanInGroups = computeFanInGroups(fanInCandidates, positions);
+  const fanInConsumed = new Set<string>();
+  for (const group of fanInGroups.values()) {
+    for (const p of group.parents) { fanInConsumed.add(`${p.parentIri}|${group.childIri}|${group.kind}`); }
+  }
+
   for (const [groupKey, g] of busGroups) {
     const { px, busY } = placements.get(groupKey)!;
     const pyBottom = positions.get(g.parentIri)!.y + nodeHeight;
@@ -760,23 +832,36 @@ function computeEdgeSegmentsCore(
     // sweep at the ordinary busY height can cross a same-row sibling's own incoming stem sitting
     // directly below the parent (reported against real anatomy.owl). A near child's rendering
     // (bus line, marker) is completely unaffected — only the group's own x-span narrows to just
-    // its near children.
+    // its near children. A near child already claimed by a fan-in group (this parent's ONLY near
+    // child, shared with another parent of the same kind) is excluded too — it renders once,
+    // below, as part of that fan-in bus instead of this fan-out one.
     const minChildY = Math.min(...g.childIris.map(c => positions.get(c)!.y));
-    const nearChildIris = g.childIris.filter(c => positions.get(c)!.y === minChildY);
+    const nearChildIris = g.childIris.filter(c => positions.get(c)!.y === minChildY
+      && !fanInConsumed.has(`${g.parentIri}|${c}|${g.kind}`));
     const farChildIris = g.childIris.filter(c => positions.get(c)!.y !== minChildY);
 
-    const xs = nearChildIris.map(c => positions.get(c)!.x);
-    const busMinX = Math.min(px, ...xs);
-    const busMaxX = Math.max(px, ...xs);
+    if (nearChildIris.length === 0 && farChildIris.length === 0) { continue; }
 
-    segments.push(
-      g.kind === 'composition'
-        ? { d: `M${px},${pyBottom} L${px},${busY}`, kind: 'composition', marker: 'start' }
-        : { d: `M${px},${busY} L${px},${pyBottom}`, kind: 'generalization', marker: 'end' },
-    );
+    // The parent-facing marker normally lives on the near-bus stem below — but if THIS parent's
+    // only near child was claimed by a fan-in group, there's no near-bus stem left to carry it,
+    // so it's placed on the first far child's own path instead (still exactly one marker per
+    // parent, per the existing "marker only on the parent-facing segment" convention).
+    const markerOnFirstFarChild = nearChildIris.length === 0 && farChildIris.length > 0;
 
-    if (busMinX !== busMaxX) {
-      segments.push({ d: `M${busMinX},${busY} L${busMaxX},${busY}`, kind: g.kind });
+    if (nearChildIris.length > 0) {
+      const xs = nearChildIris.map(c => positions.get(c)!.x);
+      const busMinX = Math.min(px, ...xs);
+      const busMaxX = Math.max(px, ...xs);
+
+      segments.push(
+        g.kind === 'composition'
+          ? { d: `M${px},${pyBottom} L${px},${busY}`, kind: 'composition', marker: 'start' }
+          : { d: `M${px},${busY} L${px},${pyBottom}`, kind: 'generalization', marker: 'end' },
+      );
+
+      if (busMinX !== busMaxX) {
+        segments.push({ d: `M${busMinX},${busY} L${busMaxX},${busY}`, kind: g.kind });
+      }
     }
 
     for (const childIri of nearChildIris) {
@@ -788,7 +873,7 @@ function computeEdgeSegmentsCore(
       segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind });
     }
 
-    for (const childIri of farChildIris) {
+    farChildIris.forEach((childIri, farIndex) => {
       const c = positions.get(childIri)!;
       const edgeId = g.edgeIdByChild.get(childIri);
       const dummyPoints = edgeId ? farEdgeRoutes?.get(edgeId) : undefined;
@@ -811,8 +896,31 @@ function computeEdgeSegmentsCore(
         );
         points = [{ x: px, y: pyBottom }, { x: px, y: safeJogY }, { x: c.x, y: safeJogY }, ...detour, { x: c.x, y: c.y }];
       }
-      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true });
+      const marker = (markerOnFirstFarChild && farIndex === 0)
+        ? (g.kind === 'composition' ? 'start' : 'end')
+        : undefined;
+      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true, marker });
+    });
+  }
+
+  // Fan-in buses: 2+ distinct parents converging on one shared child of the same kind — each
+  // parent's own stem (marked) into a shared bus, then one unmarked stem into the child.
+  for (const group of fanInGroups.values()) {
+    const childPos = positions.get(group.childIri)!;
+    for (const parent of group.parents) {
+      segments.push(
+        group.kind === 'composition'
+          ? { d: `M${parent.px},${parent.pyBottom} L${parent.px},${group.busY}`, kind: 'composition', marker: 'start' }
+          : { d: `M${parent.px},${group.busY} L${parent.px},${parent.pyBottom}`, kind: 'generalization', marker: 'end' },
+      );
     }
+    const xs = group.parents.map(p => p.px);
+    const busMinX = Math.min(childPos.x, ...xs);
+    const busMaxX = Math.max(childPos.x, ...xs);
+    if (busMinX !== busMaxX) {
+      segments.push({ d: `M${busMinX},${group.busY} L${busMaxX},${group.busY}`, kind: group.kind });
+    }
+    segments.push({ d: `M${childPos.x},${group.busY} L${childPos.x},${childPos.y}`, kind: group.kind });
   }
 
   for (const e of offAxis) {
@@ -925,6 +1033,26 @@ function computeEdgeRoutesCore(
   const placements = computeBusGroupPlacements(groupSpecs, positions, nodeHeight);
   const stemObstacles = collectStemObstacles(groupSpecs, placements, positions, nodeHeight);
 
+  // Fan-in bus discovery — see `computeFanInGroups`'s doc comment; mirrors
+  // `computeEdgeSegmentsCore`'s identical pass.
+  const fanInCandidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number; edgeId?: string }> = [];
+  for (const [groupKey, g] of busGroups) {
+    const minChildY = Math.min(...g.groupEdges.map(e => positions.get(e.childIri)!.y));
+    const nearEdges = g.groupEdges.filter(e => positions.get(e.childIri)!.y === minChildY);
+    if (nearEdges.length === 1) {
+      fanInCandidates.push({
+        parentIri: g.parentIri, childIri: nearEdges[0].childIri, kind: g.kind,
+        px: placements.get(groupKey)!.px, pyBottom: positions.get(g.parentIri)!.y + nodeHeight,
+        edgeId: nearEdges[0].id,
+      });
+    }
+  }
+  const fanInGroups = computeFanInGroups(fanInCandidates, positions);
+  const fanInConsumed = new Set<string>();
+  for (const group of fanInGroups.values()) {
+    for (const p of group.parents) { fanInConsumed.add(`${p.parentIri}|${group.childIri}|${group.kind}`); }
+  }
+
   for (const [groupKey, g] of busGroups) {
     const parentPos = positions.get(g.parentIri)!;
     const { px, busY } = placements.get(groupKey)!;
@@ -938,6 +1066,7 @@ function computeEdgeRoutesCore(
     const minChildY = Math.min(...g.groupEdges.map(e => positions.get(e.childIri)!.y));
 
     for (const e of g.groupEdges) {
+      if (fanInConsumed.has(`${g.parentIri}|${e.childIri}|${g.kind}`)) { continue; } // rendered below, as part of its fan-in group instead
       const c = positions.get(e.childIri)!;
       const isFar = c.y !== minChildY;
       const dummyPoints = isFar ? farEdgeRoutes?.get(e.id) : undefined;
@@ -973,6 +1102,33 @@ function computeEdgeRoutesCore(
           exitX: 0.5, exitY: 0, entryX: exitX, entryY: 1,
           points: [...forwardPoints].reverse(),
           far: isFar,
+        });
+      }
+    }
+  }
+
+  // Fan-in buses: 2+ distinct parents converging on one shared child of the same kind — mirrors
+  // `computeEdgeSegmentsCore`'s identical rendering, one `EdgeRoute` per contributing parent edge.
+  for (const group of fanInGroups.values()) {
+    const childPos = positions.get(group.childIri)!;
+    for (const parent of group.parents) {
+      if (!parent.edgeId) { continue; } // defensive: always populated by the candidate pass above
+      const parentPos = positions.get(parent.parentIri)!;
+      const parentExitX = 0.5 + (parent.px - parentPos.x) / nodeWidth;
+      const forwardPoints = dedupeConsecutive([{ x: parent.px, y: group.busY }, { x: childPos.x, y: group.busY }]);
+      if (group.kind === 'composition') {
+        routes.set(parent.edgeId, {
+          sourceIri: parent.parentIri, targetIri: group.childIri,
+          exitX: parentExitX, exitY: 1, entryX: 0.5, entryY: 0,
+          points: forwardPoints,
+          far: false,
+        });
+      } else {
+        routes.set(parent.edgeId, {
+          sourceIri: group.childIri, targetIri: parent.parentIri,
+          exitX: 0.5, exitY: 0, entryX: parentExitX, entryY: 1,
+          points: [...forwardPoints].reverse(),
+          far: false,
         });
       }
     }

@@ -629,3 +629,77 @@ describe('far-child (dual-relationship) bus routing', () => {
     expect(nearSegments.every(s => !s.far)).toBe(true);
   });
 });
+
+describe('fan-in bus: 2+ distinct parents sharing one child of the same kind', () => {
+  it('computeEdgeSegments: renders one shared bus (each parent marked, one unmarked final stem into the child) instead of independent coincidental paths', () => {
+    const pos = positions({
+      parentA: { x: 100, y: 0 },
+      parentB: { x: 400, y: 0 },
+      shared: { x: 250, y: 140 },
+    });
+    const edges = [
+      edge('parentA', 'shared', 'composition'),
+      edge('parentB', 'shared', 'composition'),
+    ];
+    const segments = computeEdgeSegments(pos, edges, W, H);
+
+    // Exactly two marker-carrying segments — one per parent, each a diamond (composition, marker
+    // 'start') since each parent is its own "whole" contributing to the shared part.
+    const markered = segments.filter(s => s.marker);
+    expect(markered).toHaveLength(2);
+    expect(markered.every(s => s.marker === 'start' && s.kind === 'composition')).toBe(true);
+    expect(markered.some(s => s.d === 'M100,56 L100,98')).toBe(true); // parentA's own stem
+    expect(markered.some(s => s.d === 'M400,56 L400,98')).toBe(true); // parentB's own stem
+
+    // One shared horizontal bus line spanning both parents' x (and the child's, if outside that
+    // range) at the shared busY.
+    expect(segments.some(s => !s.marker && s.d === 'M100,98 L400,98')).toBe(true);
+
+    // Exactly one final, UNMARKED stem into the shared child — not one per parent.
+    const finalStems = segments.filter(s => s.d === 'M250,98 L250,140');
+    expect(finalStems).toHaveLength(1);
+    expect(finalStems[0].marker).toBeUndefined();
+  });
+
+  it('computeEdgeSegments: does NOT fan-in when the two parents use DIFFERENT edge kinds (dual relationship, still independent)', () => {
+    const pos = positions({
+      bone: { x: 100, y: 0 },
+      whole: { x: 400, y: 0 },
+      dual: { x: 250, y: 140 },
+    });
+    const edges = [
+      edge('bone', 'dual', 'generalization'),
+      edge('whole', 'dual', 'composition'),
+    ];
+    const segments = computeEdgeSegments(pos, edges, W, H);
+
+    // Both parents still get their own independent marker — no shared bus is forced across
+    // different kinds; each kind keeps its own separate group (matching pre-existing FR-011
+    // dual-relationship behavior, which this feature doesn't change).
+    const markered = segments.filter(s => s.marker);
+    expect(markered).toHaveLength(2);
+    expect(markered.map(s => s.kind).sort()).toEqual(['composition', 'generalization']);
+  });
+
+  it('computeEdgeSegments: does NOT fan-in a parent that has OTHER exclusive children besides the shared one (mixed fan-out/fan-in stays fan-out)', () => {
+    const pos = positions({
+      parentA: { x: 100, y: 0 },
+      parentB: { x: 400, y: 0 }, // has an exclusive child too — keeps its normal fan-out bus
+      exclusiveChild: { x: 550, y: 140 },
+      shared: { x: 250, y: 140 },
+    });
+    const edges = [
+      edge('parentA', 'shared', 'composition'),
+      edge('parentB', 'shared', 'composition'),
+      edge('parentB', 'exclusiveChild', 'composition'),
+    ];
+    const segments = computeEdgeSegments(pos, edges, W, H);
+
+    // parentB keeps exactly one marker (its own fan-out bus, now spanning shared+exclusiveChild).
+    const parentBMarker = segments.filter(s => s.marker && s.d.startsWith('M400,'));
+    expect(parentBMarker).toHaveLength(1);
+    // parentA (whose ONLY child is the shared one) still gets its own marker independently.
+    const parentAMarker = segments.filter(s => s.marker && s.d.startsWith('M100,'));
+    expect(parentAMarker).toHaveLength(1);
+  });
+});
