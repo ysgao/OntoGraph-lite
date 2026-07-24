@@ -21,21 +21,25 @@ export interface Position { x: number; y: number; }
 const ROW_HEIGHT = 140;
 
 // COLUMN_WIDTH is wider than the TB/ROW_HEIGHT analogy alone would suggest: it also has to leave
-// `computeBusGroupPlacements`'s bus-lane separation enough headroom to give EVERY
-// genuinely-conflicting pair of parents in one layer its own distinct height, not just as many as
-// happen to fit before a shared ceiling. LR is this feature's default direction
-// (`generateUmlDiagram.ts`), and a real, densely-fanned-out layer there can have well over a
-// dozen sibling parents (confirmed against the real middle-ear-structure sample: 14 parent
-// groups, 19 conflicting pairs) — at the old spacing (gap 100), only ~3 distinct lane heights fit
-// before the `MIN_FINAL_STEM` ceiling, so 3 GENUINELY unrelated parent pairs (different targets,
-// no shared child) still landed at the identical bus height, reading as one merged line. This
-// wider gap gives ~14 lanes of headroom, verified as enough to resolve every genuine conflict in
-// that same sample down to zero, leaving only LEGITIMATE height-sharing (non-overlapping spans,
-// or a genuinely shared child). Widening `ROW_HEIGHT` by the same proportion was tried too, but
-// reintroduced a real node/edge overlap elsewhere in that same sample — TB isn't this feature's
-// default direction and has no equivalent verified need, so it's left unchanged rather than
-// widened speculatively.
-const COLUMN_WIDTH = 400;
+// `computeBusGroupPlacements`'s bus-lane separation enough headroom to give conflicting parents in
+// one layer distinct heights, not just as many as happen to fit before a shared ceiling. LR is
+// this feature's default direction (`generateUmlDiagram.ts`), and a real, densely-fanned-out
+// layer there can have well over a dozen sibling parents (confirmed against the real
+// middle-ear-structure sample: individual layers with 12-15 parent groups and 19-38 conflicting
+// pairs). This value was raised from the original 260 in two steps (400, then 700) — each step
+// measurably reduced, but did not fully eliminate, the number of genuinely-conflicting pairs
+// still forced onto an identical height, confirmed by cross-checking each still-shared height for
+// an actual span overlap AND absence of a shared child (both must hold for it to be a real bug
+// rather than legitimate sharing). A residual handful of conflicts in the densest layers (15+
+// mutually-related groups sharing one natural bucket) persist regardless of how much headroom is
+// given — see the `MIN_FINAL_STEM`/lane-push comments in `diagramGeometry.ts` for why: those
+// specific cases are a structural limitation of the current reactive push heuristic, not a
+// capacity problem, and need a more thorough redesign (proper interval/width-aware coloring
+// across an entire layer at once) to resolve completely. Widening `ROW_HEIGHT` by the same
+// proportion was tried too, but reintroduced a real node/edge overlap elsewhere in that same
+// sample — TB isn't this feature's default direction and has no equivalent verified need, so it's
+// left unchanged rather than widened speculatively.
+const COLUMN_WIDTH = 700;
 
 // Spacing along the CROSS axis (columns of siblings in TB, rows of siblings in LR) — sized
 // against the node's extent on THAT axis instead: TB's cross axis is screen-horizontal (against
