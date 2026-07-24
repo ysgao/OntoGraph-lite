@@ -84,7 +84,16 @@ helper.
   (1-2 level) fixtures already used by `layout.test.ts` — expected to already pass; (b) the T001
   deep multi-parent fixture — expected to FAIL against the current implementation; (c) the
   middle-ear-structure extraction from `middleEarRegression.test.ts` (guarded by the same
-  `anatomy.owl`-presence skip)
+  `anatomy.owl`-presence skip). Also add, in `layout.test.ts`: (d) a case with 2+ direct ancestors
+  of the root (`depth < 0`) asserting they remain centered/symmetric about the root's cross
+  position after this feature's changes (regression for `layout.ts:162-175`'s existing behavior);
+  (e) a case with a node unreachable from root via any parent→child edge asserting it still
+  receives a valid, non-overlapping slot rather than being dropped (regression for FR-007 and
+  `layout.ts:177-184`'s existing fallback; both (d) and (e) should already pass against the
+  current implementation and must keep passing after T007); (f) a determinism case (mirroring the
+  existing pattern in `partOfGraph.test.ts:195`/`branchColors.test.ts:46` for spec SC-003): two
+  consecutive `computeLayout()` calls with identical `nodes`/`edges`/`direction` produce deep-equal
+  output (spec FR-009) — should already pass and must keep passing after T007/T013
 
 ### Implementation for User Story 1
 
@@ -94,7 +103,10 @@ helper.
   sufficient here — US2 replaces it), and `assignLayerCoordinates` (T005) for final cross-axis
   positions. `computeLayout()`'s external signature and return type (`Map<string,
   LayoutPosition>`, keyed by real node IRI only) are unchanged, per
-  `contracts/layout-module-contract.md`
+  `contracts/layout-module-contract.md`. This range also contains two sub-behaviors that MUST be
+  preserved (either carried over as-is or intentionally reimplemented in the new coordinate step —
+  not silently dropped), each verified by T006(d)/(e): direct-ancestor centering-on-root
+  (`layout.ts:162-175`) and the unreachable-node fallback slot (`layout.ts:177-184`, spec FR-007).
 - [ ] T008 [US1] Implement per-edge route resolution (e.g. `resolveEdgeRoutes`) in `src/uml/layout.ts`
   that converts each edge's dummy-node chain plus T007's assigned coordinates into an ordered
   `Position[]` point list keyed by `edge.id` (the Edge Route entity in `data-model.md`)
@@ -109,7 +121,11 @@ helper.
   behavior instead (no case should be silently deleted — each either still applies or is replaced
   by an equivalent new assertion)
 - [ ] T011 [US1] Run T006 plus the full `src/uml` test suite (`npm test -- src/uml`); confirm every
-  test passes, including zero overlaps on the deep multi-parent and middle-ear fixtures
+  test passes, including zero overlaps on the deep multi-parent and middle-ear fixtures. Also add
+  a lightweight timing assertion (mirroring `partOfGraph.bench.test.ts`'s `Date.now()`-based
+  pattern) for `computeLayout()` at a diagram size representative of this feature's Scale/Scope
+  (tens to low hundreds of nodes/edges), asserting it completes well within the existing 5s/3s
+  interactive-use budgets from `026` (spec FR-010)
 
 **Checkpoint**: User Story 1 complete — diagrams at any depth have zero node/edge overlaps,
 independently demoable via `quickstart.md`.
@@ -196,7 +212,9 @@ positions and connector routing across all of them.
   errors and no coverage regression, per CLAUDE.md's quality gates
 - [ ] T023 Execute `quickstart.md`'s manual verification steps in the Extension Development Host
   (F5) — regenerate the middle-ear-structure diagram, export to draw.io/SVG/PNG, visually confirm
-  no overlaps and reduced crossings versus `uml-diagram-cli-plan/Middle-ear-structure-uml.drawio`
+  no overlaps and reduced crossings versus `uml-diagram-cli-plan/Middle-ear-structure-uml.drawio`;
+  also walk through the T001 synthetic deep multi-parent fixture (or another 4+ level sample) as
+  the "at least one other multi-level sample" spec SC-003 requires alongside the middle-ear sample
 
 ---
 

@@ -7,7 +7,7 @@ shape**; `DiagramNode.x`/`DiagramNode.y` still carry a single final pixel positi
 and renderers still consume per-edge point lists as they do today. The entities below are new,
 internal-only constructs introduced to compute those same final values correctly.
 
-## Layer (existing, reused as-is)
+## Layer (spec.md's "Hierarchy Level"; existing, reused as-is)
 
 An integer assigned to every real node, equal to its longest-path distance from the diagram root
 (`src/uml/depthNormalization.ts`'s `renumberDepthsLongestPath`, unchanged by this feature).
