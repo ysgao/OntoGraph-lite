@@ -19,7 +19,23 @@ export interface Position { x: number; y: number; }
 // axis is screen-vertical, so it's sized against NODE_HEIGHT (56); LR's is screen-horizontal,
 // sized against NODE_WIDTH (160) — hence the two constants differ rather than one being reused.
 const ROW_HEIGHT = 140;
-const COLUMN_WIDTH = 260;
+
+// COLUMN_WIDTH is wider than the TB/ROW_HEIGHT analogy alone would suggest: it also has to leave
+// `computeBusGroupPlacements`'s bus-lane separation enough headroom to give EVERY
+// genuinely-conflicting pair of parents in one layer its own distinct height, not just as many as
+// happen to fit before a shared ceiling. LR is this feature's default direction
+// (`generateUmlDiagram.ts`), and a real, densely-fanned-out layer there can have well over a
+// dozen sibling parents (confirmed against the real middle-ear-structure sample: 14 parent
+// groups, 19 conflicting pairs) — at the old spacing (gap 100), only ~3 distinct lane heights fit
+// before the `MIN_FINAL_STEM` ceiling, so 3 GENUINELY unrelated parent pairs (different targets,
+// no shared child) still landed at the identical bus height, reading as one merged line. This
+// wider gap gives ~14 lanes of headroom, verified as enough to resolve every genuine conflict in
+// that same sample down to zero, leaving only LEGITIMATE height-sharing (non-overlapping spans,
+// or a genuinely shared child). Widening `ROW_HEIGHT` by the same proportion was tried too, but
+// reintroduced a real node/edge overlap elsewhere in that same sample — TB isn't this feature's
+// default direction and has no equivalent verified need, so it's left unchanged rather than
+// widened speculatively.
+const COLUMN_WIDTH = 400;
 
 // Spacing along the CROSS axis (columns of siblings in TB, rows of siblings in LR) — sized
 // against the node's extent on THAT axis instead: TB's cross axis is screen-horizontal (against
