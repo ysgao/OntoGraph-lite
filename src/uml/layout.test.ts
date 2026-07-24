@@ -40,9 +40,14 @@ describe('computeLayout', () => {
     // get distinct x slots; childB (no children) is also a leaf slot.
     expect(layout.get('childA')!.x).not.toBe(layout.get('childB')!.x);
 
-    // Root's x is the average of its direct children's x (post-order tidy-tree rule)
-    const expectedRootX = (layout.get('childA')!.x + layout.get('childB')!.x) / 2;
-    expect(layout.get('root')!.x).toBeCloseTo(expectedRootX);
+    // Root's x is no longer the average of its children (that was the old tidy-tree rule,
+    // replaced by per-layer cumulative-sum placement — LayeredGraphAlgorithm.md §4): each layer
+    // is positioned independently, so root (alone in its own layer) simply falls within its
+    // children's overall cross-axis span rather than sitting at their exact arithmetic mean.
+    const childAX = layout.get('childA')!.x;
+    const childBX = layout.get('childB')!.x;
+    expect(layout.get('root')!.x).toBeGreaterThanOrEqual(Math.min(childAX, childBX));
+    expect(layout.get('root')!.x).toBeLessThanOrEqual(Math.max(childAX, childBX));
 
     // childA's x equals its only child's x (single-child average = that child's x)
     expect(layout.get('childA')!.x).toBeCloseTo(layout.get('grandchild')!.x);
@@ -204,6 +209,44 @@ describe('computeLayout', () => {
     });
   });
 
+  describe('unreachable-node fallback (spec FR-007)', () => {
+    it('still places a node with no parent->child edge reaching it, rather than dropping it', () => {
+      // 'orphan' has the same depth as childA/childB but no edge points to it at all — it must
+      // still receive a valid, non-overlapping cross-axis slot (the pre-existing fallback this
+      // rewrite's T007 was required to preserve, not silently drop).
+      const nodes = [
+        node('root', 0, true),
+        node('childA', 1), node('childB', 1), node('orphan', 1),
+      ];
+      const edges = [edge('root', 'childA'), edge('root', 'childB')];
+
+      const layout = computeLayout(nodes, edges);
+
+      expect(layout.get('orphan')).toBeDefined();
+      const xs = [layout.get('childA')!.x, layout.get('childB')!.x, layout.get('orphan')!.x];
+      const sorted = [...xs].sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i++) {
+        expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(170 - 1e-6); // SLOT_WIDTH
+      }
+    });
+  });
+
+  describe('determinism (spec FR-009)', () => {
+    it('produces deep-equal output across two consecutive calls with identical input', () => {
+      const nodes = [
+        node('root', 0, true),
+        node('a', 1), node('b', 1),
+        node('shared', 2),
+      ];
+      const edges = [edge('root', 'a'), edge('root', 'b'), edge('a', 'shared'), edge('b', 'shared')];
+
+      const first = computeLayout(nodes, edges);
+      const second = computeLayout(nodes, edges);
+
+      expect(second).toEqual(first);
+    });
+  });
+
   describe('same-depth collision avoidance (internal-node overlap)', () => {
     // Only leaves get a guaranteed-unique, separated slot via the nextSlot counter — an internal
     // node's cross is a bare average of its children with no collision check. A shared child
@@ -300,8 +343,12 @@ describe('computeLayout', () => {
 
       // Siblings are distinguished by y (not x) now.
       expect(layout.get('childA')!.y).not.toBe(layout.get('childB')!.y);
-      const expectedRootY = (layout.get('childA')!.y + layout.get('childB')!.y) / 2;
-      expect(layout.get('root')!.y).toBeCloseTo(expectedRootY);
+      // Root (alone in its own layer) falls within its children's overall cross-axis span rather
+      // than at their exact arithmetic mean — see the matching TB case above for why.
+      const childAY = layout.get('childA')!.y;
+      const childBY = layout.get('childB')!.y;
+      expect(layout.get('root')!.y).toBeGreaterThanOrEqual(Math.min(childAY, childBY));
+      expect(layout.get('root')!.y).toBeLessThanOrEqual(Math.max(childAY, childBY));
     });
 
     it('defaults to TB when direction is omitted (backward compatible)', () => {

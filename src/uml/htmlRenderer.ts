@@ -2,6 +2,7 @@ import type { DiagramNode, DiagramEdge, ExcludedRelation, LayoutDirection } from
 import { computeEdgeSegments, boxRect } from './diagramGeometry';
 import { computeBranchColors } from './branchColors';
 import type { NodeColor } from './branchColors';
+import { computeFarEdgeRoutes } from './layout';
 
 const ROOT_COLOR: NodeColor = { fill: '#CFE8FA', stroke: '#1F6FA0', font: '#1F6FA0' };
 const DEFAULT_COLOR: NodeColor = { fill: '#DDE6EA', stroke: '#4C6B7A', font: '#4C6B7A' };
@@ -92,7 +93,8 @@ export function renderDiagramFragment(
   direction: LayoutDirection = 'TB',
 ): DiagramFragment {
   const positions = new Map(nodes.map(n => [n.iri, { x: n.x ?? 0, y: n.y ?? 0 }]));
-  const segments = computeEdgeSegments(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction);
+  const farEdgeRoutes = computeFarEdgeRoutes(nodes, edges, direction);
+  const segments = computeEdgeSegments(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction, farEdgeRoutes);
   const branchColors = computeBranchColors(nodes, edges);
 
   const paths = segments.map(seg => {
@@ -160,7 +162,8 @@ export function renderStandaloneSvg(
 ): string {
   void excludedRelations;
   const positions = new Map(nodes.map(n => [n.iri, { x: n.x ?? 0, y: n.y ?? 0 }]));
-  const segments = computeEdgeSegments(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction);
+  const farEdgeRoutes = computeFarEdgeRoutes(nodes, edges, direction);
+  const segments = computeEdgeSegments(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction, farEdgeRoutes);
   const branchColors = computeBranchColors(nodes, edges);
 
   const paths = segments.map(seg => {

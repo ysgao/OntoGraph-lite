@@ -3,6 +3,7 @@ import { pickConnectionFractions, computeEdgeRoutes, boxRect } from './diagramGe
 import type { Position, ConnectionFractions, EdgeRoute } from './diagramGeometry';
 import { computeBranchColors } from './branchColors';
 import type { NodeColor } from './branchColors';
+import { computeFarEdgeRoutes } from './layout';
 
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 56;
@@ -110,7 +111,8 @@ export function renderDrawio(
   }
 
   const positions = new Map(nodes.map(n => [n.iri, { x: n.x ?? 0, y: n.y ?? 0 }]));
-  const routes = computeEdgeRoutes(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction);
+  const farEdgeRoutes = computeFarEdgeRoutes(nodes, edges, direction);
+  const routes = computeEdgeRoutes(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction, farEdgeRoutes);
   let eid = 1000;
   for (const e of edges) {
     const route = routes.get(e.id);

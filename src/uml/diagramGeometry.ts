@@ -355,6 +355,31 @@ function dedupeConsecutive(points: Position[]): Position[] {
   return points.filter((p, i) => i === 0 || p.x !== points[i - 1].x || p.y !== points[i - 1].y);
 }
 
+/**
+ * Expands a raw waypoint chain (anchor -> dummy positions -> anchor, `src/uml/layout.ts`'s
+ * `computeFarEdgeRoutes`) into a fully elbowed polyline: between any two consecutive points that
+ * differ on BOTH axes, jogs through the midpoint y between them (`LayeredGraphAlgorithm.md` §5)
+ * rather than a diagonal — that midpoint band is always empty since a dummy (or real node)
+ * occupies only its own reserved slot at its own row, never the gap between rows. Used for a
+ * multi-layer ("far") edge in place of the reactive `computeSafeJogY`/`computeStemDetour` search:
+ * the dummy positions already reserve real, guaranteed-clear space at every intermediate layer, so
+ * no obstacle search is needed at all.
+ */
+function elbowExpand(waypoints: Position[]): Position[] {
+  if (waypoints.length === 0) { return []; }
+  const out: Position[] = [waypoints[0]];
+  for (let i = 1; i < waypoints.length; i++) {
+    const prev = waypoints[i - 1];
+    const next = waypoints[i];
+    if (prev.x !== next.x && prev.y !== next.y) {
+      const midY = (prev.y + next.y) / 2;
+      out.push({ x: prev.x, y: midY }, { x: next.x, y: midY });
+    }
+    out.push(next);
+  }
+  return dedupeConsecutive(out);
+}
+
 /** Clearance (px) kept between a detoured stem and the obstacle box it routes around. */
 const OBSTACLE_CLEARANCE = 10;
 
@@ -661,13 +686,16 @@ export function computeEdgeSegments(
   nodeWidth: number,
   nodeHeight: number,
   direction: LayoutDirection = 'TB',
+  farEdgeRoutes?: Map<string, Position[]>,
 ): RenderedSegment[] {
   if (direction === 'LR') {
     const transposed = new Map([...positions].map(([iri, p]) => [iri, transposePosition(p)]));
-    return computeEdgeSegmentsCore(transposed, edges, nodeHeight, nodeWidth)
+    const transposedRoutes = farEdgeRoutes
+      && new Map([...farEdgeRoutes].map(([id, pts]) => [id, pts.map(transposePosition)]));
+    return computeEdgeSegmentsCore(transposed, edges, nodeHeight, nodeWidth, transposedRoutes)
       .map(seg => ({ ...seg, d: transposePathD(seg.d) }));
   }
-  return computeEdgeSegmentsCore(positions, edges, nodeWidth, nodeHeight);
+  return computeEdgeSegmentsCore(positions, edges, nodeWidth, nodeHeight, farEdgeRoutes);
 }
 
 function computeEdgeSegmentsCore(
@@ -675,10 +703,16 @@ function computeEdgeSegmentsCore(
   edges: DiagramEdge[],
   nodeWidth: number,
   nodeHeight: number,
+  farEdgeRoutes?: Map<string, Position[]>,
 ): RenderedSegment[] {
   const segments: RenderedSegment[] = [];
 
-  interface Group { parentIri: string; kind: 'composition' | 'generalization'; childIris: string[]; }
+  interface Group {
+    parentIri: string;
+    kind: 'composition' | 'generalization';
+    childIris: string[];
+    edgeIdByChild: Map<string, string>;
+  }
   const busGroups = new Map<string, Group>();
   const offAxis: DiagramEdge[] = [];
 
@@ -690,8 +724,9 @@ function computeEdgeSegmentsCore(
     if (c.y >= p.y + nodeHeight) {
       const key = `${e.parentIri}|${e.kind}`;
       let g = busGroups.get(key);
-      if (!g) { g = { parentIri: e.parentIri, kind: e.kind, childIris: [] }; busGroups.set(key, g); }
+      if (!g) { g = { parentIri: e.parentIri, kind: e.kind, childIris: [], edgeIdByChild: new Map() }; busGroups.set(key, g); }
       g.childIris.push(e.childIri);
+      g.edgeIdByChild.set(e.childIri, e.id);
     } else {
       offAxis.push(e);
     }
@@ -742,14 +777,27 @@ function computeEdgeSegmentsCore(
 
     for (const childIri of farChildIris) {
       const c = positions.get(childIri)!;
-      const excludeIris = new Set([g.parentIri, childIri]);
-      const safeJogY = computeSafeJogY(
-        px, c.x, pyBottom, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey,
-      );
-      const detour = computeStemDetour(
-        c.x, safeJogY, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey, childIri,
-      );
-      const points = [{ x: px, y: pyBottom }, { x: px, y: safeJogY }, { x: c.x, y: safeJogY }, ...detour, { x: c.x, y: c.y }];
+      const edgeId = g.edgeIdByChild.get(childIri);
+      const dummyPoints = edgeId ? farEdgeRoutes?.get(edgeId) : undefined;
+
+      let points: Position[];
+      if (dummyPoints && dummyPoints.length > 0) {
+        // Structural routing (spec FR-002): the edge's dummy-node chain already reserves real,
+        // guaranteed-clear space at every intermediate layer — no obstacle search needed.
+        points = elbowExpand([{ x: px, y: pyBottom }, ...dummyPoints, { x: c.x, y: c.y }]);
+      } else {
+        // Defensive fallback (should not normally trigger for a genuinely multi-layer edge, since
+        // `layout.ts`'s `computeFarEdgeRoutes` always produces a dummy chain for one): the
+        // original reactive detour search.
+        const excludeIris = new Set([g.parentIri, childIri]);
+        const safeJogY = computeSafeJogY(
+          px, c.x, pyBottom, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey,
+        );
+        const detour = computeStemDetour(
+          c.x, safeJogY, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey, childIri,
+        );
+        points = [{ x: px, y: pyBottom }, { x: px, y: safeJogY }, { x: c.x, y: safeJogY }, ...detour, { x: c.x, y: c.y }];
+      }
       segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true });
     }
   }
@@ -809,10 +857,13 @@ export function computeEdgeRoutes(
   nodeWidth: number,
   nodeHeight: number,
   direction: LayoutDirection = 'TB',
+  farEdgeRoutes?: Map<string, Position[]>,
 ): Map<string, EdgeRoute> {
   if (direction === 'LR') {
     const transposed = new Map([...positions].map(([iri, p]) => [iri, transposePosition(p)]));
-    const coreRoutes = computeEdgeRoutesCore(transposed, edges, nodeHeight, nodeWidth);
+    const transposedRoutes = farEdgeRoutes
+      && new Map([...farEdgeRoutes].map(([id, pts]) => [id, pts.map(transposePosition)]));
+    const coreRoutes = computeEdgeRoutesCore(transposed, edges, nodeHeight, nodeWidth, transposedRoutes);
     const routes = new Map<string, EdgeRoute>();
     for (const [id, r] of coreRoutes) {
       routes.set(id, {
@@ -824,7 +875,7 @@ export function computeEdgeRoutes(
     }
     return routes;
   }
-  return computeEdgeRoutesCore(positions, edges, nodeWidth, nodeHeight);
+  return computeEdgeRoutesCore(positions, edges, nodeWidth, nodeHeight, farEdgeRoutes);
 }
 
 function computeEdgeRoutesCore(
@@ -832,6 +883,7 @@ function computeEdgeRoutesCore(
   edges: DiagramEdge[],
   nodeWidth: number,
   nodeHeight: number,
+  farEdgeRoutes?: Map<string, Position[]>,
 ): Map<string, EdgeRoute> {
   const routes = new Map<string, EdgeRoute>();
 
@@ -874,27 +926,39 @@ function computeEdgeRoutesCore(
 
     for (const e of g.groupEdges) {
       const c = positions.get(e.childIri)!;
-      const excludeIris = new Set([g.parentIri, e.childIri]);
       const isFar = c.y !== minChildY;
-      const jogY = isFar
-        ? computeSafeJogY(px, c.x, pyBottom, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey)
-        : busY;
-      const detour = computeStemDetour(
-        c.x, jogY, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey, e.childIri,
-      );
-      const farPrefix = isFar ? [{ x: px, y: pyBottom }] : [];
+      const dummyPoints = isFar ? farEdgeRoutes?.get(e.id) : undefined;
+
+      let forwardPoints: Position[]; // parent-exit-anchor -> ... -> (just before target entry)
+      if (dummyPoints && dummyPoints.length > 0) {
+        // Structural routing (spec FR-002): route through the edge's dummy-node chain, which
+        // already reserves real, guaranteed-clear space at every intermediate layer.
+        const expanded = elbowExpand([{ x: px, y: pyBottom }, ...dummyPoints, { x: c.x, y: c.y }]);
+        forwardPoints = expanded.slice(0, -1);
+      } else {
+        const excludeIris = new Set([g.parentIri, e.childIri]);
+        const jogY = isFar
+          ? computeSafeJogY(px, c.x, pyBottom, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey)
+          : busY;
+        const detour = computeStemDetour(
+          c.x, jogY, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey, e.childIri,
+        );
+        const farPrefix = isFar ? [{ x: px, y: pyBottom }] : [];
+        forwardPoints = dedupeConsecutive([...farPrefix, { x: px, y: jogY }, { x: c.x, y: jogY }, ...detour]);
+      }
+
       if (g.kind === 'composition') {
         routes.set(e.id, {
           sourceIri: e.parentIri, targetIri: e.childIri,
           exitX, exitY: 1, entryX: 0.5, entryY: 0,
-          points: dedupeConsecutive([...farPrefix, { x: px, y: jogY }, { x: c.x, y: jogY }, ...detour]),
+          points: forwardPoints,
           far: isFar,
         });
       } else {
         routes.set(e.id, {
           sourceIri: e.childIri, targetIri: e.parentIri,
           exitX: 0.5, exitY: 0, entryX: exitX, entryY: 1,
-          points: dedupeConsecutive([...[...detour].reverse(), { x: c.x, y: jogY }, { x: px, y: jogY }, ...[...farPrefix].reverse()]),
+          points: [...forwardPoints].reverse(),
           far: isFar,
         });
       }

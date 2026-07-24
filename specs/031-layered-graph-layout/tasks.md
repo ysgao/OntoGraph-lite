@@ -33,7 +33,7 @@ Single project — this feature only touches `src/uml/` (existing module; no new
 
 **Purpose**: Shared test fixture needed by every later phase
 
-- [ ] T001 [P] Create a shared synthetic "deep multi-parent" fixture (4+ layers, including one
+- [x] T001 [P] Create a shared synthetic "deep multi-parent" fixture (4+ layers, including one
   node reachable from two parents at different layers) in `src/uml/testFixtures.ts`, exporting
   `DiagramNode[]`/`DiagramEdge[]` for reuse by `layout.test.ts`, `diagramGeometry.test.ts`, and the
   new `layoutMetrics.test.ts`
@@ -48,18 +48,18 @@ any user-story wiring happens.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T002 [P] Write failing unit tests for dummy-node insertion in `src/uml/dummyNodes.test.ts`:
+- [x] T002 [P] Write failing unit tests for dummy-node insertion in `src/uml/dummyNodes.test.ts`:
   an edge whose child layer is more than one greater than its parent layer gets one dummy node per
   intermediate layer; an adjacent-layer edge is unchanged (no dummies); a back-edge/cycle
   contributes no dummies (mirrors `depthNormalization.ts`'s existing cycle guard)
-- [ ] T003 Implement dummy-node insertion (`insertDummyNodes`) in `src/uml/dummyNodes.ts` per
+- [x] T003 Implement dummy-node insertion (`insertDummyNodes`) in `src/uml/dummyNodes.ts` per
   `data-model.md`'s Dummy Node entity, to make T002 pass
-- [ ] T004 [P] Write failing unit tests for cumulative-sum coordinate assignment in
+- [x] T004 [P] Write failing unit tests for cumulative-sum coordinate assignment in
   `src/uml/layerCoordinates.test.ts`: given a per-layer ordering of real + dummy occupants (with
   widths) and a spacing constant, cross-axis positions are assigned by running sum
   (`cumulative += width + MIN_GAP`), never by an averaging-then-clamp pass — so two adjacent
   occupants in the same layer can never overlap regardless of input order
-- [ ] T005 Implement cumulative-sum coordinate assignment (`assignLayerCoordinates`) in
+- [x] T005 Implement cumulative-sum coordinate assignment (`assignLayerCoordinates`) in
   `src/uml/layerCoordinates.ts`, to make T004 pass
 
 **Checkpoint**: Dummy-node insertion and coordinate assignment exist and are unit-tested in
@@ -78,7 +78,7 @@ helper.
 
 ### Tests for User Story 1 ⚠️ (write first, confirm they FAIL against current `layout.ts`/`diagramGeometry.ts`)
 
-- [ ] T006 [P] [US1] Implement a general-purpose overlap-detection helper
+- [x] T006 [P] [US1] Implement a general-purpose overlap-detection helper
   (`detectNodeOverlaps`, `detectEdgeNodeOverlaps`) in `src/uml/layoutMetrics.ts`, plus regression
   tests in `src/uml/layoutMetrics.test.ts` asserting zero overlaps for: (a) the existing shallow
   (1-2 level) fixtures already used by `layout.test.ts` — expected to already pass; (b) the T001
@@ -97,7 +97,7 @@ helper.
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] In `src/uml/layout.ts`, replace `computeLayout()`'s average-of-children placement
+- [x] T007 [US1] In `src/uml/layout.ts`, replace `computeLayout()`'s average-of-children placement
   and same-depth-only clamp (current lines ~139-229) with: `insertDummyNodes` (T003) to expand
   multi-layer edges, a naive/deterministic per-layer ordering (existing declaration order is
   sufficient here — US2 replaces it), and `assignLayerCoordinates` (T005) for final cross-axis
@@ -107,20 +107,20 @@ helper.
   preserved (either carried over as-is or intentionally reimplemented in the new coordinate step —
   not silently dropped), each verified by T006(d)/(e): direct-ancestor centering-on-root
   (`layout.ts:162-175`) and the unreachable-node fallback slot (`layout.ts:177-184`, spec FR-007).
-- [ ] T008 [US1] Implement per-edge route resolution (e.g. `resolveEdgeRoutes`) in `src/uml/layout.ts`
+- [x] T008 [US1] Implement per-edge route resolution (e.g. `resolveEdgeRoutes`) in `src/uml/layout.ts`
   that converts each edge's dummy-node chain plus T007's assigned coordinates into an ordered
   `Position[]` point list keyed by `edge.id` (the Edge Route entity in `data-model.md`)
-- [ ] T009 [US1] In `src/uml/diagramGeometry.ts`, wire T008's resolved point lists into
+- [x] T009 [US1] In `src/uml/diagramGeometry.ts`, wire T008's resolved point lists into
   `computeEdgeSegments`/`computeEdgeRoutes` so a multi-layer edge routes through its dummy-derived
   points instead of calling `computeStemDetour`/`computeSafeJogY`; adjacent-layer edges keep using
   the existing direct bus/elbow computation unchanged (per `plan.md`'s "don't regress shallow
   cases")
-- [ ] T010 [US1] Remove the now-dead average-of-children/same-depth-clamp code in `layout.ts` and
+- [x] T010 [US1] Remove the now-dead average-of-children/same-depth-clamp code in `layout.ts` and
   the `computeStemDetour`/`computeSafeJogY` branches fully subsumed by T009; update the existing
   `layout.test.ts`/`diagramGeometry.test.ts` cases that asserted the old behavior to assert the new
   behavior instead (no case should be silently deleted — each either still applies or is replaced
   by an equivalent new assertion)
-- [ ] T011 [US1] Run T006 plus the full `src/uml` test suite (`npm test -- src/uml`); confirm every
+- [x] T011 [US1] Run T006 plus the full `src/uml` test suite (`npm test -- src/uml`); confirm every
   test passes, including zero overlaps on the deep multi-parent and middle-ear fixtures. Also add
   a lightweight timing assertion (mirroring `partOfGraph.bench.test.ts`'s `Date.now()`-based
   pattern) for `computeLayout()` at a diagram size representative of this feature's Scale/Scope
@@ -144,7 +144,7 @@ same input.
 
 ### Tests for User Story 2 ⚠️ (write first, confirm they FAIL against US1's naive ordering)
 
-- [ ] T012 [P] [US2] Add a crossing-count metric (`countCrossings`) to `src/uml/layoutMetrics.ts`
+- [x] T012 [P] [US2] Add a crossing-count metric (`countCrossings`) to `src/uml/layoutMetrics.ts`
   (pairwise per adjacent-layer-pair comparison, per `LayeredGraphAlgorithm.md` §3's crossing
   test), plus a regression test in `layoutMetrics.test.ts` comparing crossing count on a
   shared-parent/shared-child fixture before vs. after this story's ordering pass — expected to
@@ -152,16 +152,16 @@ same input.
 
 ### Implementation for User Story 2
 
-- [ ] T013 [US2] Implement the crossing-minimization ordering sweep (median/barycenter-style,
+- [x] T013 [US2] Implement the crossing-minimization ordering sweep (median/barycenter-style,
   ~8-10 alternating up/down passes, keep the snapshot with the fewest counted crossings) as a pure
   function (e.g. `reduceCrossings`) in `src/uml/layerOrdering.ts`, operating over each layer's real
   + dummy occupants (from T003)
-- [ ] T014 [US2] Wire `reduceCrossings`'s output ordering into `layout.ts`'s coordinate-assignment
+- [x] T014 [US2] Wire `reduceCrossings`'s output ordering into `layout.ts`'s coordinate-assignment
   call (T007/T005), replacing the naive/declaration-order baseline introduced in T007
-- [ ] T015 [US2] Retire `layout.ts`'s `reorderBySharedChildren` union-find heuristic, now subsumed
+- [x] T015 [US2] Retire `layout.ts`'s `reorderBySharedChildren` union-find heuristic, now subsumed
   by T013's global ordering sweep; update the `layout.test.ts` cases that exercised it directly to
   assert against the new ordering pass instead
-- [ ] T016 [US2] Run T012 plus the full `src/uml` test suite; confirm crossing count is reduced
+- [x] T016 [US2] Run T012 plus the full `src/uml` test suite; confirm crossing count is reduced
   (not merely unchanged) on shared-parent/shared-child fixtures, and unchanged/zero on fixtures
   that were already crossing-free
 
@@ -180,20 +180,20 @@ positions and connector routing across all of them.
 
 ### Tests for User Story 3 ⚠️ (write first)
 
-- [ ] T017 [P] [US3] Write a cross-format consistency test asserting `src/uml/drawioRenderer.ts`
+- [x] T017 [P] [US3] Write a cross-format consistency test asserting `src/uml/drawioRenderer.ts`
   and `src/uml/htmlRenderer.ts` produce matching node positions and edge point-lists for the same
   diagram input (new shared-assertion test, or extend `drawioRenderer.test.ts` /
   `htmlRenderer.test.ts`)
 
 ### Implementation for User Story 3
 
-- [ ] T018 [US3] Verify (and adjust if any divergence is found) that `src/uml/drawioRenderer.ts`
+- [x] T018 [US3] Verify (and adjust if any divergence is found) that `src/uml/drawioRenderer.ts`
   and `src/uml/htmlRenderer.ts` both consume T009's shared edge-route output with no
   format-specific fallback/divergent path
-- [ ] T019 [US3] Confirm PNG export (`src/uml/drawioCli.ts`, which shells out to the draw.io
+- [x] T019 [US3] Confirm PNG export (`src/uml/drawioCli.ts`, which shells out to the draw.io
   desktop CLI on the exported `.drawio` file) reflects the same layout by construction; extend
   `drawioCli.test.ts` if any gap is found
-- [ ] T020 [US3] Run T017 plus the full `src/uml` test suite; confirm all four formats show
+- [x] T020 [US3] Run T017 plus the full `src/uml` test suite; confirm all four formats show
   identical non-overlapping layout for the same diagram
 
 **Checkpoint**: All three user stories independently functional — this is the full feature.
@@ -204,13 +204,13 @@ positions and connector routing across all of them.
 
 **Purpose**: Cleanup and final validation across all stories
 
-- [ ] T021 [P] Update stale module-level comments in `src/uml/layout.ts` and
+- [x] T021 [P] Update stale module-level comments in `src/uml/layout.ts` and
   `src/uml/diagramGeometry.ts` (e.g. `layout.ts`'s docstring referencing "average of its
   children's (post-order)" and "Cytoscape, `preset` layout") to describe the new dummy-node /
   ordering / coordinate-assignment pipeline
-- [ ] T022 [P] Run `npm run compile` (type-check) and `npm test` (full suite) to confirm no type
+- [x] T022 [P] Run `npm run compile` (type-check) and `npm test` (full suite) to confirm no type
   errors and no coverage regression, per CLAUDE.md's quality gates
-- [ ] T023 Execute `quickstart.md`'s manual verification steps in the Extension Development Host
+- [x] T023 Execute `quickstart.md`'s manual verification steps in the Extension Development Host
   (F5) — regenerate the middle-ear-structure diagram, export to draw.io/SVG/PNG, visually confirm
   no overlaps and reduced crossings versus `uml-diagram-cli-plan/Middle-ear-structure-uml.drawio`;
   also walk through the T001 synthetic deep multi-parent fixture (or another 4+ level sample) as
