@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { describe, it, expect } from 'vitest';
 import { computeLayout, computeFarEdgeRoutes } from './layout';
-import { computeEdgeRoutes } from './diagramGeometry';
+import { computeEdgeRoutes, boxRect } from './diagramGeometry';
+import type { LayoutDirection } from './diagramModel';
 import { detectNodeOverlaps, detectEdgeNodeOverlaps, countPathCrossings, type NodeBox } from './layoutMetrics';
 import { deepMultiParentFixture, crossingFixture } from './testFixtures';
 import type { DiagramNode, DiagramEdge } from './diagramModel';
@@ -85,6 +86,43 @@ describe('layout overlap metrics (spec FR-001/FR-002/SC-001)', () => {
     const model = ParserRegistry.parse(raw, 'owl-functional', 'file:///anatomy.owl');
     const result = extractUmlDiagram(model, MIDDLE_EAR_IRI, 4, { compositionProperties: SNOMED_PART_OF });
     assertNoOverlaps(result.nodes, result.edges);
+  });
+
+  // Direction-aware overlap check. Boxes MUST be built via `boxRect`, not the TB shortcut
+  // (`x` = centre) — in LR `x` is the box's LEFT edge and `y` the vertical centre, so a naive
+  // centre±half box mis-places every node and reports phantom edge-node overlaps that aren't there.
+  const assertNoOverlapsDir = (nodes: DiagramNode[], edges: DiagramEdge[], direction: LayoutDirection): void => {
+    const layout = computeLayout(nodes, edges, direction);
+    const positions = new Map([...layout].map(([iri, p]) => [iri, { x: p.x, y: p.y }]));
+    const boxes = new Map<string, NodeBox>();
+    for (const n of nodes) {
+      const b = boxRect(positions.get(n.iri)!, direction, NODE_WIDTH, NODE_HEIGHT);
+      boxes.set(n.iri, { left: b.left, right: b.left + NODE_WIDTH, top: b.top, bottom: b.top + NODE_HEIGHT });
+    }
+    expect(detectNodeOverlaps(boxes)).toEqual([]);
+
+    const farEdgeRoutes = computeFarEdgeRoutes(nodes, edges, direction);
+    const routes = computeEdgeRoutes(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction, farEdgeRoutes);
+    const edgePaths = new Map<string, Array<{ x: number; y: number }>>();
+    for (const [id, r] of routes) {
+      const sb = boxRect(positions.get(r.sourceIri)!, direction, NODE_WIDTH, NODE_HEIGHT);
+      const tb = boxRect(positions.get(r.targetIri)!, direction, NODE_WIDTH, NODE_HEIGHT);
+      edgePaths.set(id, [{ x: sb.centerX, y: sb.centerY }, ...r.points, { x: tb.centerX, y: tb.centerY }]);
+    }
+    const edgeById = new Map(edges.map(e => [e.id, e]));
+    const edgeOverlaps = detectEdgeNodeOverlaps(edgePaths, boxes, (edgeId) => {
+      const e = edgeById.get(edgeId)!;
+      return new Set([e.parentIri, e.childIri]);
+    });
+    expect(edgeOverlaps, `expected zero edge-node overlaps in ${direction}, got: ${JSON.stringify(edgeOverlaps)}`).toEqual([]);
+  };
+
+  it.skipIf(!ANATOMY_EXISTS)('(c-LR) has zero node AND edge-node overlaps in the LR direction too (not just TB)', () => {
+    const raw = fs.readFileSync(ANATOMY_PATH, 'utf8');
+    const model = ParserRegistry.parse(raw, 'owl-functional', 'file:///anatomy.owl');
+    const result = extractUmlDiagram(model, MIDDLE_EAR_IRI, 4, { compositionProperties: SNOMED_PART_OF });
+    assertNoOverlapsDir(result.nodes, result.edges, 'LR');
+    assertNoOverlapsDir(result.nodes, result.edges, 'TB');
   });
 
   it('actually engages structural (dummy-chain) routing for the deep fixture\'s multi-layer edges, not just the reactive fallback', () => {
