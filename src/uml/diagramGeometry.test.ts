@@ -593,3 +593,57 @@ describe('computeEdgeRoutes — bus-lane separation across 3+ mutually-overlappi
     for (const y of Object.values(heights)) { expect(y).toBeLessThan(780); }
   });
 });
+
+describe('entry-port fan-out: a node entered by two edges gets two distinct, non-crossing ports', () => {
+  it('assigns each entering edge its own port so their stems no longer overlap at the node centre', () => {
+    // Two edges into one child C (x=300): a straight generalization and an adjacent composition.
+    // Without ports both would descend at x=300 and overlap collinearly.
+    const pos = positions({
+      C: { x: 300, y: 400 },
+      whole: { x: 500, y: 200 },
+      superType: { x: 100, y: 200 },
+    });
+    const edges = [
+      edge('whole', 'C', 'composition'),
+      edge('superType', 'C', 'generalization'),
+    ];
+    const routes = computeEdgeRoutes(pos, edges, W, H);
+    const comp = routes.get(edges[0].id)!;
+    const gen = routes.get(edges[1].id)!;
+    // C is the composition's target (entry) and the generalization's source (exit) — both connect
+    // to C's TOP. The two connection points must be DISTINCT (not both 0.5).
+    expect(comp.entryX).not.toBe(gen.exitX);
+    // Port x on C = 300 - W/2 + frac*W. The two ports straddle the centre.
+    const compPort = 300 - W / 2 + comp.entryX * W;
+    const genPort = 300 - W / 2 + gen.exitX * W;
+    expect(Math.abs(compPort - genPort)).toBeGreaterThanOrEqual(20);
+  });
+
+  it('orders the ports by APPROACH side, not by the distant parent: a far edge swinging in from the left takes the left port so it does not cross a straight edge', () => {
+    // Reproduces the reported middle-ear case ("Inner epithelial layer of tympanic membrane"): a
+    // far COMPOSITION edge jogs into the node from the LEFT (dummy at x=250, left of centre 300),
+    // while a straight GENERALIZATION descends from a parent that is even further left (x=50).
+    // The composition genuinely arrives from the left, so it must take the LEFT port; the straight
+    // edge, which sits at the centre right down to the node, takes the RIGHT port. (The earlier
+    // ordering keyed off the straight edge's far-left parent and wrongly sent the composition to
+    // the right port, forcing its jog to cross the straight stem.)
+    const pos = positions({
+      C: { x: 300, y: 400 },
+      compParent: { x: 100, y: 0 },
+      genParent: { x: 50, y: 200 },
+    });
+    const edges = [
+      edge('compParent', 'C', 'composition'),
+      edge('genParent', 'C', 'generalization'),
+    ];
+    const farEdgeRoutes = new Map<string, Position[]>([['compParent|C|composition', [{ x: 250, y: 200 }]]]);
+    const routes = computeEdgeRoutes(pos, edges, W, H, 'TB', farEdgeRoutes);
+    const comp = routes.get('compParent|C|composition')!;
+    const gen = routes.get('genParent|C|generalization')!;
+    const compPort = 300 - W / 2 + comp.entryX * W;
+    const genPort = 300 - W / 2 + gen.exitX * W;
+    expect(compPort).toBeLessThan(300);   // composition on the LEFT port (its approach side)
+    expect(genPort).toBeGreaterThan(300); // straight generalization on the RIGHT port
+    expect(compPort).toBeLessThan(genPort);
+  });
+});

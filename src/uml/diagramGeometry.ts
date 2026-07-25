@@ -866,10 +866,15 @@ function computeEdgeSegmentsCore(
       const edgeId = g.edgeIdByChild.get(childIri);
       if (!edgeId) { continue; }
       const cx = positions.get(childIri)!.x;
-      // A far edge's true approach is the last waypoint whose x differs from the child centre (its
-      // lane jog brings it to centre-x only for the final descent); a near edge approaches from its
-      // parent's exit x.
-      let approachX = px;
+      // "Approach x" is where the edge sits in the narrow band JUST above the ports, which decides
+      // the non-crossing port order — NOT where its far-away parent is. A near (straight) edge
+      // descends vertically at the child centre right down to the node, so its approach is centre-x.
+      // A far edge makes a low horizontal jog to reach the node; its approach is that jog's origin
+      // (the last waypoint whose x differs from centre) — the side it genuinely swings in from. So a
+      // far edge arriving from the left takes the left port and a straight edge stays centre-ward,
+      // instead of the straight edge being dragged to a side by its distant parent and forcing the
+      // far edge to cross it.
+      let approachX = cx;
       const lane = farRoutePoints.get(edgeId);
       if (lane) {
         for (let i = lane.length - 1; i >= 0; i--) {
@@ -1192,7 +1197,9 @@ function computeEdgeRoutesCore(
     for (const e of g.groupEdges) {
       if (fanInConsumed.has(`${g.parentIri}|${e.childIri}|${g.kind}`)) { continue; }
       const cx = positions.get(e.childIri)!.x;
-      let approachX = px;
+      // See `computeEdgeSegmentsCore`: approach x is centre-x for a straight near edge, the low
+      // jog's origin for a far edge — so the far edge takes the port on the side it swings in from.
+      let approachX = cx;
       const lane = farRoutePoints.get(e.id);
       if (lane) {
         for (let i = lane.length - 1; i >= 0; i--) {
