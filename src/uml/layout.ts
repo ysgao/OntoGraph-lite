@@ -119,6 +119,24 @@ function computeInternal(
     set.add(`${e.parentIri}|${e.kind}`);
   }
 
+  // Far-edge crossings per band — a multi-layer (dashed) edge is routed through the transition
+  // bands between its parent and child, and `diagramGeometry.ts` now gives its horizontal jog in
+  // each band its OWN lane BELOW that band's bus lanes (rather than cutting across the middle of
+  // them, which read as cramped). So each band's flow-gap must also make room for the far-edge
+  // jogs passing through it, on the same uniform lane pitch as the buses. A far edge from layer
+  // `p` to layer `c` (c > p+1) crosses the bands whose top layer is p, p+1, …, c-1.
+  const farCrossByBandLayer = new Map<number, number>();
+  for (const e of edges) {
+    const p = depthByIri.get(e.parentIri);
+    const c = depthByIri.get(e.childIri);
+    if (p === undefined || c === undefined || c <= p + 1) { continue; }
+    for (let band = p; band < c; band++) {
+      farCrossByBandLayer.set(band, (farCrossByBandLayer.get(band) ?? 0) + 1);
+    }
+  }
+  const laneCountForBand = (bandTopLayer: number): number =>
+    (laneKeysByParentLayer.get(bandTopLayer)?.size ?? 0) + (farCrossByBandLayer.get(bandTopLayer) ?? 0);
+
   // A parent frequently has BOTH composition and generalization children at once (e.g. an
   // anatomical whole with a part-of breakdown AND laterality-qualified subtypes) — clustering
   // same-kind children together (rather than the raw edge-declaration order, which can
@@ -200,7 +218,7 @@ function computeInternal(
     flowByLayer.set(sortedLayers[0], 0);
     for (let i = 1; i < sortedLayers.length; i++) {
       const upperLayer = sortedLayers[i - 1];
-      const lanes = laneKeysByParentLayer.get(upperLayer)?.size ?? 0;
+      const lanes = laneCountForBand(upperLayer);
       const gap = baseFlow + Math.max(0, lanes - 1) * LANE_STEP;
       flowByLayer.set(sortedLayers[i], flowByLayer.get(upperLayer)! + gap);
     }

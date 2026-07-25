@@ -311,6 +311,73 @@ function elbowExpand(waypoints: Position[]): Position[] {
   return dedupeConsecutive(out);
 }
 
+interface FarEdgeSpec {
+  edgeId: string;
+  px: number;         // parent exit x
+  parentY: number;    // parent's own row y (top of its box)
+  childPos: Position; // final target
+  dummyPoints: Position[]; // intermediate dummy positions, one per crossed layer, in order
+}
+
+/**
+ * Routes each multi-layer ("far") edge so its horizontal jog in every transition band it crosses
+ * sits in its OWN lane just BELOW that band's bus lanes — on the same uniform `BUS_LANE_SPREAD`
+ * pitch — rather than cutting across the MIDDLE of the bus stack (what a plain midpoint jog does),
+ * which reads as cramped when a dashed edge lands a few px from a solid bus line. Each band's far
+ * edges are ranked (deterministically, by edge id) so several dashed edges crossing the same band
+ * stack cleanly one lane apart instead of overlapping. `layout.ts` already sizes every band's gap
+ * to include these far lanes (`farCrossByBandLayer`), so the stack always fits.
+ *
+ * A far edge's "source rows" — the top of each band it jogs in — are its parent's row followed by
+ * each dummy's row (`[parentY, dummy1.y, …]`), one per segment (parent→dummy1, dummy1→dummy2, …,
+ * lastDummy→child). `deepestBusYByRow` gives the lowest bus lane in the band below each such row
+ * (falling back to that band's natural bus height when it holds no fan-out bus at all).
+ */
+function routeFarEdgesThroughLanes(
+  farEdges: FarEdgeSpec[],
+  deepestBusYByRow: Map<number, number>,
+  nodeHeight: number,
+): Map<string, Position[]> {
+  const sourceRowsOf = (fe: FarEdgeSpec): number[] => [fe.parentY, ...fe.dummyPoints.map(d => d.y)];
+
+  // Rank the far edges crossing each band (keyed by the band-top row), so they stack rather than
+  // coincide.
+  const rankByRowEdge = new Map<string, number>();
+  const idsByRow = new Map<number, string[]>();
+  for (const fe of farEdges) {
+    for (const row of sourceRowsOf(fe)) {
+      let list = idsByRow.get(row);
+      if (!list) { list = []; idsByRow.set(row, list); }
+      list.push(fe.edgeId);
+    }
+  }
+  for (const [row, ids] of idsByRow) {
+    [...ids].sort().forEach((id, i) => rankByRowEdge.set(`${row}|${id}`, i));
+  }
+
+  const result = new Map<string, Position[]>();
+  for (const fe of farEdges) {
+    const waypoints = [...fe.dummyPoints, fe.childPos];
+    const sourceRows = sourceRowsOf(fe);
+    const pts: Position[] = [{ x: fe.px, y: fe.parentY + nodeHeight }];
+    let prev = pts[0];
+    waypoints.forEach((wp, i) => {
+      const row = sourceRows[i];
+      const rank = rankByRowEdge.get(`${row}|${fe.edgeId}`) ?? 0;
+      const deepestBus = deepestBusYByRow.get(row) ?? (row + nodeHeight + BUS_GAP - BUS_LANE_SPREAD);
+      // One lane below the deepest bus in this band, per far-edge rank; never past the next row.
+      const laneY = Math.min(deepestBus + BUS_LANE_SPREAD * (rank + 1), wp.y - MIN_FINAL_STEM);
+      if (prev.x !== wp.x) {
+        pts.push({ x: prev.x, y: laneY }, { x: wp.x, y: laneY });
+      }
+      pts.push(wp);
+      prev = wp;
+    });
+    result.set(fe.edgeId, dedupeConsecutive(pts));
+  }
+  return result;
+}
+
 /** Clearance (px) kept between a detoured stem and the obstacle box it routes around. */
 const OBSTACLE_CLEARANCE = 10;
 
@@ -755,6 +822,25 @@ function computeEdgeSegmentsCore(
     for (const p of group.parents) { fanInConsumed.add(`${p.parentIri}|${group.childIri}|${group.kind}`); }
   }
 
+  // Route far (multi-layer) edges through lanes below each band's buses — see
+  // `routeFarEdgesThroughLanes`. Built up front so all far edges crossing a band can be ranked
+  // together; the group loop below just looks up the result per far child.
+  const deepestBusYByRow = new Map<number, number>();
+  const farEdgeSpecs: FarEdgeSpec[] = [];
+  for (const [groupKey, g] of busGroups) {
+    const busY = placements.get(groupKey)!.busY;
+    const parentY = positions.get(g.parentIri)!.y;
+    deepestBusYByRow.set(parentY, Math.max(deepestBusYByRow.get(parentY) ?? -Infinity, busY));
+    const px = placements.get(groupKey)!.px;
+    for (const childIri of g.childIris) {
+      const edgeId = g.edgeIdByChild.get(childIri);
+      const dummyPoints = edgeId ? farEdgeRoutes?.get(edgeId) : undefined;
+      if (!edgeId || !dummyPoints || dummyPoints.length === 0) { continue; }
+      farEdgeSpecs.push({ edgeId, px, parentY, childPos: positions.get(childIri)!, dummyPoints });
+    }
+  }
+  const farRoutePoints = routeFarEdgesThroughLanes(farEdgeSpecs, deepestBusYByRow, nodeHeight);
+
   for (const [groupKey, g] of busGroups) {
     const { px, busY } = placements.get(groupKey)!;
     const pyBottom = positions.get(g.parentIri)!.y + nodeHeight;
@@ -833,9 +919,12 @@ function computeEdgeSegmentsCore(
       const dummyPoints = edgeId ? farEdgeRoutes?.get(edgeId) : undefined;
 
       let points: Position[];
-      if (dummyPoints && dummyPoints.length > 0) {
-        // Structural routing (spec FR-002): the edge's dummy-node chain already reserves real,
-        // guaranteed-clear space at every intermediate layer — no obstacle search needed.
+      const laneRouted = edgeId ? farRoutePoints.get(edgeId) : undefined;
+      if (laneRouted) {
+        // Structural routing (spec FR-002) through the edge's reserved dummy columns, with each
+        // band jog placed in its own lane below that band's buses (`routeFarEdgesThroughLanes`).
+        points = laneRouted;
+      } else if (dummyPoints && dummyPoints.length > 0) {
         points = elbowExpand([{ x: px, y: pyBottom }, ...dummyPoints, { x: c.x, y: c.y }]);
       } else {
         // Defensive fallback (should not normally trigger for a genuinely multi-layer edge, since
@@ -1013,6 +1102,23 @@ function computeEdgeRoutesCore(
     for (const p of group.parents) { fanInConsumed.add(`${p.parentIri}|${group.childIri}|${group.kind}`); }
   }
 
+  // Far-edge lane routing — see `routeFarEdgesThroughLanes` and the identical pass in
+  // `computeEdgeSegmentsCore`.
+  const deepestBusYByRow = new Map<number, number>();
+  const farEdgeSpecs: FarEdgeSpec[] = [];
+  for (const [groupKey, g] of busGroups) {
+    const busY = placements.get(groupKey)!.busY;
+    const parentY = positions.get(g.parentIri)!.y;
+    deepestBusYByRow.set(parentY, Math.max(deepestBusYByRow.get(parentY) ?? -Infinity, busY));
+    const px = placements.get(groupKey)!.px;
+    for (const e of g.groupEdges) {
+      const dummyPoints = farEdgeRoutes?.get(e.id);
+      if (!dummyPoints || dummyPoints.length === 0) { continue; }
+      farEdgeSpecs.push({ edgeId: e.id, px, parentY, childPos: positions.get(e.childIri)!, dummyPoints });
+    }
+  }
+  const farRoutePoints = routeFarEdgesThroughLanes(farEdgeSpecs, deepestBusYByRow, nodeHeight);
+
   for (const [groupKey, g] of busGroups) {
     const parentPos = positions.get(g.parentIri)!;
     const { px, busY } = placements.get(groupKey)!;
@@ -1031,10 +1137,13 @@ function computeEdgeRoutesCore(
       const dummyPoints = farEdgeRoutes?.get(e.id);
       const spansMultiLayer = (dummyPoints?.length ?? 0) > 0;
 
+      const laneRouted = farRoutePoints.get(e.id);
       let forwardPoints: Position[]; // parent-exit-anchor -> ... -> (just before target entry)
-      if (spansMultiLayer && dummyPoints) {
-        // Structural routing (spec FR-002): route through the edge's dummy-node chain, which
-        // already reserves real, guaranteed-clear space at every intermediate layer.
+      if (laneRouted) {
+        // Lane-routed far edge (jog below each band's buses) — drop the final child point, which
+        // is re-added at the target entry by the caller's exit/entry fractions.
+        forwardPoints = laneRouted.slice(0, -1);
+      } else if (spansMultiLayer && dummyPoints) {
         const expanded = elbowExpand([{ x: px, y: pyBottom }, ...dummyPoints, { x: c.x, y: c.y }]);
         forwardPoints = expanded.slice(0, -1);
       } else {
