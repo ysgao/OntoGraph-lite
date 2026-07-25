@@ -2,6 +2,7 @@ import type { DiagramNode, DiagramEdge, LayoutDirection } from './diagramModel';
 import { insertDummyNodes } from './dummyNodes';
 import { assignTidyTreeCoordinates } from './layerCoordinates';
 import { reduceCrossings } from './layerOrdering';
+import { assignBusLanes, laneCountOf } from './busLanes';
 
 export interface LayoutPosition {
   x: number;
@@ -134,9 +135,6 @@ function computeInternal(
       farCrossByBandLayer.set(band, (farCrossByBandLayer.get(band) ?? 0) + 1);
     }
   }
-  const laneCountForBand = (bandTopLayer: number): number =>
-    (laneKeysByParentLayer.get(bandTopLayer)?.size ?? 0) + (farCrossByBandLayer.get(bandTopLayer) ?? 0);
-
   // A parent frequently has BOTH composition and generalization children at once (e.g. an
   // anatomical whole with a part-of breakdown AND laterality-qualified subtypes) — clustering
   // same-kind children together (rather than the raw edge-declaration order, which can
@@ -204,25 +202,6 @@ function computeInternal(
   for (const n of nodes) { allLayers.add(n.depth); }
   for (const d of dummies) { allLayers.add(d.layer); }
   const sortedLayers = [...allLayers].sort((a, b) => a - b);
-
-  // --- Per-transition flow coordinate (variable, lane-count-driven) ---
-  // Instead of a single fixed gap between every pair of adjacent layers, each transition's gap is
-  // sized to how many bus lanes it needs: `baseFlow` (room for one lane) plus `LANE_STEP` per
-  // extra lane. A shallow layer whose parents fan out into just one or two buses gets a small
-  // gap; a densely-fanned-out layer gets a proportionally larger one, so `diagramGeometry.ts` has
-  // room to give each of its buses a distinct height. Cumulative from the shallowest layer (which
-  // may be a negative-depth ancestor) at flow 0, so every resulting coordinate is non-negative
-  // without a separate offset pass.
-  const flowByLayer = new Map<number, number>();
-  if (sortedLayers.length > 0) {
-    flowByLayer.set(sortedLayers[0], 0);
-    for (let i = 1; i < sortedLayers.length; i++) {
-      const upperLayer = sortedLayers[i - 1];
-      const lanes = laneCountForBand(upperLayer);
-      const gap = baseFlow + Math.max(0, lanes - 1) * LANE_STEP;
-      flowByLayer.set(sortedLayers[i], flowByLayer.get(upperLayer)! + gap);
-    }
-  }
 
   const layerOrder = new Map<number, string[]>();
   const placed = new Set<string>();
@@ -302,9 +281,43 @@ function computeInternal(
     }
   }
 
+  // --- Per-transition flow coordinate (variable, lane-count-driven) ---
+  // Each transition's gap is sized to how many bus lanes that band actually needs: `baseFlow`
+  // (room for one lane) plus `LANE_STEP` per extra lane. The lane count is NOT the raw number of
+  // (parent, kind) buses at the band — it's how many of them MUTUALLY OVERLAP in x, computed by the
+  // same `assignBusLanes` colouring `diagramGeometry.ts` uses to place them. Now that tidy-tree
+  // placement separates sibling parents horizontally, most sibling buses have disjoint spans and
+  // share a single lane, so a band that once cost N lanes of height now usually costs one — this is
+  // what compacts the height between levels. Bus spans are taken from the FINAL cross coordinates
+  // (a constant margin shift preserves overlaps, so it's safe to read them post-shift). A far
+  // (multi-layer) edge still claims its own lane below the buses in every band it crosses, so those
+  // are added on top. Cumulative from the shallowest layer (a possibly-negative ancestor) at flow 0.
+  const busLaneCountByLayer = new Map<number, number>();
+  for (const [parentLayer, keys] of laneKeysByParentLayer) {
+    const spans = [...keys].map((key) => {
+      const [parentIri, kind] = [key.slice(0, key.lastIndexOf('|')), key.slice(key.lastIndexOf('|') + 1)];
+      const childIris = edges.filter(e => e.parentIri === parentIri && e.kind === kind).map(e => e.childIri);
+      const xs = [cross.get(parentIri) ?? LEFT_MARGIN, ...childIris.map(c => cross.get(c) ?? LEFT_MARGIN)];
+      return { key, minX: Math.min(...xs), maxX: Math.max(...xs), childIris: new Set(childIris) };
+    });
+    busLaneCountByLayer.set(parentLayer, laneCountOf(assignBusLanes(spans)));
+  }
+  const lanesForBand = (bandTopLayer: number): number =>
+    (busLaneCountByLayer.get(bandTopLayer) ?? 0) + (farCrossByBandLayer.get(bandTopLayer) ?? 0);
+
+  const flowByLayer = new Map<number, number>();
+  if (sortedLayers.length > 0) {
+    flowByLayer.set(sortedLayers[0], 0);
+    for (let i = 1; i < sortedLayers.length; i++) {
+      const upperLayer = sortedLayers[i - 1];
+      const gap = baseFlow + Math.max(0, lanesForBand(upperLayer) - 1) * LANE_STEP;
+      flowByLayer.set(sortedLayers[i], flowByLayer.get(upperLayer)! + gap);
+    }
+  }
+
   // A direct ancestor of the root is given a negative depth so it never shares a row/column with
-  // the root's own descendants; `flowByLayer` already starts the shallowest (most negative) layer
-  // at flow 0, so every resulting flow coordinate is non-negative without a separate offset pass.
+  // the root's own descendants; `flowByLayer` starts the shallowest (most negative) layer at flow 0,
+  // so every resulting flow coordinate is non-negative without a separate offset pass.
   const realPositions = new Map<string, LayoutPosition>();
   for (const n of nodes) {
     const flow = flowByLayer.get(n.depth) ?? 0;

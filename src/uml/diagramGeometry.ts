@@ -1,4 +1,5 @@
 import type { DiagramEdge, LayoutDirection } from './diagramModel';
+import { assignBusLanes } from './busLanes';
 
 export interface Position { x: number; y: number; }
 
@@ -258,25 +259,20 @@ function computeBusGroupPlacements(
     bucket.push(n);
   }
 
-  // Within each band, give EVERY bus its OWN lane — a distinct height, `BUS_LANE_SPREAD` apart —
-  // so no two buses ever share a horizontal line. This is the whole point of the layered redesign:
-  // `layout.ts` sizes each transition's flow-gap to exactly this lane count (one lane per
-  // (parent, kind) group), so the full stack always fits and the `Math.min(…, childTopY -
-  // MIN_FINAL_STEM)` clamp below is a pure safety net that never actually fires when the gap was
-  // sized correctly. No conflict graph and no reactive push-down pass are needed or wanted: two
-  // buses at different heights can still visually CROSS (one horizontal, one vertical) — ordinary
-  // orthogonal routing — but they can no longer MERGE into one indistinguishable collinear line,
-  // which was the reported bug (a dense layer's buses all collapsing onto a single shared height
-  // because the greedy conflict-coloring + reactive push ran out of headroom and clamped them
-  // together). Lane order is deterministic (leftmost `minX` first, ties broken by key) so the
-  // assignment is stable across runs (spec FR-009).
+  // Within each band, assign lanes by span colouring (`assignBusLanes`): two buses that overlap in
+  // x get distinct heights so their horizontal lines never MERGE into one collinear line (the
+  // reported bug), but buses with disjoint spans SHARE a height — which, now that tidy-tree
+  // placement separates sibling parents horizontally, is the common case, so a band usually needs
+  // only one lane. `layout.ts` sizes each transition's flow-gap to this same colouring count, so
+  // the stack always fits and the `Math.min(…, childTopY - MIN_FINAL_STEM)` clamp is a pure safety
+  // net. Deterministic (leftmost span first, ties by key) so the assignment is stable (spec FR-009).
   const busYByKey = new Map<string, number>();
   for (const bucket of byNaturalBusY.values()) {
-    const ordered = [...bucket].sort((a, b) => a.minX - b.minX || (a.key < b.key ? -1 : 1));
-    ordered.forEach((item, lane) => {
-      const shifted = item.naturalBusY + lane * BUS_LANE_SPREAD;
+    const laneOf = assignBusLanes(bucket.map(n => ({ key: n.key, minX: n.minX, maxX: n.maxX, childIris: n.childIris })));
+    for (const item of bucket) {
+      const shifted = item.naturalBusY + (laneOf.get(item.key) ?? 0) * BUS_LANE_SPREAD;
       busYByKey.set(item.key, Math.min(shifted, item.childTopY - MIN_FINAL_STEM));
-    });
+    }
   }
 
   const placements = new Map<string, BusGroupPlacement>();

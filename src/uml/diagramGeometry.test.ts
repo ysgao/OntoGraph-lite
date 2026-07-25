@@ -165,51 +165,62 @@ describe('computeEdgeSegments — a single parent with BOTH composition and gene
   });
 });
 
-describe('computeEdgeRoutes — every bus group in a transition gets its own lane/height', () => {
+describe('computeEdgeRoutes — bus lanes compact: overlapping buses split, disjoint buses share a height', () => {
   const W2 = 160, H2 = 56;
 
-  it('gives two DIFFERENT-kind edges into the same child their own distinct bus heights (same target but different type must NOT share a bus)', () => {
+  it('gives two buses whose horizontal spans OVERLAP distinct heights (so their lines never merge)', () => {
+    // Two wide, genuinely overlapping fan-out buses (each spans from its own parent across to its
+    // child on the other side): parentA 100→700, parentB 300→900 — overlapping [300,700].
     const pos = positions({
-      parentA: { x: 100, y: 0 },
-      parentB: { x: 900, y: 0 },
-      childX: { x: 100, y: 140 },
+      parentA: { x: 100, y: 0 }, childA: { x: 700, y: 140 },
+      parentB: { x: 900, y: 0 }, childB: { x: 300, y: 140 },
     });
     const edges = [
-      edge('parentA', 'childX', 'generalization'),
-      edge('parentB', 'childX', 'composition'),
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
     ];
     const routes = computeEdgeRoutes(pos, edges, W2, H2);
-    const aBusY = routes.get('parentA|childX|generalization')!.points[0].y;
-    const bBusY = routes.get('parentB|childX|composition')!.points[0].y;
-    // Two separate (parent, kind) groups in the same layer-0 transition -> two lanes -> two
-    // heights, 98 (lane 0) and 110 (lane 1, `BUS_LANE_SPREAD` below), not one shared line.
+    const aBusY = routes.get('parentA|childA|composition')!.points[0].y;
+    const bBusY = routes.get('parentB|childB|composition')!.points[0].y;
+    // Overlapping spans -> two lanes -> two heights (98 and 110, `BUS_LANE_SPREAD` apart).
     expect(aBusY).not.toBe(bBusY);
     expect([aBusY, bBusY].sort((x, y) => x - y)).toEqual([98, 110]);
   });
 
-  it('gives three unrelated same-layer parents three distinct bus heights (no two collapse together)', () => {
+  it('lets two buses with DISJOINT horizontal spans SHARE one height (the compaction)', () => {
+    // Two fan-out buses whose spans do not overlap: A over [100,300], B over [600,800].
     const pos = positions({
-      parentA: { x: 100, y: 0 },
-      parentB: { x: 900, y: 0 },
-      childX: { x: 100, y: 140 },
-      parentY: { x: 500, y: 0 },
-      childY: { x: 500, y: 140 },
+      parentA: { x: 100, y: 0 }, childA: { x: 300, y: 140 },
+      parentB: { x: 800, y: 0 }, childB: { x: 600, y: 140 },
     });
     const edges = [
-      edge('parentA', 'childX', 'generalization'),
-      edge('parentB', 'childX', 'composition'),
-      edge('parentY', 'childY', 'generalization'),
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
     ];
     const routes = computeEdgeRoutes(pos, edges, W2, H2);
-    const heights = [
-      routes.get('parentA|childX|generalization')!.points[0].y,
-      routes.get('parentB|childX|composition')!.points[0].y,
-      routes.get('parentY|childY|generalization')!.points[0].y,
+    const aBusY = routes.get('parentA|childA|composition')!.points[0].y;
+    const bBusY = routes.get('parentB|childB|composition')!.points[0].y;
+    // Disjoint spans never merge, so both keep the natural lane-0 height — one lane, not two.
+    expect(aBusY).toBe(bBusY);
+    expect(aBusY).toBe(98);
+  });
+
+  it('a parent sitting directly above its child (a point-span, no horizontal bus) shares a height with a wide bus that passes over it', () => {
+    // parentB is a plain vertical stem at x=500; parentA's wide bus 100→900 passes over x=500 but
+    // only CROSSES that stem — it cannot merge with a zero-width span — so no extra lane is spent.
+    const pos = positions({
+      parentA: { x: 100, y: 0 }, childA: { x: 900, y: 140 },
+      parentB: { x: 500, y: 0 }, childB: { x: 500, y: 140 },
+    });
+    const edges = [
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
     ];
-    // Three groups in one transition -> three distinct lane heights (98, 110, 120; the 3rd hits the MIN_FINAL_STEM safety clamp under this fixture's tight spacing), assigned by
-    // ascending minX then key. None share a height.
-    expect(new Set(heights).size).toBe(3);
-    expect([...heights].sort((x, y) => x - y)).toEqual([98, 110, 120]);
+    const routes = computeEdgeRoutes(pos, edges, W2, H2);
+    const aBusY = routes.get('parentA|childA|composition')!.points[0].y;
+    const bBusY = routes.get('parentB|childB|composition')!.points[0].y;
+    expect(aBusY).toBe(98);
+    expect(bBusY).toBe(98);
   });
 });
 
@@ -262,25 +273,25 @@ describe('computeEdgeSegments — distinct bus heights are visible in the render
     return [...d.matchAll(/-?\d+(?:\.\d+)?,(-?\d+(?:\.\d+)?)/g)].map(m => Number(m[1]));
   }
 
-  it('renders three distinct bus heights for three unrelated same-layer parents', () => {
+  it('renders distinct heights only where buses overlap, sharing a height where they do not', () => {
+    // Three fan-out buses: A [100,400] and B [300,600] overlap each other; C [800,1000] is off on
+    // its own. So A and B take two lanes (98, 110) and C shares lane 0's height (98) — two distinct
+    // heights across the three, not three.
     const pos = positions({
-      parentA: { x: 100, y: 0 },
-      parentB: { x: 900, y: 0 },
-      childX: { x: 100, y: 140 },
-      parentY: { x: 500, y: 0 },
-      childY: { x: 500, y: 140 },
+      parentA: { x: 100, y: 0 }, childA: { x: 400, y: 140 },
+      parentB: { x: 600, y: 0 }, childB: { x: 300, y: 140 },
+      parentC: { x: 800, y: 0 }, childC: { x: 1000, y: 140 },
     });
     const edges = [
-      edge('parentA', 'childX', 'generalization'),
-      edge('parentB', 'childX', 'composition'),
-      edge('parentY', 'childY', 'generalization'),
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
+      edge('parentC', 'childC', 'composition'),
     ];
     const result = computeEdgeSegments(pos, edges, W, H);
 
     const markerYs = result.filter(s => s.marker).flatMap(s => extractYs(s.d));
     const busYs = new Set(markerYs.filter(y => y !== 56)); // 56 = every parent's shared pyBottom
-    // Three groups in one transition -> three distinct lane heights (98, 110, 120; the 3rd hits the MIN_FINAL_STEM safety clamp under this fixture's tight spacing).
-    expect(busYs).toEqual(new Set([98, 110, 120]));
+    expect(busYs).toEqual(new Set([98, 110]));
   });
 });
 
