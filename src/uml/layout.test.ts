@@ -149,10 +149,12 @@ describe('computeLayout', () => {
       // each must be at least one crossSpacing apart from its neighbor.
       expect(xs[1] - xs[0]).toBeGreaterThanOrEqual(170 - 1e-6); // SLOT_WIDTH
       expect(xs[2] - xs[1]).toBeGreaterThanOrEqual(170 - 1e-6);
-      // 'shared' now sits centered under its three parents (mean of their x = the middle parent's
-      // x, and the midpoint of the span) — the tidy parent-over-children placement, rather than the
-      // old quirk that pinned it under the leftmost parent.
-      expect(layout.get('shared')!.x).toBeCloseTo((xs[0] + xs[2]) / 2);
+      // Tidy-tree placement reduces the graph to a spanning tree: 'shared' is claimed by exactly one
+      // of its parents and sits centered directly beneath that one (the others reach it by a longer
+      // edge). So its x aligns with one of the three parents — not floating between them, and never
+      // collapsing them onto a shared column.
+      const sharedX = layout.get('shared')!.x;
+      expect(xs.some(px => Math.abs(px - sharedX) < 1e-6)).toBe(true);
     });
   });
 
@@ -359,5 +361,55 @@ describe('computeLayout', () => {
       const withExplicitTB = computeLayout(nodes, edges, 'TB');
       expect(withDefault).toEqual(withExplicitTB);
     });
+  });
+});
+
+describe('computeLayout — tidy parent-over-children centering', () => {
+  const node = (iri: string, depth: number, isRoot = false): DiagramNode =>
+    ({ iri, label: iri, depth, isRoot, hasHiddenRelations: false });
+  const edge = (parentIri: string, childIri: string): DiagramEdge =>
+    ({ id: `${parentIri}|${childIri}|generalization|`, parentIri, childIri, kind: 'generalization' });
+
+  it('places every parent EXACTLY at the midpoint of its children span', () => {
+    // Root with two internal children, each with a different number of leaves — so each parent's
+    // centre is the midpoint of ITS own children, not a shared even pitch.
+    const nodes = [
+      node('root', 0, true),
+      node('A', 1), node('B', 1),
+      node('a1', 2), node('a2', 2), node('a3', 2), node('b1', 2), node('b2', 2),
+    ];
+    const edges = [
+      edge('root', 'A'), edge('root', 'B'),
+      edge('A', 'a1'), edge('A', 'a2'), edge('A', 'a3'),
+      edge('B', 'b1'), edge('B', 'b2'),
+    ];
+    const layout = computeLayout(nodes, edges);
+    const x = (id: string): number => layout.get(id)!.x;
+
+    const mid = (ids: string[]): number => (Math.min(...ids.map(x)) + Math.max(...ids.map(x))) / 2;
+    expect(x('A')).toBeCloseTo(mid(['a1', 'a2', 'a3']));
+    expect(x('B')).toBeCloseTo(mid(['b1', 'b2']));
+    expect(x('root')).toBeCloseTo(mid(['A', 'B']));
+  });
+
+  it('spaces sibling parents UNEVENLY — the wider subtree claims more room', () => {
+    // A has 3 leaves, B has 1. The A↔B gap must exceed the (even) one-slot pitch, because A's
+    // subtree is wider — the whole point of tidy placement vs flat packing.
+    const nodes = [
+      node('root', 0, true),
+      node('A', 1), node('B', 1),
+      node('a1', 2), node('a2', 2), node('a3', 2), node('b1', 2),
+    ];
+    const edges = [
+      edge('root', 'A'), edge('root', 'B'),
+      edge('A', 'a1'), edge('A', 'a2'), edge('A', 'a3'),
+      edge('B', 'b1'),
+    ];
+    const layout = computeLayout(nodes, edges);
+    // Sibling parents further apart than a single slot (170) — uneven, subtree-driven spacing.
+    expect(Math.abs(layout.get('A')!.x - layout.get('B')!.x)).toBeGreaterThan(170 + 1e-6);
+    // ...yet no two leaves overlap: adjacent leaves stay exactly one slot apart.
+    const leaves = ['a1', 'a2', 'a3', 'b1'].map(id => layout.get(id)!.x).sort((p, q) => p - q);
+    for (let i = 1; i < leaves.length; i++) { expect(leaves[i] - leaves[i - 1]).toBeGreaterThanOrEqual(170 - 1e-6); }
   });
 });

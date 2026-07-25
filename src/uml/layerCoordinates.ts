@@ -27,119 +27,111 @@ export function assignLayerCoordinates(
 }
 
 /**
- * Order-preserving, overlap-free packing of ONE layer toward a per-occupant DESIRED coordinate.
- * A node with no desire keeps its current coordinate. Runs the crowd-resolution twice — once
- * left-to-right (each occupant pushed at least far enough right of its predecessor) and once
- * right-to-left (pulled left of its successor) — then averages the two. Averaging two arrangements
- * that each already satisfy the minimum centre-to-centre separation yields one that still does
- * (the average of two values each ≥ S is ≥ S) AND is unbiased: the pure left-to-right pass alone
- * would jam a crowded layer against the left margin, the reverse against the right; their mean
- * sits balanced. Preserves the given order exactly.
- */
-function packLayerToward(
-  order: string[],
-  desired: Map<string, number>,
-  current: Map<string, number>,
-  widthById: Map<string, number>,
-  gap: number,
-  leftMargin: number,
-): Map<string, number> {
-  const want = (id: string): number => desired.get(id) ?? current.get(id) ?? leftMargin;
-  const half = (id: string): number => (widthById.get(id) ?? 0) / 2;
-
-  const ltr = new Map<string, number>();
-  let rightEdge = -Infinity;
-  for (const id of order) {
-    const lower = (rightEdge === -Infinity ? leftMargin : rightEdge + gap) + half(id);
-    const c = Math.max(want(id), lower);
-    ltr.set(id, c);
-    rightEdge = c + half(id);
-  }
-
-  const rtl = new Map<string, number>();
-  let leftEdge = Infinity;
-  for (let i = order.length - 1; i >= 0; i--) {
-    const id = order[i];
-    const upper = leftEdge === Infinity ? Infinity : leftEdge - gap - half(id);
-    const c = Math.min(want(id), upper);
-    rtl.set(id, c);
-    leftEdge = c - half(id);
-  }
-
-  const out = new Map<string, number>();
-  for (const id of order) { out.set(id, (ltr.get(id)! + rtl.get(id)!) / 2); }
-  return out;
-}
-
-/**
- * Tidy, parent-over-children coordinate assignment (the layout users expect from a class/part-of
- * tree — a parent sits horizontally in the middle of the span of its subtypes/compositions, not
- * merely at the same even pitch as unrelated siblings). Starts from the flat cumulative packing
- * (which fixes each layer's order and guarantees no overlap), then alternately sweeps:
+ * Tidy, parent-over-children coordinate assignment (a Reingold–Tilford-style layered tree walk):
+ * every parent is placed EXACTLY at the midpoint of the span of its children, and sibling subtrees
+ * are pushed apart by whole-subtree shifts only as far as needed to stay clear of each other. So a
+ * parent sits in the middle of its subtypes/compositions and the gap between sibling parents is
+ * deliberately UNEVEN — determined by how wide each one's own subtree is, not a fixed pitch.
  *
- *  - UP (deepest→shallowest): each occupant desires the MIDPOINT of its children's current span,
- *    so a parent centres over its children.
- *  - DOWN (shallowest→deepest): each occupant desires the MEAN of its parents' positions, so a
- *    lone child tucks under its parent and a shared child balances between them.
+ * Each occupant is laid out under a single parent (the first, in `layerOrder`, to reach it), so a
+ * shared child (or the real child at the end of a far edge's dummy chain, already claimed by a
+ * nearer parent) attaches to just one — the graph is reduced to a spanning tree for placement.
+ * A childless occupant takes the next free slot; an internal one is centred over its children after
+ * each later child subtree has been shifted right past the accumulated span of its earlier siblings.
  *
- * After each per-layer desire is computed, `packLayerToward` re-packs that layer order-preserving
- * and overlap-free. A chain dummy (exactly one parent, one child) desires its neighbour's x in
- * both sweeps, so multi-layer edges stay vertical. Occupants at negative layers (root ancestors)
- * are left untouched — the caller positions those as a symmetric group about the root instead.
+ * Separation uses a per-layer contour: when merging two subtrees the required shift is the MAX over
+ * every shared layer of `(halfWidthLeftExtreme + halfWidthRightExtreme)` minus their current gap —
+ * so a wide upper layer forces enough spread even where a narrow dummy layer alone would not,
+ * keeping every layer overlap-free. Children are visited in their `layerOrder` position, preserving
+ * the crossing-minimised ordering. Negative-depth ancestors are skipped for the caller to place.
  */
-export function assignBalancedCoordinates(
+export function assignTidyTreeCoordinates(
   layerOrder: Map<number, string[]>,
-  sortedLayers: number[],
   widthById: Map<string, number>,
   childrenByOccupant: Map<string, string[]>,
   layerOfId: Map<string, number>,
-  gap: number,
   leftMargin: number,
-  iterations = 8,
 ): Map<string, number> {
-  const pos = assignLayerCoordinates(layerOrder, widthById, gap, leftMargin);
+  const xById = new Map<string, number>();
+  const claimed = new Set<string>();
+  const widthOf = (id: string): number => widthById.get(id) ?? 0;
 
-  const parentsByOccupant = new Map<string, string[]>();
-  for (const [parent, kids] of childrenByOccupant) {
-    for (const k of kids) {
-      const arr = parentsByOccupant.get(k) ?? [];
-      arr.push(parent);
-      parentsByOccupant.set(k, arr);
+  const orderIndex = new Map<string, number>();
+  for (const order of layerOrder.values()) { order.forEach((id, i) => orderIndex.set(id, i)); }
+
+  // A subtree's contour: its extreme (min/max) coordinate at every layer it occupies, plus the
+  // width of the extreme occupant there (needed to compute a correct separation on merge).
+  interface Extreme { x: number; w: number; }
+  interface Sub { ids: string[]; min: Map<number, Extreme>; max: Map<number, Extreme>; }
+
+  const addToContour = (s: Sub, layer: number, x: number, w: number): void => {
+    const lo = s.min.get(layer); if (!lo || x < lo.x) { s.min.set(layer, { x, w }); }
+    const hi = s.max.get(layer); if (!hi || x > hi.x) { s.max.set(layer, { x, w }); }
+  };
+  const shiftSub = (s: Sub, d: number): void => {
+    for (const id of s.ids) { xById.set(id, xById.get(id)! + d); }
+    for (const m of [s.min, s.max]) { for (const [l, e] of m) { m.set(l, { x: e.x + d, w: e.w }); } }
+  };
+  // Right-shift `s` so it clears `acc` at every shared layer, then fold `s` into `acc`.
+  const placeRightOf = (acc: Sub, s: Sub): void => {
+    let shift = 0;
+    for (const [layer, hi] of acc.max) {
+      const lo = s.min.get(layer);
+      if (!lo) { continue; }
+      shift = Math.max(shift, hi.x + (hi.w + lo.w) / 2 - lo.x);
     }
-  }
-
-  const adjustable = (id: string): boolean => (layerOfId.get(id) ?? 0) >= 0;
-  const positive = sortedLayers.filter(l => l >= 0);
-
-  const sweep = (layers: number[], desireOf: (id: string) => number | undefined): void => {
-    for (const layer of layers) {
-      const order = layerOrder.get(layer);
-      if (!order || order.length === 0) { continue; }
-      const desired = new Map<string, number>();
-      for (const id of order) {
-        const d = desireOf(id);
-        if (d !== undefined) { desired.set(id, d); }
-      }
-      const packed = packLayerToward(order, desired, pos, widthById, gap, leftMargin);
-      for (const [id, v] of packed) { pos.set(id, v); }
-    }
+    if (shift > 0) { shiftSub(s, shift); }
+    acc.ids.push(...s.ids);
+    for (const [l, e] of s.min) { const lo = acc.min.get(l); if (!lo || e.x < lo.x) { acc.min.set(l, e); } }
+    for (const [l, e] of s.max) { const hi = acc.max.get(l); if (!hi || e.x > hi.x) { acc.max.set(l, e); } }
   };
 
-  for (let it = 0; it < iterations; it++) {
-    // UP: parent → midpoint of its children's span.
-    sweep([...positive].reverse(), (id) => {
-      const kids = (childrenByOccupant.get(id) ?? []).filter(k => pos.has(k));
-      if (kids.length === 0) { return undefined; }
-      const xs = kids.map(k => pos.get(k)!);
-      return (Math.min(...xs) + Math.max(...xs)) / 2;
-    });
-    // DOWN: child → mean of its (non-ancestor) parents.
-    sweep(positive, (id) => {
-      const parents = (parentsByOccupant.get(id) ?? []).filter(p => pos.has(p) && adjustable(p));
-      if (parents.length === 0) { return undefined; }
-      return parents.reduce((a, p) => a + pos.get(p)!, 0) / parents.length;
-    });
+  const layout = (id: string): Sub => {
+    claimed.add(id);
+    const layer = layerOfId.get(id)!;
+    const kids = (childrenByOccupant.get(id) ?? [])
+      .filter(k => !claimed.has(k) && layerOfId.get(k) === layer + 1)
+      .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+
+    if (kids.length === 0) {
+      xById.set(id, 0);
+      const s: Sub = { ids: [id], min: new Map(), max: new Map() };
+      addToContour(s, layer, 0, widthOf(id));
+      return s;
+    }
+
+    let acc: Sub | null = null;
+    for (const k of kids) {
+      const sub = layout(k);
+      if (!acc) { acc = sub; } else { placeRightOf(acc, sub); }
+    }
+    const kxs = kids.map(k => xById.get(k)!);
+    const px = (Math.min(...kxs) + Math.max(...kxs)) / 2;
+    xById.set(id, px);
+    acc!.ids.push(id);
+    addToContour(acc!, layer, px, widthOf(id));
+    return acc!;
+  };
+
+  // Grow a forest left-to-right: root first (claims its whole subtree), then any still-unclaimed
+  // occupant (an unreachable node, or a second root) as its own subtree placed past the rest.
+  let forest: Sub | null = null;
+  for (const layer of [...layerOrder.keys()].sort((a, b) => a - b)) {
+    if (layer < 0) { continue; }
+    for (const id of layerOrder.get(layer) ?? []) {
+      if (claimed.has(id)) { continue; }
+      const sub = layout(id);
+      if (!forest) { forest = sub; } else { placeRightOf(forest, sub); }
+    }
   }
 
-  return pos;
+  // Normalise so the left-most box edge sits exactly at the margin (a constant shift preserves every
+  // pairwise separation, so it can never introduce an overlap).
+  if (xById.size > 0) {
+    let minEdge = Infinity;
+    for (const [id, x] of xById) { minEdge = Math.min(minEdge, x - widthOf(id) / 2); }
+    const d = leftMargin - minEdge;
+    if (d !== 0) { for (const [id, x] of xById) { xById.set(id, x + d); } }
+  }
+  return xById;
 }

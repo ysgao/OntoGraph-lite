@@ -1,6 +1,6 @@
 import type { DiagramNode, DiagramEdge, LayoutDirection } from './diagramModel';
 import { insertDummyNodes } from './dummyNodes';
-import { assignBalancedCoordinates } from './layerCoordinates';
+import { assignTidyTreeCoordinates } from './layerCoordinates';
 import { reduceCrossings } from './layerOrdering';
 
 export interface LayoutPosition {
@@ -271,8 +271,8 @@ function computeInternal(
   for (const n of nodes) { layerOfId.set(n.iri, n.depth); }
   for (const d of dummies) { layerOfId.set(d.id, d.layer); }
 
-  const cross = assignBalancedCoordinates(
-    optimizedOrder, sortedLayers, widthById, nextHopByOccupant, layerOfId, 0, LEFT_MARGIN,
+  const cross = assignTidyTreeCoordinates(
+    optimizedOrder, widthById, nextHopByOccupant, layerOfId, LEFT_MARGIN,
   );
 
   // Direct ancestors of the root (`partOfGraph.ts`'s one-hop ancestor pre-pass, depth < 0) are
