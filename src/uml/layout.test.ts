@@ -149,9 +149,10 @@ describe('computeLayout', () => {
       // each must be at least one crossSpacing apart from its neighbor.
       expect(xs[1] - xs[0]).toBeGreaterThanOrEqual(170 - 1e-6); // SLOT_WIDTH
       expect(xs[2] - xs[1]).toBeGreaterThanOrEqual(170 - 1e-6);
-      // 'shared' is a lone node at depth 2 (no sibling to collide with), so it keeps its original
-      // pre-separation position — the accepted "not perfectly re-centered" cosmetic trade-off.
-      expect(layout.get('shared')!.x).toBeCloseTo(xs[0]);
+      // 'shared' now sits centered under its three parents (mean of their x = the middle parent's
+      // x, and the midpoint of the span) — the tidy parent-over-children placement, rather than the
+      // old quirk that pinned it under the leftmost parent.
+      expect(layout.get('shared')!.x).toBeCloseTo((xs[0] + xs[2]) / 2);
     });
   });
 

@@ -1,6 +1,6 @@
 import type { DiagramNode, DiagramEdge, LayoutDirection } from './diagramModel';
 import { insertDummyNodes } from './dummyNodes';
-import { assignLayerCoordinates } from './layerCoordinates';
+import { assignBalancedCoordinates } from './layerCoordinates';
 import { reduceCrossings } from './layerOrdering';
 
 export interface LayoutPosition {
@@ -265,7 +265,15 @@ function computeInternal(
   for (const n of nodes) { widthById.set(n.iri, crossSpacing); }
   for (const d of dummies) { widthById.set(d.id, dummyCrossSpacing); }
 
-  const cross = assignLayerCoordinates(optimizedOrder, widthById, 0, LEFT_MARGIN);
+  // Combined layer index for every occupant (real node depth or dummy layer) — lets the balanced
+  // coordinate pass leave negative-depth ancestors alone (centered as a group on root, below).
+  const layerOfId = new Map<string, number>();
+  for (const n of nodes) { layerOfId.set(n.iri, n.depth); }
+  for (const d of dummies) { layerOfId.set(d.id, d.layer); }
+
+  const cross = assignBalancedCoordinates(
+    optimizedOrder, sortedLayers, widthById, nextHopByOccupant, layerOfId, 0, LEFT_MARGIN,
+  );
 
   // Direct ancestors of the root (`partOfGraph.ts`'s one-hop ancestor pre-pass, depth < 0) are
   // never reached by the propagation above (the edge runs ancestor -> root, not the other way) —
