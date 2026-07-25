@@ -16,6 +16,9 @@
  */
 export interface LaneSpan {
   key: string;
+  /** composition vs generalization — the two kinds are never placed on the same height (see
+   *  `collides`), so a subtype bus and a part-of bus always read as visually distinct levels. */
+  kind: 'composition' | 'generalization';
   /** Left/right edge of this bus's horizontal span (parent exit x and children xs, min/max). */
   minX: number;
   maxX: number;
@@ -24,17 +27,17 @@ export interface LaneSpan {
   childIris: Set<string>;
 }
 
-/** Two buses collide only if their horizontal spans overlap on a POSITIVE-length sub-interval — the
- *  only way two horizontal lines can actually merge into one. Merely touching at an endpoint (two
- *  lines meeting at a point) does not count, and neither does a degenerate span (a parent sitting
- *  directly above its single child has no horizontal bus at all, just a vertical stem, which can
- *  cross other buses but never merge with them). Buses that share a child are a legitimate shared
- *  bus (fan-in), never a collision. */
+/** Two buses collide (must take different lanes/heights) when EITHER they are of different kinds —
+ *  a composition bus and a generalization bus are never allowed to share a height, so the two
+ *  relationship types always read as separate levels — OR their horizontal spans overlap on a
+ *  POSITIVE-length sub-interval (the only way two same-kind lines could actually merge into one).
+ *  A mere endpoint touch, or a degenerate point-span (a parent directly above its single child has
+ *  no horizontal bus, just a vertical stem that can cross but never merge), does not count. Buses
+ *  that share a child are a legitimate shared bus (fan-in) and never collide. */
 function collides(a: LaneSpan, b: LaneSpan): boolean {
-  const overlap = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) > 0;
-  if (!overlap) { return false; }
+  if (a.kind !== b.kind) { return true; }
   for (const c of a.childIris) { if (b.childIris.has(c)) { return false; } }
-  return true;
+  return Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) > 0;
 }
 
 /**

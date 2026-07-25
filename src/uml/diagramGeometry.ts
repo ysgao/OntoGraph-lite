@@ -268,7 +268,11 @@ function computeBusGroupPlacements(
   // net. Deterministic (leftmost span first, ties by key) so the assignment is stable (spec FR-009).
   const busYByKey = new Map<string, number>();
   for (const bucket of byNaturalBusY.values()) {
-    const laneOf = assignBusLanes(bucket.map(n => ({ key: n.key, minX: n.minX, maxX: n.maxX, childIris: n.childIris })));
+    const laneOf = assignBusLanes(bucket.map(n => ({
+      key: n.key,
+      kind: n.key.endsWith('composition') ? 'composition' : 'generalization',
+      minX: n.minX, maxX: n.maxX, childIris: n.childIris,
+    })));
     for (const item of bucket) {
       const shifted = item.naturalBusY + (laneOf.get(item.key) ?? 0) * BUS_LANE_SPREAD;
       busYByKey.set(item.key, Math.min(shifted, item.childTopY - MIN_FINAL_STEM));
@@ -855,28 +859,18 @@ function computeEdgeSegmentsCore(
   // instead of crossing. Fan-in-consumed near children are excluded here: they render once as a
   // centred fan-in stem below, not as this group's own stem.
   const enteringByChild = new Map<string, Array<{ edgeId: string; approachX: number }>>();
-  for (const [groupKey, g] of busGroups) {
-    const px = placements.get(groupKey)!.px;
+  for (const [, g] of busGroups) {
+    // Order the ports at a node by the cross-position each edge's OTHER end (its parent/source)
+    // sits at: an edge coming from further "up" the cross-axis takes the port further up, one from
+    // further "down" takes the port further down, so two edges into one node no longer swap sides
+    // and cross. Now that tidy-tree placement keeps far edges from swinging past their target, the
+    // parent position is a faithful proxy for the side an edge genuinely arrives from — near and
+    // far alike.
+    const approachX = positions.get(g.parentIri)!.x;
     for (const childIri of g.childIris) {
       if (fanInConsumed.has(`${g.parentIri}|${childIri}|${g.kind}`)) { continue; }
       const edgeId = g.edgeIdByChild.get(childIri);
       if (!edgeId) { continue; }
-      const cx = positions.get(childIri)!.x;
-      // "Approach x" is where the edge sits in the narrow band JUST above the ports, which decides
-      // the non-crossing port order — NOT where its far-away parent is. A near (straight) edge
-      // descends vertically at the child centre right down to the node, so its approach is centre-x.
-      // A far edge makes a low horizontal jog to reach the node; its approach is that jog's origin
-      // (the last waypoint whose x differs from centre) — the side it genuinely swings in from. So a
-      // far edge arriving from the left takes the left port and a straight edge stays centre-ward,
-      // instead of the straight edge being dragged to a side by its distant parent and forcing the
-      // far edge to cross it.
-      let approachX = cx;
-      const lane = farRoutePoints.get(edgeId);
-      if (lane) {
-        for (let i = lane.length - 1; i >= 0; i--) {
-          if (lane[i].x !== cx) { approachX = lane[i].x; break; }
-        }
-      }
       const arr = enteringByChild.get(childIri) ?? [];
       arr.push({ edgeId, approachX });
       enteringByChild.set(childIri, arr);
@@ -1188,20 +1182,12 @@ function computeEdgeRoutesCore(
   // node entered by 2+ bus/far stems fans them out onto distinct ports ordered by approach x, so
   // the drawio export matches the HTML/SVG one exactly.
   const enteringByChild = new Map<string, Array<{ edgeId: string; approachX: number }>>();
-  for (const [groupKey, g] of busGroups) {
-    const px = placements.get(groupKey)!.px;
+  for (const [, g] of busGroups) {
+    // See `computeEdgeSegmentsCore`: order a node's ports by the cross-position of each edge's
+    // parent/source, so edges never swap sides and cross.
+    const approachX = positions.get(g.parentIri)!.x;
     for (const e of g.groupEdges) {
       if (fanInConsumed.has(`${g.parentIri}|${e.childIri}|${g.kind}`)) { continue; }
-      const cx = positions.get(e.childIri)!.x;
-      // See `computeEdgeSegmentsCore`: approach x is centre-x for a straight near edge, the low
-      // jog's origin for a far edge — so the far edge takes the port on the side it swings in from.
-      let approachX = cx;
-      const lane = farRoutePoints.get(e.id);
-      if (lane) {
-        for (let i = lane.length - 1; i >= 0; i--) {
-          if (lane[i].x !== cx) { approachX = lane[i].x; break; }
-        }
-      }
       const arr = enteringByChild.get(e.childIri) ?? [];
       arr.push({ edgeId: e.id, approachX });
       enteringByChild.set(e.childIri, arr);

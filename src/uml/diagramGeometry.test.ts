@@ -630,31 +630,33 @@ describe('entry-port fan-out: a node entered by two edges gets two distinct, non
     expect(Math.abs(compPort - genPort)).toBeGreaterThanOrEqual(20);
   });
 
-  it('orders the ports by APPROACH side, not by the distant parent: a far edge swinging in from the left takes the left port so it does not cross a straight edge', () => {
-    // Reproduces the reported middle-ear case ("Inner epithelial layer of tympanic membrane"): a
-    // far COMPOSITION edge jogs into the node from the LEFT (dummy at x=250, left of centre 300),
-    // while a straight GENERALIZATION descends from a parent that is even further left (x=50).
-    // The composition genuinely arrives from the left, so it must take the LEFT port; the straight
-    // edge, which sits at the centre right down to the node, takes the RIGHT port. (The earlier
-    // ordering keyed off the straight edge's far-left parent and wrongly sent the composition to
-    // the right port, forcing its jog to cross the straight stem.)
+  it('orders the ports by each edge\'s PARENT (source) cross-position, so edges from opposite sides do not swap and cross', () => {
+    // Reproduces the reported middle-ear case ("Tympanic ostium of eustachian tube"): three edges
+    // enter one node from parents at different cross-positions. Ports must be assigned in the same
+    // order as those parents — the edge whose parent sits furthest up-cross gets the up-cross port —
+    // so no two edges swap sides and cross. Here parentLeft (x=50) < parentMid-far (x=250) <
+    // parentRight (x=560), so their ports must come out left, middle, right in that order.
     const pos = positions({
       C: { x: 300, y: 400 },
-      compParent: { x: 100, y: 0 },
-      genParent: { x: 50, y: 200 },
+      parentLeft: { x: 50, y: 200 },
+      parentMid: { x: 250, y: 0 },
+      parentRight: { x: 560, y: 200 },
     });
     const edges = [
-      edge('compParent', 'C', 'composition'),
-      edge('genParent', 'C', 'generalization'),
+      edge('parentLeft', 'C', 'generalization'),
+      edge('parentMid', 'C', 'composition'),   // a far edge (two layers up), still ordered by its parent
+      edge('parentRight', 'C', 'composition'),
     ];
-    const farEdgeRoutes = new Map<string, Position[]>([['compParent|C|composition', [{ x: 250, y: 200 }]]]);
+    const farEdgeRoutes = new Map<string, Position[]>([['parentMid|C|composition', [{ x: 250, y: 200 }]]]);
     const routes = computeEdgeRoutes(pos, edges, W, H, 'TB', farEdgeRoutes);
-    const comp = routes.get('compParent|C|composition')!;
-    const gen = routes.get('genParent|C|generalization')!;
-    const compPort = 300 - W / 2 + comp.entryX * W;
-    const genPort = 300 - W / 2 + gen.exitX * W;
-    expect(compPort).toBeLessThan(300);   // composition on the LEFT port (its approach side)
-    expect(genPort).toBeGreaterThan(300); // straight generalization on the RIGHT port
-    expect(compPort).toBeLessThan(genPort);
+    const portOf = (id: string, useExit: boolean): number => {
+      const r = routes.get(id)!;
+      return 300 - W / 2 + (useExit ? r.exitX : r.entryX) * W;
+    };
+    const leftPort = portOf('parentLeft|C|generalization', true);  // C is the source (exit) for a generalization
+    const midPort = portOf('parentMid|C|composition', false);      // C is the target (entry) for a composition
+    const rightPort = portOf('parentRight|C|composition', false);
+    expect(leftPort).toBeLessThan(midPort);
+    expect(midPort).toBeLessThan(rightPort);
   });
 });

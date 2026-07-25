@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { assignBusLanes, laneCountOf, type LaneSpan } from './busLanes';
 
-function span(key: string, minX: number, maxX: number, children: string[] = []): LaneSpan {
-  return { key, minX, maxX, childIris: new Set(children) };
+function span(key: string, minX: number, maxX: number, children: string[] = [], kind: LaneSpan['kind'] = 'composition'): LaneSpan {
+  return { key, kind, minX, maxX, childIris: new Set(children) };
 }
 
 describe('assignBusLanes', () => {
@@ -44,5 +44,23 @@ describe('assignBusLanes', () => {
   it('is deterministic — lane order follows ascending minX then key', () => {
     const s = [span('z', 200, 500), span('a', 0, 300)];
     expect(assignBusLanes(s).get('a')).toBe(0); // leftmost span gets lane 0 regardless of input order
+  });
+
+  it('never shares a lane between a composition bus and a generalization bus, even when disjoint', () => {
+    const lanes = assignBusLanes([
+      span('comp', 0, 100, [], 'composition'),
+      span('gen', 300, 400, [], 'generalization'),
+    ]);
+    expect(lanes.get('comp')).not.toBe(lanes.get('gen'));
+  });
+
+  it('still shares a lane among disjoint SAME-kind buses (compaction preserved within a kind)', () => {
+    const lanes = assignBusLanes([
+      span('c1', 0, 100, [], 'composition'),
+      span('c2', 300, 400, [], 'composition'),
+      span('g1', 600, 700, [], 'generalization'),
+    ]);
+    expect(lanes.get('c1')).toBe(lanes.get('c2'));   // two disjoint compositions share
+    expect(lanes.get('g1')).not.toBe(lanes.get('c1')); // generalization on its own lane
   });
 });
