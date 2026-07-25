@@ -143,6 +143,16 @@ const BUS_LANE_SPREAD = 12;
  *  letting a bus land on top of the child row. */
 const MIN_FINAL_STEM = 20;
 
+/** How far (px, each side of center) to fan out the final stems when a single node is entered by
+ *  two or more edges (any mix of subtype/composition, near or far). Without this every entering
+ *  stem descends at the child's exact centre-x and they overlap collinearly — reading as one line,
+ *  or worse crossing just above the box when one edge approaches from the left and the other from
+ *  the right. `assignEntryPorts` gives each entering edge a distinct port and orders them by the x
+ *  the edge actually approaches from (left-most approach → left-most port), so two edges into one
+ *  node splay apart instead of crossing. Kept well within the node half-width (NODE_WIDTH/2 = 80)
+ *  so a shifted stem still lands on the node's own top edge. */
+const ENTRY_PORT_SPREAD = 22;
+
 interface BusGroupSpec {
   parentIri: string;
   kind: 'composition' | 'generalization';
@@ -841,6 +851,44 @@ function computeEdgeSegmentsCore(
   }
   const farRoutePoints = routeFarEdgesThroughLanes(farEdgeSpecs, deepestBusYByRow, nodeHeight);
 
+  // Entry-port assignment (crossing reduction, FR "reduce unnecessary bus-lane crosses"): when a
+  // node is entered by 2+ bus/far stems they all otherwise descend at the child's exact centre-x
+  // and overlap (or cross just above the box). Give each entering edge a distinct port offset from
+  // centre, ordered by the x the edge genuinely approaches FROM — so the edge coming from the left
+  // takes the left port and the one from the right takes the right port, and they splay apart
+  // instead of crossing. Fan-in-consumed near children are excluded here: they render once as a
+  // centred fan-in stem below, not as this group's own stem.
+  const enteringByChild = new Map<string, Array<{ edgeId: string; approachX: number }>>();
+  for (const [groupKey, g] of busGroups) {
+    const px = placements.get(groupKey)!.px;
+    for (const childIri of g.childIris) {
+      if (fanInConsumed.has(`${g.parentIri}|${childIri}|${g.kind}`)) { continue; }
+      const edgeId = g.edgeIdByChild.get(childIri);
+      if (!edgeId) { continue; }
+      const cx = positions.get(childIri)!.x;
+      // A far edge's true approach is the last waypoint whose x differs from the child centre (its
+      // lane jog brings it to centre-x only for the final descent); a near edge approaches from its
+      // parent's exit x.
+      let approachX = px;
+      const lane = farRoutePoints.get(edgeId);
+      if (lane) {
+        for (let i = lane.length - 1; i >= 0; i--) {
+          if (lane[i].x !== cx) { approachX = lane[i].x; break; }
+        }
+      }
+      const arr = enteringByChild.get(childIri) ?? [];
+      arr.push({ edgeId, approachX });
+      enteringByChild.set(childIri, arr);
+    }
+  }
+  const entryPortByEdge = new Map<string, number>();
+  for (const [, arr] of enteringByChild) {
+    if (arr.length < 2) { continue; }
+    arr.sort((a, b) => a.approachX - b.approachX || a.edgeId.localeCompare(b.edgeId));
+    const n = arr.length;
+    arr.forEach((it, i) => entryPortByEdge.set(it.edgeId, (i - (n - 1) / 2) * ENTRY_PORT_SPREAD));
+  }
+
   for (const [groupKey, g] of busGroups) {
     const { px, busY } = placements.get(groupKey)!;
     const pyBottom = positions.get(g.parentIri)!.y + nodeHeight;
@@ -883,8 +931,14 @@ function computeEdgeSegmentsCore(
     // parent, per the existing "marker only on the parent-facing segment" convention).
     const markerOnFirstFarChild = nearChildIris.length === 0 && farChildIris.length > 0;
 
+    // Final stem x for a near child = its centre-x plus any entry-port offset assigned above
+    // (non-zero only when the child is entered by 2+ edges). The feeding bus horizontal is
+    // stretched to reach the shifted stem so no gap opens between bus and stem.
+    const nearStemX = (childIri: string): number =>
+      positions.get(childIri)!.x + (entryPortByEdge.get(g.edgeIdByChild.get(childIri)!) ?? 0);
+
     if (nearChildIris.length > 0) {
-      const xs = nearChildIris.map(c => positions.get(c)!.x);
+      const xs = nearChildIris.map(c => nearStemX(c));
       const busMinX = Math.min(px, ...xs);
       const busMaxX = Math.max(px, ...xs);
 
@@ -909,7 +963,8 @@ function computeEdgeSegmentsCore(
       // routed elsewhere via dummies — and detour around those phantom lines, which is exactly the
       // garbage routing that appeared once variable per-transition spacing let a lane-0 near stem
       // grow past the old length-based skip threshold.)
-      const points = [{ x: c.x, y: busY }, { x: c.x, y: c.y }];
+      const sx = nearStemX(childIri);
+      const points = [{ x: sx, y: busY }, { x: sx, y: c.y }];
       segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, colorIri: groupColorIri });
     }
 
@@ -938,6 +993,15 @@ function computeEdgeSegmentsCore(
           c.x, safeJogY, c.y, excludeIris, positions, nodeWidth, nodeHeight, stemObstacles, groupKey, childIri,
         );
         points = [{ x: px, y: pyBottom }, { x: px, y: safeJogY }, { x: c.x, y: safeJogY }, ...detour, { x: c.x, y: c.y }];
+      }
+      // Shift the FINAL descent onto this edge's assigned entry port (non-zero only when the child
+      // takes 2+ incoming edges). The final descent is the trailing run of points already at the
+      // child's centre-x; nudging just that run keeps the rest of the dummy-column route intact.
+      const off = edgeId ? (entryPortByEdge.get(edgeId) ?? 0) : 0;
+      if (off !== 0) {
+        for (let i = points.length - 1; i >= 0 && points[i].x === c.x; i--) {
+          points[i] = { x: c.x + off, y: points[i].y };
+        }
       }
       const marker = (markerOnFirstFarChild && farIndex === 0)
         ? (g.kind === 'composition' ? 'start' : 'end')
@@ -1119,6 +1183,35 @@ function computeEdgeRoutesCore(
   }
   const farRoutePoints = routeFarEdgesThroughLanes(farEdgeSpecs, deepestBusYByRow, nodeHeight);
 
+  // Entry-port assignment — identical policy to `computeEdgeSegmentsCore`'s (see its comment): a
+  // node entered by 2+ bus/far stems fans them out onto distinct ports ordered by approach x, so
+  // the drawio export matches the HTML/SVG one exactly.
+  const enteringByChild = new Map<string, Array<{ edgeId: string; approachX: number }>>();
+  for (const [groupKey, g] of busGroups) {
+    const px = placements.get(groupKey)!.px;
+    for (const e of g.groupEdges) {
+      if (fanInConsumed.has(`${g.parentIri}|${e.childIri}|${g.kind}`)) { continue; }
+      const cx = positions.get(e.childIri)!.x;
+      let approachX = px;
+      const lane = farRoutePoints.get(e.id);
+      if (lane) {
+        for (let i = lane.length - 1; i >= 0; i--) {
+          if (lane[i].x !== cx) { approachX = lane[i].x; break; }
+        }
+      }
+      const arr = enteringByChild.get(e.childIri) ?? [];
+      arr.push({ edgeId: e.id, approachX });
+      enteringByChild.set(e.childIri, arr);
+    }
+  }
+  const entryPortByEdge = new Map<string, number>();
+  for (const [, arr] of enteringByChild) {
+    if (arr.length < 2) { continue; }
+    arr.sort((a, b) => a.approachX - b.approachX || a.edgeId.localeCompare(b.edgeId));
+    const n = arr.length;
+    arr.forEach((it, i) => entryPortByEdge.set(it.edgeId, (i - (n - 1) / 2) * ENTRY_PORT_SPREAD));
+  }
+
   for (const [groupKey, g] of busGroups) {
     const parentPos = positions.get(g.parentIri)!;
     const { px, busY } = placements.get(groupKey)!;
@@ -1155,10 +1248,21 @@ function computeEdgeRoutesCore(
         forwardPoints = dedupeConsecutive([{ x: px, y: busY }, { x: c.x, y: busY }]);
       }
 
+      // Nudge the child-facing end of the route onto this edge's assigned entry port (non-zero only
+      // when the child takes 2+ incoming edges) — both the trailing waypoints already at centre-x
+      // and the connection fraction, so waypoints and perimeter point stay aligned.
+      const off = entryPortByEdge.get(e.id) ?? 0;
+      if (off !== 0) {
+        for (let i = forwardPoints.length - 1; i >= 0 && forwardPoints[i].x === c.x; i--) {
+          forwardPoints[i] = { x: c.x + off, y: forwardPoints[i].y };
+        }
+      }
+      const portFrac = 0.5 + off / nodeWidth;
+
       if (g.kind === 'composition') {
         routes.set(e.id, {
           sourceIri: e.parentIri, targetIri: e.childIri,
-          exitX, exitY: 1, entryX: 0.5, entryY: 0,
+          exitX, exitY: 1, entryX: portFrac, entryY: 0,
           points: forwardPoints,
           far: spansMultiLayer,
           colorIri: groupColorIri,
@@ -1166,7 +1270,7 @@ function computeEdgeRoutesCore(
       } else {
         routes.set(e.id, {
           sourceIri: e.childIri, targetIri: e.parentIri,
-          exitX: 0.5, exitY: 0, entryX: exitX, entryY: 1,
+          exitX: portFrac, exitY: 0, entryX: exitX, entryY: 1,
           points: [...forwardPoints].reverse(),
           far: spansMultiLayer,
           colorIri: groupColorIri,
