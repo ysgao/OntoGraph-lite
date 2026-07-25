@@ -298,7 +298,8 @@ function computeInternal(
       const [parentIri, kind] = [key.slice(0, key.lastIndexOf('|')), key.slice(key.lastIndexOf('|') + 1)];
       const childIris = edges.filter(e => e.parentIri === parentIri && e.kind === kind).map(e => e.childIri);
       const xs = [cross.get(parentIri) ?? LEFT_MARGIN, ...childIris.map(c => cross.get(c) ?? LEFT_MARGIN)];
-      return { key, minX: Math.min(...xs), maxX: Math.max(...xs), childIris: new Set(childIris) };
+      const laneKind = kind === 'composition' ? 'composition' as const : 'generalization' as const;
+      return { key, kind: laneKind, minX: Math.min(...xs), maxX: Math.max(...xs), childIris: new Set(childIris) };
     });
     busLaneCountByLayer.set(parentLayer, laneCountOf(assignBusLanes(spans)));
   }
