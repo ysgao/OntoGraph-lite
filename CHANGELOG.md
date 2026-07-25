@@ -3,6 +3,17 @@
 All notable changes to OntoGraph Lite are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.7] — 2026-07-25
+
+### Changed
+- **UML diagrams now use a proper layered graph layout algorithm**, replacing the old flat/reactive layout whose node overlaps and heavy edge crossings became obvious once a diagram's hierarchy went beyond two or three levels:
+  - Each parent is centered exactly over the span of its own subtypes/compositions (tidy-tree placement); sibling parents are spaced *unevenly*, according to how wide each one's own subtree is, rather than an even fixed pitch.
+  - Bus lines (a parent fanning out to several children, or several parents converging on one shared child) only get a dedicated horizontal lane when they would otherwise visually merge with another bus of the *same* relationship kind — disjoint buses of the same kind now share a lane, compacting the vertical space between levels.
+  - Composition and generalization buses are never placed at the same height, so subtype and part-of relationships always read as visually distinct levels.
+  - Multi-layer ("far") edges render dashed and route through their own uniformly-spaced lanes below the ordinary buses, instead of cutting across them.
+  - Each edge is colored to match the node it connects to — the target's color for a single destination, the source's color when a bus fans out to several — making it easier to trace where a line goes.
+  - A node entered by two or more edges assigns each edge its own connection point, ordered by the cross-position of the edge's source, so incoming lines no longer swap sides and cross each other.
+
 ## [0.3.6] — 2026-07-23
 
 ### Added
