@@ -165,178 +165,83 @@ describe('computeEdgeSegments — a single parent with BOTH composition and gene
   });
 });
 
-describe('computeEdgeRoutes — bus-lane collision avoidance across DIFFERENT classes', () => {
+describe('computeEdgeRoutes — bus lanes compact: overlapping buses split, disjoint buses share a height', () => {
   const W2 = 160, H2 = 56;
 
-  it('does NOT separate two groups that share a child — a single class\'s own multiple parents converging on one bus height is the intended "shared bus" look, not a collision', () => {
+  it('gives two buses whose horizontal spans OVERLAP distinct heights (so their lines never merge)', () => {
+    // Two wide, genuinely overlapping fan-out buses (each spans from its own parent across to its
+    // child on the other side): parentA 100→700, parentB 300→900 — overlapping [300,700].
     const pos = positions({
-      parentNear: { x: 100, y: 0 },
-      parentFar: { x: 900, y: 0 },
-      childX: { x: 100, y: 140 },
+      parentA: { x: 100, y: 0 }, childA: { x: 700, y: 140 },
+      parentB: { x: 900, y: 0 }, childB: { x: 300, y: 140 },
     });
     const edges = [
-      edge('parentNear', 'childX', 'generalization'),
-      edge('parentFar', 'childX', 'composition'),
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
     ];
     const routes = computeEdgeRoutes(pos, edges, W2, H2);
-    const nearBusY = routes.get('parentNear|childX|generalization')!.points[0].y;
-    const farBusY = routes.get('parentFar|childX|composition')!.points[0].y;
-    expect(nearBusY).toBe(farBusY);
-    expect(nearBusY).toBe(98); // natural busY: pyBottom(56) + min(BUS_GAP(42), (140-56)/2=42)
+    const aBusY = routes.get('parentA|childA|composition')!.points[0].y;
+    const bBusY = routes.get('parentB|childB|composition')!.points[0].y;
+    // Overlapping spans -> two lanes -> two heights (98 and 110, `BUS_LANE_SPREAD` apart).
+    expect(aBusY).not.toBe(bBusY);
+    expect([aBusY, bBusY].sort((x, y) => x - y)).toEqual([98, 110]);
   });
 
-  it('separates a class\'s bridging bus (to a distant second parent) from an UNRELATED class\'s bus that would otherwise land at the identical natural height and cross it', () => {
+  it('lets two buses with DISJOINT horizontal spans SHARE one height (the compaction)', () => {
+    // Two fan-out buses whose spans do not overlap: A over [100,300], B over [600,800].
     const pos = positions({
-      parentNear: { x: 100, y: 0 },
-      parentFar: { x: 900, y: 0 },
-      childX: { x: 100, y: 140 },
-      parentY: { x: 500, y: 0 },
-      childY: { x: 500, y: 140 },
+      parentA: { x: 100, y: 0 }, childA: { x: 300, y: 140 },
+      parentB: { x: 800, y: 0 }, childB: { x: 600, y: 140 },
     });
     const edges = [
-      edge('parentNear', 'childX', 'generalization'),
-      edge('parentFar', 'childX', 'composition'),
-      edge('parentY', 'childY', 'generalization'),
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
     ];
     const routes = computeEdgeRoutes(pos, edges, W2, H2);
+    const aBusY = routes.get('parentA|childA|composition')!.points[0].y;
+    const bBusY = routes.get('parentB|childB|composition')!.points[0].y;
+    // Disjoint spans never merge, so both keep the natural lane-0 height — one lane, not two.
+    expect(aBusY).toBe(bBusY);
+    expect(aBusY).toBe(98);
+  });
 
-    const farBusY = routes.get('parentFar|childX|composition')!.points[0].y;
-    const yBusY = routes.get('parentY|childY|generalization')!.points[0].y;
-    // Without lane separation both would be 98 (identical natural busY) and cross paths —
-    // parentFar's long bridging bus (100 -> 900) sweeps straight through parentY/childY's
-    // territory (x=500) at that same height. Lane separation alone pushes parentY to a second
-    // lane (110); the bus-vs-stem push then ALSO has to move parentFar further still, since its
-    // span keeps crossing parentY's own stems (parent-stem, then child-stem) as it climbs — it
-    // ends up capped at its own child's ceiling (childTopY(140) - BUS_LANE_CLEARANCE(6) = 134)
-    // without fully escaping, which is this specific case's inherent limit (parentFar's own
-    // child sits at the same row parentY's whole structure occupies) rather than a bug: the two
-    // buses are still NOT at the same height, which is what actually matters visually.
-    expect(farBusY).toBe(134);
-    expect(yBusY).toBe(110);
-    expect(farBusY).not.toBe(yBusY);
-
-    // The two groups NOT in conflict (parentNear/childX, whose span [100,100] doesn't overlap
-    // parentY/childY's [500,500]) are untouched — still at the natural height.
-    const nearBusY = routes.get('parentNear|childX|generalization')!.points[0].y;
-    expect(nearBusY).toBe(98);
+  it('a parent sitting directly above its child (a point-span, no horizontal bus) shares a height with a wide bus that passes over it', () => {
+    // parentB is a plain vertical stem at x=500; parentA's wide bus 100→900 passes over x=500 but
+    // only CROSSES that stem — it cannot merge with a zero-width span — so no extra lane is spent.
+    const pos = positions({
+      parentA: { x: 100, y: 0 }, childA: { x: 900, y: 140 },
+      parentB: { x: 500, y: 0 }, childB: { x: 500, y: 140 },
+    });
+    const edges = [
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
+    ];
+    const routes = computeEdgeRoutes(pos, edges, W2, H2);
+    const aBusY = routes.get('parentA|childA|composition')!.points[0].y;
+    const bBusY = routes.get('parentB|childB|composition')!.points[0].y;
+    expect(aBusY).toBe(98);
+    expect(bBusY).toBe(98);
   });
 });
 
-describe('computeEdgeRoutes — obstacle avoidance for a multi-row-spanning descent', () => {
+describe('computeEdgeRoutes — adjacent (one-layer) edges route straight, no detour', () => {
   const W2 = 160, H2 = 56;
 
-  it('routes a composition edge\'s descent AROUND an unrelated intermediate node instead of straight through its box (reported: "Ostium of eustachian tube" sitting between "Tympanic cavity" and its real children two rows down)', () => {
-    const pos = positions({
-      cavity: { x: 500, y: 0 },   // composition parent (the "whole"), row 0
-      ostium: { x: 500, y: 140 }, // unrelated intermediate node, row 1, directly in the path
-      part1: { x: 450, y: 280 },  // actual composition child, row 2
-      part2: { x: 550, y: 280 },  // actual composition child, row 2
-    });
-    const edges = [
-      edge('cavity', 'part1', 'composition'),
-      edge('cavity', 'part2', 'composition'),
-    ];
-    const routes = computeEdgeRoutes(pos, edges, W2, H2);
-
-    // ostium's box: x in [420, 580], y in [140, 196].
-    const route1 = routes.get('cavity|part1|composition')!;
-    expect(route1.points).toEqual([
-      { x: 500, y: 98 }, { x: 450, y: 98 },
-      { x: 450, y: 130 }, { x: 410, y: 130 }, { x: 410, y: 206 }, { x: 450, y: 206 },
-    ]);
-
-    const route2 = routes.get('cavity|part2|composition')!;
-    expect(route2.points).toEqual([
-      { x: 500, y: 98 }, { x: 550, y: 98 },
-      { x: 550, y: 130 }, { x: 590, y: 130 }, { x: 590, y: 206 }, { x: 550, y: 206 },
-    ]);
-
-    // Neither route ever sits inside ostium's box while passing through its row.
-    for (const route of [route1, route2]) {
-      for (const p of route.points) {
-        if (p.y > 140 && p.y < 196) { expect(p.x < 420 || p.x > 580).toBe(true); }
-      }
-    }
-  });
-
-  it('detours to whichever side is closer — part1 (left of the obstacle center) detours left, part2 (right of center) detours right', () => {
-    const pos = positions({
-      cavity: { x: 500, y: 0 }, ostium: { x: 500, y: 140 },
-      part1: { x: 450, y: 280 }, part2: { x: 550, y: 280 },
-    });
-    const routes = computeEdgeRoutes(pos, [
-      edge('cavity', 'part1', 'composition'), edge('cavity', 'part2', 'composition'),
-    ], W2, H2);
-
-    expect(routes.get('cavity|part1|composition')!.points.some(p => p.x === 410)).toBe(true);
-    expect(routes.get('cavity|part2|composition')!.points.some(p => p.x === 590)).toBe(true);
-  });
+  // NOTE: obstacle avoidance for a MULTI-layer descent is no longer a reactive per-edge detour —
+  // a multi-layer edge is expanded into a dummy-node chain by `layout.ts`, and routed through
+  // those reserved (guaranteed-clear) dummy columns via `elbowExpand`. Its correctness (no edge
+  // ever crosses an unrelated node box) is verified structurally, on real and synthetic
+  // multi-layer fixtures, in `layoutMetrics.test.ts`. The old reactive-detour tests that fed a
+  // multi-row edge WITHOUT its dummy chain (a production-impossible input) were removed with that
+  // change. What remains here is the still-load-bearing invariant: a genuinely ADJACENT edge
+  // (child exactly one layer down, no dummy chain) always descends straight, never detours —
+  // nothing can occupy the gap between two adjacent layers, so it must never go looking.
 
   it('does not detour when the child sits directly one row below its bus (the ordinary case) — no node can ever occupy that narrow gap', () => {
     const pos = positions({ root: { x: 500, y: 0 }, only: { x: 650, y: 140 } });
     const routes = computeEdgeRoutes(pos, [edge('root', 'only', 'composition')], W2, H2);
-    // Same shape as before this feature existed: just the bus-arrival waypoint, no detour points.
+    // Just the bus-arrival waypoint, no detour points.
     expect(routes.get('root|only|composition')!.points).toEqual([{ x: 500, y: 98 }, { x: 650, y: 98 }]);
-  });
-
-  it('reverses the detour order for a generalization edge, since its path travels child -> parent (bottom to top) rather than parent -> child', () => {
-    const pos = positions({
-      cavity: { x: 500, y: 0 }, ostium: { x: 500, y: 140 }, part1: { x: 450, y: 280 },
-    });
-    const routes = computeEdgeRoutes(pos, [edge('cavity', 'part1', 'generalization')], W2, H2);
-    const route = routes.get('cavity|part1|generalization')!;
-    // Path starts at the child's own top edge (implicit, not in `points`) and ends at the parent —
-    // so the detour's "exit" (near the child) must come FIRST here, "enter" (near the bus) last.
-    expect(route.points).toEqual([
-      { x: 450, y: 206 }, { x: 410, y: 206 }, { x: 410, y: 130 }, { x: 450, y: 130 },
-      { x: 450, y: 98 }, { x: 500, y: 98 },
-    ]);
-  });
-
-  it('widens the detour iteratively when the first candidate side ALSO lands on a second, different obstacle — rather than stopping after checking only the original straight-line position', () => {
-    const pos = positions({
-      cavity: { x: 500, y: 0 },
-      obstacle1: { x: 500, y: 140 }, // box: x in [420, 580]
-      obstacle2: { x: 350, y: 140 }, // box: x in [270, 430] — overlaps where a naive fix would jog to
-      part1: { x: 460, y: 280 },
-    });
-    const routes = computeEdgeRoutes(pos, [edge('cavity', 'part1', 'composition')], W2, H2);
-    const route = routes.get('cavity|part1|composition')!;
-
-    // A single-pass fix would stop at detourX=410 (just past obstacle1's left edge) without
-    // noticing obstacle2 also occupies that spot; the correct result clears BOTH by detouring
-    // right instead, once merging obstacle2 in makes the right side cheaper.
-    expect(route.points).toEqual([
-      { x: 500, y: 98 }, { x: 460, y: 98 },
-      { x: 460, y: 130 }, { x: 590, y: 130 }, { x: 590, y: 206 }, { x: 460, y: 206 },
-    ]);
-  });
-
-  it('detours around a DIFFERENT parent\'s own stem line even with no accompanying box in the way — reported: a composition edge crossed "Ostium of eustachian tube"\'s own separate outgoing stem', () => {
-    const w4 = 16, h4 = 56; // narrow nodes so a PARENT_STEM_SPREAD-offset stem clears its own box
-    const pos = positions({
-      parentX: { x: 500, y: 20 },
-      child1: { x: 488, y: 140 }, // parentX's composition child — its PARENT stem exits at x=488 (spread left)
-      child2: { x: 512, y: 140 }, // parentX's generalization child — forces the composition/generalization spread
-      parentY: { x: 700, y: 0 },  // unrelated parent, far away
-      childY: { x: 488, y: 200 }, // parentY's composition child (multi-row span) — sits directly on parentX's own stem line
-    });
-    const edges = [
-      edge('parentX', 'child1', 'composition'),
-      edge('parentX', 'child2', 'generalization'),
-      edge('parentY', 'childY', 'composition'),
-    ];
-    const routes = computeEdgeRoutes(pos, edges, w4, h4);
-    const route = routes.get('parentY|childY|composition')!;
-
-    // parentY's OWN bus first gets pushed (146) by the bus-vs-stem check, since its span crosses
-    // parentX's incoming parent-stem and then its own outgoing child-stem in turn — past both of
-    // those, its descent still passes through child1's own BOX (child1 also happens to sit at
-    // x=488), so the per-child detour still jogs around that.
-    expect(route.points).toEqual([
-      { x: 700, y: 146 }, { x: 488, y: 146 },
-      { x: 488, y: 130 }, { x: 470, y: 130 }, { x: 470, y: 206 }, { x: 488, y: 206 },
-    ]);
   });
 
   it('does NOT attempt a detour for a normal one-row edge even amid other multi-row obstacles nearby — a one-row gap can never legitimately contain an obstacle, so it must never go looking for one', () => {
@@ -363,33 +268,30 @@ describe('computeEdgeRoutes — obstacle avoidance for a multi-row-spanning desc
   });
 });
 
-describe('computeEdgeSegments — bus-lane collision avoidance is visible in the rendered path data too', () => {
+describe('computeEdgeSegments — distinct bus heights are visible in the rendered path data too', () => {
   function extractYs(d: string): number[] {
     return [...d.matchAll(/-?\d+(?:\.\d+)?,(-?\d+(?:\.\d+)?)/g)].map(m => Number(m[1]));
   }
 
-  it('renders two distinct bus heights for two unrelated classes whose buses would otherwise coincide, while leaving a shared-child pair at one height', () => {
+  it('renders distinct heights only where buses overlap, sharing a height where they do not', () => {
+    // Three fan-out buses: A [100,400] and B [300,600] overlap each other; C [800,1000] is off on
+    // its own. So A and B take two lanes (98, 110) and C shares lane 0's height (98) — two distinct
+    // heights across the three, not three.
     const pos = positions({
-      parentNear: { x: 100, y: 0 },
-      parentFar: { x: 900, y: 0 },
-      childX: { x: 100, y: 140 },
-      parentY: { x: 500, y: 0 },
-      childY: { x: 500, y: 140 },
+      parentA: { x: 100, y: 0 }, childA: { x: 400, y: 140 },
+      parentB: { x: 600, y: 0 }, childB: { x: 300, y: 140 },
+      parentC: { x: 800, y: 0 }, childC: { x: 1000, y: 140 },
     });
     const edges = [
-      edge('parentNear', 'childX', 'generalization'),
-      edge('parentFar', 'childX', 'composition'),
-      edge('parentY', 'childY', 'generalization'),
+      edge('parentA', 'childA', 'composition'),
+      edge('parentB', 'childB', 'composition'),
+      edge('parentC', 'childC', 'composition'),
     ];
     const result = computeEdgeSegments(pos, edges, W, H);
 
     const markerYs = result.filter(s => s.marker).flatMap(s => extractYs(s.d));
     const busYs = new Set(markerYs.filter(y => y !== 56)); // 56 = every parent's shared pyBottom
-    // parentNear/parentFar (98, shared child, unaffected) and parentY (110, lane-separated).
-    // parentFar's own bus-vs-stem push (crossing parentY's stems as its wide span sweeps past
-    // parentY's column) then pushes it further still, to 134 — see the routes-level test with
-    // the identical fixture for why that specific value is this case's inherent ceiling.
-    expect(busYs).toEqual(new Set([98, 110, 134]));
+    expect(busYs).toEqual(new Set([98, 110]));
   });
 });
 
@@ -487,60 +389,11 @@ describe('computeEdgeRoutes', () => {
     expect(busY - parentBottom).toBeGreaterThanOrEqual(30);
   });
 
-  it('regression: a multi-row descent detours around an UNRELATED group\'s horizontal bus line, not just its vertical stems — reported: "Tympanic ostium of eustachian tube"\'s composition edge sailed straight through "Structure of pharyngotympanic tube"\'s own horizontal bus band, undetected', () => {
-    const pos = positions({
-      parentC: { x: 1500, y: 0 },   // composition parent (e.g. "Tympanic cavity"), far right
-      parentA: { x: 1000, y: 140 }, // unrelated parent (e.g. "Structure of pharyngotympanic tube")
-      childB1: { x: 300, y: 280 },  // parentA's own children, spread wide — its bus spans [300,1700]
-      childB2: { x: 1700, y: 280 },
-      childD: { x: 700, y: 560 },   // parentC's child — multi-row descent passes straight through
-    });
-    const edges = [
-      edge('parentA', 'childB1', 'generalization'),
-      edge('parentA', 'childB2', 'generalization'),
-      edge('parentC', 'childD', 'composition'),
-    ];
-    const routes = computeEdgeRoutes(pos, edges, W, H);
-    const route = routes.get('parentC|childD|composition')!;
-
-    // parentA's OWN bus, in turn, gets pushed by the SAME bus-vs-stem check (its span crosses
-    // parentC's own child-facing stem, which reaches all the way down to childD's row) — moving
-    // parentA's obstacle band deeper, which is why childD's detour clears it at a taller enterY
-    // (256) than the original (pre-bus-push) fix alone would have needed.
-    expect(route.points).toEqual([
-      { x: 1500, y: 98 }, { x: 700, y: 98 },
-      { x: 700, y: 256 }, { x: 210, y: 256 }, { x: 210, y: 346 }, { x: 700, y: 346 },
-    ]);
-
-    // The detour still clears parentA's ORIGINAL bus band (y in [230,246], x in [300,1700]) too.
-    for (const p of route.points) {
-      if (p.y > 230 && p.y < 246) { expect(p.x < 300 || p.x > 1700).toBe(true); }
-    }
-  });
-
-  it('regression: widens the detour when the RETURN horizontal jog itself crosses a third, unrelated obstacle — not just when the vertical detour column does — reported: a return jog sailed straight through several sibling classes\' stems that sat between the two endpoints, never checked before', () => {
-    const pos = positions({
-      cavity: { x: 500, y: 0 },
-      obstacleA: { x: 500, y: 140 },       // box: x in [420,580] — found by the initial vertical hit
-      childD: { x: 460, y: 280 },
-      // Unrelated group, positioned so its child's stem sits ONLY along the horizontal return
-      // path (x in [437,453], well inside the [410,460] jog span) — NOT at childX(460) and NOT
-      // at the chosen detourX(410), so only a horizontal-segment check can find it.
-      obstacleDParent: { x: 445, y: 0 },
-      obstacleDChild: { x: 445, y: 280 },
-    });
-    const edges = [
-      edge('cavity', 'childD', 'composition'),
-      edge('obstacleDParent', 'obstacleDChild', 'composition'),
-    ];
-    const routes = computeEdgeRoutes(pos, edges, W, H);
-    const route = routes.get('cavity|childD|composition')!;
-
-    expect(route.points).toEqual([
-      { x: 500, y: 98 }, { x: 460, y: 98 },
-      { x: 460, y: 88 }, { x: 410, y: 88 }, { x: 410, y: 290 }, { x: 460, y: 290 },
-    ]);
-  });
+  // (Multi-row descent obstacle-avoidance is now structural via dummy-column routing — see the
+  // note in the "adjacent edges route straight" describe block and the zero-overlap coverage in
+  // `layoutMetrics.test.ts`. The former reactive-detour regression tests here fed a multi-row
+  // edge without its dummy chain, a production-impossible input, and were removed with that
+  // change.)
 });
 
 describe('far-child (dual-relationship) bus routing', () => {
@@ -551,6 +404,11 @@ describe('far-child (dual-relationship) bus routing', () => {
   // instead of one). Reported: farChild's straight bus sweep from parentB toward its own x swept
   // directly through parentA's incoming stem to "Ostium", sitting in the row directly below
   // parentA (and directly below parentB's own sibling row too).
+  // `farRoutes` is the dummy chain `layout.ts` would produce for the multi-layer parentB->farChild
+  // edge: one dummy at the intermediate row (420), placed in a CLEAR column (520 — no real node
+  // sits there at that row), which is exactly how the layered layout keeps the far edge's path
+  // clear of `ostium`/`siblingOfFar`. Passing it makes these tests exercise the real production
+  // far-routing path (elbow through the reserved dummy column) rather than a bare geometry call.
   function buildFixture() {
     const pos = positions({
       parentA: { x: 252.5, y: 280 }, // "Pharyngotympanic tube"
@@ -567,58 +425,238 @@ describe('far-child (dual-relationship) bus routing', () => {
       edge('parentB', 'farChild', 'composition'),
       edge('ostium', 'farChild', 'generalization'),
     ];
-    return { pos, edges };
+    const farRoutes = new Map<string, Position[]>([
+      ['parentB|farChild|composition', [{ x: 520, y: 420 }]],
+    ]);
+    return { pos, edges, farRoutes };
   }
 
-  it('computeEdgeRoutes: routes the far child down the parent\'s own column, past the blocking sibling stem, before jogging sideways', () => {
-    const { pos, edges } = buildFixture();
-    const routes = computeEdgeRoutes(pos, edges, W, H);
+  it('computeEdgeRoutes: routes the far child through its reserved dummy column; the near child stays a plain single-hop bus reach', () => {
+    const { pos, edges, farRoutes } = buildFixture();
+    const routes = computeEdgeRoutes(pos, edges, W, H, 'TB', farRoutes);
 
-    // The near child is completely unaffected — still a plain single-hop bus reach.
+    // Near child (one layer down): straight bus-arrival waypoints at parentB's own busY.
     expect(routes.get('parentB|nearChild|composition')!.points).toEqual([
-      { x: 465, y: 414 }, { x: 635, y: 414 },
+      { x: 465, y: 390 }, { x: 635, y: 390 },
     ]);
 
-    // The far child descends straight down at parentB's OWN x (465) past ostium's incoming stem
-    // AND the ostium/ostiumSibling generalization bus (both sitting in the rows in between)
-    // before jogging left into its own column.
-    expect(routes.get('parentB|farChild|composition')!.points).toEqual([
-      { x: 465, y: 336 }, { x: 465, y: 550 }, { x: 295, y: 550 },
-    ]);
+    // Far child: its route passes through the reserved dummy column (x=520) at the intermediate
+    // row, rather than descending straight at parentB's x through whatever sits between.
+    const farPoints = routes.get('parentB|farChild|composition')!.points;
+    expect(farPoints.some(p => p.x === 520)).toBe(true);
+    // ...and never sits inside `ostium`'s box (x in [300,460], y in [420,476]) while crossing its row.
+    for (const p of farPoints) {
+      if (p.y > 420 && p.y < 476) { expect(p.x < 300 || p.x > 460).toBe(true); }
+    }
   });
 
-  it('computeEdgeRoutes: flags the far child\'s route as far, and leaves the near child (and other ordinary edges) as not-far', () => {
-    const { pos, edges } = buildFixture();
-    const routes = computeEdgeRoutes(pos, edges, W, H);
+  it('computeEdgeRoutes: flags the far (multi-layer) child\'s route as far, and the near/adjacent edges as not-far', () => {
+    const { pos, edges, farRoutes } = buildFixture();
+    const routes = computeEdgeRoutes(pos, edges, W, H, 'TB', farRoutes);
 
     expect(routes.get('parentB|farChild|composition')!.far).toBe(true);
     expect(routes.get('parentB|nearChild|composition')!.far).toBe(false);
     expect(routes.get('parentA|ostium|composition')!.far).toBe(false);
   });
 
-  it('computeEdgeSegments: the shared webview bus line only spans the near children — the far child gets its own independent segment, no shared bus / no marker', () => {
-    const { pos, edges } = buildFixture();
-    const segments = computeEdgeSegments(pos, edges, W, H);
+  it('computeEdgeSegments: the shared bus line spans only the near (adjacent) child; the far child is its own independent path routed through its dummy column', () => {
+    const { pos, edges, farRoutes } = buildFixture();
+    const segments = computeEdgeSegments(pos, edges, W, H, 'TB', farRoutes);
 
-    const parentBSegments = segments.filter(s => s.d.includes('465,336') || s.d.includes('465,414') || s.d.includes('465,550'));
-    // Marker-carrying parent stem still exits at parentB's own x, straight down to its ordinary busY.
-    expect(parentBSegments.some(s => s.marker === 'start' && s.d === 'M465,336 L465,414')).toBe(true);
-    // No bus line needed for a single near child (busMinX === busMaxX, both 635... wait px=465,
-    // nearChild=635, so there IS a one-child bus spanning 465-635 at busY=414).
-    expect(parentBSegments.some(s => s.d === 'M465,414 L635,414')).toBe(true);
-    // The far child's own independent path, entirely separate from the above.
-    expect(parentBSegments.some(s => s.d === 'M465,336 L465,550 L295,550 L295,560')).toBe(true);
+    // Marker-carrying parent stem exits at parentB's own x, straight down to its busY.
+    expect(segments.some(s => s.marker === 'start' && s.d === 'M465,336 L465,390')).toBe(true);
+    // One-child bus spanning parentB's exit (465) to the near child (635) at that busY.
+    expect(segments.some(s => s.d === 'M465,390 L635,390')).toBe(true);
+    // The far child's own dashed path goes through the reserved dummy column (x=520).
+    const farSeg = segments.find(s => s.far);
+    expect(farSeg).toBeDefined();
+    expect(farSeg!.d).toContain('520,');
   });
 
-  it('computeEdgeSegments: flags the far child\'s segment as far, and the near child/bus/stem segments as not-far', () => {
-    const { pos, edges } = buildFixture();
-    const segments = computeEdgeSegments(pos, edges, W, H);
+  it('computeEdgeSegments: flags the far child\'s segment as far, and the near bus/stem segments as not-far', () => {
+    const { pos, edges, farRoutes } = buildFixture();
+    const segments = computeEdgeSegments(pos, edges, W, H, 'TB', farRoutes);
 
-    const farSegment = segments.find(s => s.d === 'M465,336 L465,550 L295,550 L295,560');
-    expect(farSegment?.far).toBe(true);
-
-    const nearSegments = segments.filter(s => s.d === 'M465,336 L465,414' || s.d === 'M465,414 L635,414');
+    const farSegs = segments.filter(s => s.far);
+    expect(farSegs.length).toBe(1);
+    const nearSegments = segments.filter(s => s.d === 'M465,336 L465,390' || s.d === 'M465,390 L635,390');
     expect(nearSegments.length).toBeGreaterThan(0);
     expect(nearSegments.every(s => !s.far)).toBe(true);
+  });
+});
+
+describe('fan-in bus: 2+ distinct parents sharing one child of the same kind', () => {
+  it('computeEdgeSegments: renders one shared bus (each parent marked, one unmarked final stem into the child) instead of independent coincidental paths', () => {
+    const pos = positions({
+      parentA: { x: 100, y: 0 },
+      parentB: { x: 400, y: 0 },
+      shared: { x: 250, y: 140 },
+    });
+    const edges = [
+      edge('parentA', 'shared', 'composition'),
+      edge('parentB', 'shared', 'composition'),
+    ];
+    const segments = computeEdgeSegments(pos, edges, W, H);
+
+    // Exactly two marker-carrying segments — one per parent, each a diamond (composition, marker
+    // 'start') since each parent is its own "whole" contributing to the shared part.
+    const markered = segments.filter(s => s.marker);
+    expect(markered).toHaveLength(2);
+    expect(markered.every(s => s.marker === 'start' && s.kind === 'composition')).toBe(true);
+    expect(markered.some(s => s.d === 'M100,56 L100,98')).toBe(true); // parentA's own stem
+    expect(markered.some(s => s.d === 'M400,56 L400,98')).toBe(true); // parentB's own stem
+
+    // One shared horizontal bus line spanning both parents' x (and the child's, if outside that
+    // range) at the shared busY.
+    expect(segments.some(s => !s.marker && s.d === 'M100,98 L400,98')).toBe(true);
+
+    // Exactly one final, UNMARKED stem into the shared child — not one per parent.
+    const finalStems = segments.filter(s => s.d === 'M250,98 L250,140');
+    expect(finalStems).toHaveLength(1);
+    expect(finalStems[0].marker).toBeUndefined();
+  });
+
+  it('computeEdgeSegments: does NOT fan-in when the two parents use DIFFERENT edge kinds (dual relationship, still independent)', () => {
+    const pos = positions({
+      bone: { x: 100, y: 0 },
+      whole: { x: 400, y: 0 },
+      dual: { x: 250, y: 140 },
+    });
+    const edges = [
+      edge('bone', 'dual', 'generalization'),
+      edge('whole', 'dual', 'composition'),
+    ];
+    const segments = computeEdgeSegments(pos, edges, W, H);
+
+    // Both parents still get their own independent marker — no shared bus is forced across
+    // different kinds; each kind keeps its own separate group (matching pre-existing FR-011
+    // dual-relationship behavior, which this feature doesn't change).
+    const markered = segments.filter(s => s.marker);
+    expect(markered).toHaveLength(2);
+    expect(markered.map(s => s.kind).sort()).toEqual(['composition', 'generalization']);
+  });
+
+  it('computeEdgeSegments: does NOT fan-in a parent that has OTHER exclusive children besides the shared one (mixed fan-out/fan-in stays fan-out)', () => {
+    const pos = positions({
+      parentA: { x: 100, y: 0 },
+      parentB: { x: 400, y: 0 }, // has an exclusive child too — keeps its normal fan-out bus
+      exclusiveChild: { x: 550, y: 140 },
+      shared: { x: 250, y: 140 },
+    });
+    const edges = [
+      edge('parentA', 'shared', 'composition'),
+      edge('parentB', 'shared', 'composition'),
+      edge('parentB', 'exclusiveChild', 'composition'),
+    ];
+    const segments = computeEdgeSegments(pos, edges, W, H);
+
+    // parentB keeps exactly one marker (its own fan-out bus, now spanning shared+exclusiveChild).
+    const parentBMarker = segments.filter(s => s.marker && s.d.startsWith('M400,'));
+    expect(parentBMarker).toHaveLength(1);
+    // parentA (whose ONLY child is the shared one) still gets its own marker independently.
+    const parentAMarker = segments.filter(s => s.marker && s.d.startsWith('M100,'));
+    expect(parentAMarker).toHaveLength(1);
+  });
+});
+
+describe('computeEdgeRoutes — bus-lane separation across 3+ mutually-overlapping groups in one row (regression)', () => {
+  it('gives each of four different parents a bus line that stays visually distinct from the others, rather than cascading to one shared height', () => {
+    // Mirrors the real middle-ear-structure shape (Ossicle of ear / Malleus / Stapes / Incus, all
+    // in one row): every adjacent pair's span overlaps, so the OLD round-based push loop kept
+    // pushing ALL of them in lockstep — including a pair (ossicle/incus) whose spans only TOUCH,
+    // not strictly overlap, a false "crossing" created by this loop's own obstacle margin — until
+    // every one collapsed onto the exact same clamped ceiling height.
+    const pos = positions({
+      ossicle: { x: 1060, y: 600 }, malleus: { x: 1230, y: 600 },
+      stapes: { x: 1400, y: 600 }, incus: { x: 1570, y: 600 },
+      bone_ossicle: { x: 380, y: 800 },
+      lig_malleus: { x: 550, y: 800 }, bone_malleus: { x: 720, y: 800 },
+      bone_stapes: { x: 890, y: 800 },
+      lig_incus: { x: 1060, y: 800 }, bone_incus: { x: 1230, y: 800 },
+    });
+    const edges = [
+      edge('ossicle', 'bone_ossicle', 'composition'),
+      edge('malleus', 'lig_malleus', 'composition'), edge('malleus', 'bone_malleus', 'composition'),
+      edge('stapes', 'bone_stapes', 'composition'),
+      edge('incus', 'lig_incus', 'composition'), edge('incus', 'bone_incus', 'composition'),
+    ];
+    const routes = computeEdgeRoutes(pos, edges, W, H);
+
+    const busYOf = (childIri: string): number => routes.get(edges.find(e => e.childIri === childIri)!.id)!.points[0].y;
+    const heights = {
+      ossicle: busYOf('bone_ossicle'),
+      malleus: busYOf('lig_malleus'),
+      stapes: busYOf('bone_stapes'),
+      incus: busYOf('lig_incus'),
+    };
+
+    // Malleus and Stapes each genuinely overlap EVERY other group's span (no shared child), so
+    // all three of {ossicle, malleus, stapes, incus} pairs involving either of them must land at
+    // distinct heights. Ossicle and Incus's spans only TOUCH at one point (not a strict overlap),
+    // so it's fine — expected, even — for them to share a height; that's not a visual collision.
+    expect(heights.malleus).not.toBe(heights.ossicle);
+    expect(heights.malleus).not.toBe(heights.stapes);
+    expect(heights.malleus).not.toBe(heights.incus);
+    expect(heights.stapes).not.toBe(heights.ossicle);
+    expect(heights.stapes).not.toBe(heights.incus);
+
+    // None of them collapsed onto the shared ceiling (childTopY(800) - MIN_FINAL_STEM(20) = 780).
+    for (const y of Object.values(heights)) { expect(y).toBeLessThan(780); }
+  });
+});
+
+describe('entry-port fan-out: a node entered by two edges gets two distinct, non-crossing ports', () => {
+  it('assigns each entering edge its own port so their stems no longer overlap at the node centre', () => {
+    // Two edges into one child C (x=300): a straight generalization and an adjacent composition.
+    // Without ports both would descend at x=300 and overlap collinearly.
+    const pos = positions({
+      C: { x: 300, y: 400 },
+      whole: { x: 500, y: 200 },
+      superType: { x: 100, y: 200 },
+    });
+    const edges = [
+      edge('whole', 'C', 'composition'),
+      edge('superType', 'C', 'generalization'),
+    ];
+    const routes = computeEdgeRoutes(pos, edges, W, H);
+    const comp = routes.get(edges[0].id)!;
+    const gen = routes.get(edges[1].id)!;
+    // C is the composition's target (entry) and the generalization's source (exit) — both connect
+    // to C's TOP. The two connection points must be DISTINCT (not both 0.5).
+    expect(comp.entryX).not.toBe(gen.exitX);
+    // Port x on C = 300 - W/2 + frac*W. The two ports straddle the centre.
+    const compPort = 300 - W / 2 + comp.entryX * W;
+    const genPort = 300 - W / 2 + gen.exitX * W;
+    expect(Math.abs(compPort - genPort)).toBeGreaterThanOrEqual(20);
+  });
+
+  it('orders the ports by each edge\'s PARENT (source) cross-position, so edges from opposite sides do not swap and cross', () => {
+    // Reproduces the reported middle-ear case ("Tympanic ostium of eustachian tube"): three edges
+    // enter one node from parents at different cross-positions. Ports must be assigned in the same
+    // order as those parents — the edge whose parent sits furthest up-cross gets the up-cross port —
+    // so no two edges swap sides and cross. Here parentLeft (x=50) < parentMid-far (x=250) <
+    // parentRight (x=560), so their ports must come out left, middle, right in that order.
+    const pos = positions({
+      C: { x: 300, y: 400 },
+      parentLeft: { x: 50, y: 200 },
+      parentMid: { x: 250, y: 0 },
+      parentRight: { x: 560, y: 200 },
+    });
+    const edges = [
+      edge('parentLeft', 'C', 'generalization'),
+      edge('parentMid', 'C', 'composition'),   // a far edge (two layers up), still ordered by its parent
+      edge('parentRight', 'C', 'composition'),
+    ];
+    const farEdgeRoutes = new Map<string, Position[]>([['parentMid|C|composition', [{ x: 250, y: 200 }]]]);
+    const routes = computeEdgeRoutes(pos, edges, W, H, 'TB', farEdgeRoutes);
+    const portOf = (id: string, useExit: boolean): number => {
+      const r = routes.get(id)!;
+      return 300 - W / 2 + (useExit ? r.exitX : r.entryX) * W;
+    };
+    const leftPort = portOf('parentLeft|C|generalization', true);  // C is the source (exit) for a generalization
+    const midPort = portOf('parentMid|C|composition', false);      // C is the target (entry) for a composition
+    const rightPort = portOf('parentRight|C|composition', false);
+    expect(leftPort).toBeLessThan(midPort);
+    expect(midPort).toBeLessThan(rightPort);
   });
 });

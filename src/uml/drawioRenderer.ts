@@ -3,6 +3,7 @@ import { pickConnectionFractions, computeEdgeRoutes, boxRect } from './diagramGe
 import type { Position, ConnectionFractions, EdgeRoute } from './diagramGeometry';
 import { computeBranchColors } from './branchColors';
 import type { NodeColor } from './branchColors';
+import { computeFarEdgeRoutes } from './layout';
 
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 56;
@@ -54,7 +55,7 @@ function nodeStyle(n: DiagramNode, branchColors: Map<string, NodeColor>): string
     + `align=center;verticalAlign=middle;${extra}`;
 }
 
-function edgeStyle(kind: 'composition' | 'generalization', points: ConnectionPoints, far = false): string {
+function edgeStyle(kind: 'composition' | 'generalization', points: ConnectionPoints, far: boolean, strokeColor: string): string {
   // No `edgeStyle=` key here (deliberately): mxGraph's `orthogonalEdgeStyle` computes its own
   // route between the fixed exit/entry points with no notion of sibling boxes, and would
   // happily draw a line straight through an unrelated node — the reported "edges overlap the
@@ -65,12 +66,14 @@ function edgeStyle(kind: 'composition' | 'generalization', points: ConnectionPoi
   // same dash style `nodeStyle()` uses for `hasHiddenRelations`, for visual-language consistency
   // between "this box has more hidden relations" and "this edge is a distant/secondary one".
   const base = 'rounded=0;html=1;fontSize=10;fontColor=#4B564F;' + (far ? 'dashed=1;dashPattern=6 4;' : '');
-  // startSize/endSize=10 (down from an earlier 16) matches draw.io's own, noticeably smaller
-  // default arrowhead size — mirrored by htmlRenderer.ts's SVG_DEFS marker scale-down so the
-  // webview/SVG export and this drawio export read as the same diagram.
+  // `strokeColor` is the connected node's own border colour (see renderDrawio) so the line — and,
+  // since draw.io tints arrowheads by strokeColor, its diamond/triangle too — matches the box it
+  // leads to. startSize/endSize=10 (down from an earlier 16) matches draw.io's own, noticeably
+  // smaller default arrowhead size — mirrored by htmlRenderer.ts's SVG_DEFS marker scale-down so
+  // the webview/SVG export and this drawio export read as the same diagram.
   const arrows = kind === 'composition'
-    ? 'startArrow=diamondThin;startFill=1;startSize=10;endArrow=none;strokeColor=#7C8A80;strokeWidth=1.5;'
-    : 'endArrow=block;endFill=0;endSize=10;startArrow=none;strokeColor=#3A3F3B;strokeWidth=1.5;';
+    ? `startArrow=diamondThin;startFill=1;startSize=10;endArrow=none;strokeColor=${strokeColor};strokeWidth=1.5;`
+    : `endArrow=block;endFill=0;endSize=10;startArrow=none;strokeColor=${strokeColor};strokeWidth=1.5;`;
   const conn = `exitX=${points.exitX};exitY=${points.exitY};exitDx=0;exitDy=0;`
     + `entryX=${points.entryX};entryY=${points.entryY};entryDx=0;entryDy=0;`;
   return base + arrows + conn;
@@ -110,7 +113,8 @@ export function renderDrawio(
   }
 
   const positions = new Map(nodes.map(n => [n.iri, { x: n.x ?? 0, y: n.y ?? 0 }]));
-  const routes = computeEdgeRoutes(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction);
+  const farEdgeRoutes = computeFarEdgeRoutes(nodes, edges, direction);
+  const routes = computeEdgeRoutes(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction, farEdgeRoutes);
   let eid = 1000;
   for (const e of edges) {
     const route = routes.get(e.id);
@@ -119,9 +123,18 @@ export function renderDrawio(
     const targetId = cellId.get(route.targetIri);
     if (!sourceId || !targetId) { continue; }
 
+    // Colour the edge by its `colorIri` node's border shade (target when a single target, source
+    // when it fans out) so a viewer can trace where it goes — see `computeEdgeSegments`/
+    // `htmlRenderer.ts`. Falls back to the per-kind default when the node has no branch colour.
+    const colorNode = nodes.find(n => n.iri === route.colorIri);
+    const kindDefault = e.kind === 'composition' ? '#7C8A80' : '#3A3F3B';
+    const strokeColor = colorNode
+      ? (colorNode.isRoot ? ROOT_COLOR.stroke : (branchColors.get(colorNode.iri) ?? DEFAULT_COLOR).stroke)
+      : kindDefault;
+
     const waypoints = route.points.map(p => `<mxPoint x="${p.x}" y="${p.y}" />`).join('');
     cells.push(
-      `<mxCell id="e${eid}" style="${edgeStyle(e.kind, route, route.far)}" edge="1" parent="1" `
+      `<mxCell id="e${eid}" style="${edgeStyle(e.kind, route, route.far, strokeColor)}" edge="1" parent="1" `
       + `source="${sourceId}" target="${targetId}"><mxGeometry relative="1" as="geometry">`
       + `<Array as="points">${waypoints}</Array></mxGeometry></mxCell>`,
     );

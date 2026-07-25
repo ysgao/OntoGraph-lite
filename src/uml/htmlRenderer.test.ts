@@ -89,13 +89,16 @@ describe('renderDiagramFragment', () => {
   it('dashes a "far child" (dual-relationship) edge but not an ordinary near-child edge', () => {
     // Mirrors diagramGeometry.test.ts's far-child fixture: parentB's composition child farChild
     // is ALSO ostium's generalization child, landing 2 rows below parentB instead of 1.
+    // Depths drive far-edge detection (a multi-layer edge gets a dummy chain, and that's what
+    // marks it "far"/dashed): parents at 0, their direct children at 1, and farChild at 2 — so
+    // parentB->farChild spans two layers (far) while parentB->nearChild spans one (near).
     const nodes = [
-      node('urn:parentA', 'Pharyngotympanic tube', 252.5, 280),
-      node('urn:parentB', 'Tympanic cavity', 465, 280, { isRoot: true }),
-      node('urn:siblingOfFar', 'Mucous membrane', 125, 420),
-      node('urn:ostium', 'Ostium', 380, 420),
-      node('urn:nearChild', 'Cochlear window', 635, 420),
-      node('urn:farChild', 'Tympanic ostium', 295, 560),
+      node('urn:parentA', 'Pharyngotympanic tube', 252.5, 280, { depth: 0 }),
+      node('urn:parentB', 'Tympanic cavity', 465, 280, { isRoot: true, depth: 0 }),
+      node('urn:siblingOfFar', 'Mucous membrane', 125, 420, { depth: 1 }),
+      node('urn:ostium', 'Ostium', 380, 420, { depth: 1 }),
+      node('urn:nearChild', 'Cochlear window', 635, 420, { depth: 1 }),
+      node('urn:farChild', 'Tympanic ostium', 295, 560, { depth: 2 }),
     ];
     const edges: DiagramEdge[] = [
       { id: 'e1', parentIri: 'urn:parentA', childIri: 'urn:siblingOfFar', kind: 'composition' },
@@ -109,7 +112,7 @@ describe('renderDiagramFragment', () => {
     expect(frag.svg).toContain('stroke-dasharray="6 4"');
     // The near-child bus segment (straight line from parentB down to nearChild's row) must NOT
     // carry the dash — only the far child's own independent path should.
-    const nearSegment = /<path d="M465,414 L635,414"[^>]*\/>/.exec(frag.svg);
+    const nearSegment = /<path d="M465,390 L635,390"[^>]*\/>/.exec(frag.svg);
     expect(nearSegment?.[0]).not.toContain('stroke-dasharray');
   });
 });
