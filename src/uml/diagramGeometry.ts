@@ -76,6 +76,12 @@ export interface RenderedSegment {
    *  rather than it reading as a layout glitch. Never set on a near-child/bus/parent-stem segment
    *  or an off-axis bridge. */
   far?: boolean;
+  /** IRI of the node whose color this segment should be drawn in, so a viewer can follow a line
+   *  to the box it connects: the TARGET node when a bus goes to a single target (one child, or a
+   *  fan-in's single shared child), or the SOURCE (parent) node when it fans out to several
+   *  targets and no single target colour applies. Renderers resolve it to that node's colour;
+   *  a segment whose `colorIri` node has no assigned colour falls back to a neutral default. */
+  colorIri?: string;
 }
 
 /**
@@ -753,6 +759,11 @@ function computeEdgeSegmentsCore(
     const { px, busY } = placements.get(groupKey)!;
     const pyBottom = positions.get(g.parentIri)!.y + nodeHeight;
 
+    // Colour the whole group by its single target when it has one, else by its source (parent):
+    // a one-child bus reads as a line leading to that child's box; a fan-out to several children
+    // has no single destination, so it takes the parent's colour instead.
+    const groupColorIri = g.childIris.length === 1 ? g.childIris[0] : g.parentIri;
+
     // A "far" child — one that does NOT sit at the group's own shallowest row (a
     // dual-relationship node, FR-011, whose OTHER parent is deeper) — is excluded from the shared
     // bus and routed independently via `computeSafeJogY`: folding it into the same bus as its
@@ -793,12 +804,12 @@ function computeEdgeSegmentsCore(
 
       segments.push(
         g.kind === 'composition'
-          ? { d: `M${px},${pyBottom} L${px},${busY}`, kind: 'composition', marker: 'start' }
-          : { d: `M${px},${busY} L${px},${pyBottom}`, kind: 'generalization', marker: 'end' },
+          ? { d: `M${px},${pyBottom} L${px},${busY}`, kind: 'composition', marker: 'start', colorIri: groupColorIri }
+          : { d: `M${px},${busY} L${px},${pyBottom}`, kind: 'generalization', marker: 'end', colorIri: groupColorIri },
       );
 
       if (busMinX !== busMaxX) {
-        segments.push({ d: `M${busMinX},${busY} L${busMaxX},${busY}`, kind: g.kind });
+        segments.push({ d: `M${busMinX},${busY} L${busMaxX},${busY}`, kind: g.kind, colorIri: groupColorIri });
       }
     }
 
@@ -813,7 +824,7 @@ function computeEdgeSegmentsCore(
       // garbage routing that appeared once variable per-transition spacing let a lane-0 near stem
       // grow past the old length-based skip threshold.)
       const points = [{ x: c.x, y: busY }, { x: c.x, y: c.y }];
-      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind });
+      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, colorIri: groupColorIri });
     }
 
     farChildIris.forEach((childIri, farIndex) => {
@@ -842,35 +853,36 @@ function computeEdgeSegmentsCore(
       const marker = (markerOnFirstFarChild && farIndex === 0)
         ? (g.kind === 'composition' ? 'start' : 'end')
         : undefined;
-      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true, marker });
+      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true, marker, colorIri: groupColorIri });
     });
   }
 
   // Fan-in buses: 2+ distinct parents converging on one shared child of the same kind — each
-  // parent's own stem (marked) into a shared bus, then one unmarked stem into the child.
+  // parent's own stem (marked) into a shared bus, then one unmarked stem into the child. The bus
+  // has a single target (the shared child), so the whole thing takes that child's colour.
   for (const group of fanInGroups.values()) {
     const childPos = positions.get(group.childIri)!;
     for (const parent of group.parents) {
       segments.push(
         group.kind === 'composition'
-          ? { d: `M${parent.px},${parent.pyBottom} L${parent.px},${group.busY}`, kind: 'composition', marker: 'start' }
-          : { d: `M${parent.px},${group.busY} L${parent.px},${parent.pyBottom}`, kind: 'generalization', marker: 'end' },
+          ? { d: `M${parent.px},${parent.pyBottom} L${parent.px},${group.busY}`, kind: 'composition', marker: 'start', colorIri: group.childIri }
+          : { d: `M${parent.px},${group.busY} L${parent.px},${parent.pyBottom}`, kind: 'generalization', marker: 'end', colorIri: group.childIri },
       );
     }
     const xs = group.parents.map(p => p.px);
     const busMinX = Math.min(childPos.x, ...xs);
     const busMaxX = Math.max(childPos.x, ...xs);
     if (busMinX !== busMaxX) {
-      segments.push({ d: `M${busMinX},${group.busY} L${busMaxX},${group.busY}`, kind: group.kind });
+      segments.push({ d: `M${busMinX},${group.busY} L${busMaxX},${group.busY}`, kind: group.kind, colorIri: group.childIri });
     }
-    segments.push({ d: `M${childPos.x},${group.busY} L${childPos.x},${childPos.y}`, kind: group.kind });
+    segments.push({ d: `M${childPos.x},${group.busY} L${childPos.x},${childPos.y}`, kind: group.kind, colorIri: group.childIri });
   }
 
   for (const e of offAxis) {
     const p = positions.get(e.parentIri);
     const c = positions.get(e.childIri);
     if (!p || !c) { continue; }
-    segments.push(renderBridge(p, c, e.kind, nodeWidth, nodeHeight));
+    segments.push(renderBridge(p, c, e.kind, nodeWidth, nodeHeight, e.childIri));
   }
 
   return segments;
@@ -898,6 +910,10 @@ export interface EdgeRoute {
    *  dual-relationship node not at its bus group's shallowest row), false for an ordinary
    *  near-child or off-axis/bridge edge. */
   far: boolean;
+  /** Mirrors `RenderedSegment.colorIri` — the node whose colour this edge should be drawn in:
+   *  the single target where the bus goes to one, or the source (parent) when it fans out to
+   *  several (see `RenderedSegment.colorIri`). */
+  colorIri: string;
 }
 
 /**
@@ -1003,6 +1019,10 @@ function computeEdgeRoutesCore(
     const pyBottom = parentPos.y + nodeHeight;
     const exitX = 0.5 + (px - parentPos.x) / nodeWidth;
 
+    // Colour the group by its single target when it has one, else by its source (parent) — see
+    // the matching `groupColorIri` in `computeEdgeSegmentsCore`.
+    const groupColorIri = g.groupEdges.length === 1 ? g.groupEdges[0].childIri : g.parentIri;
+
     // Split on whether the edge spans MORE than one layer (has a dummy chain), not on whether the
     // child is the group's shallowest row — see the matching comment in `computeEdgeSegmentsCore`.
     for (const e of g.groupEdges) {
@@ -1032,6 +1052,7 @@ function computeEdgeRoutesCore(
           exitX, exitY: 1, entryX: 0.5, entryY: 0,
           points: forwardPoints,
           far: spansMultiLayer,
+          colorIri: groupColorIri,
         });
       } else {
         routes.set(e.id, {
@@ -1039,6 +1060,7 @@ function computeEdgeRoutesCore(
           exitX: 0.5, exitY: 0, entryX: exitX, entryY: 1,
           points: [...forwardPoints].reverse(),
           far: spansMultiLayer,
+          colorIri: groupColorIri,
         });
       }
     }
@@ -1059,6 +1081,7 @@ function computeEdgeRoutesCore(
           exitX: parentExitX, exitY: 1, entryX: 0.5, entryY: 0,
           points: forwardPoints,
           far: false,
+          colorIri: group.childIri,
         });
       } else {
         routes.set(parent.edgeId, {
@@ -1066,6 +1089,7 @@ function computeEdgeRoutesCore(
           exitX: 0.5, exitY: 0, entryX: parentExitX, entryY: 1,
           points: [...forwardPoints].reverse(),
           far: false,
+          colorIri: group.childIri,
         });
       }
     }
@@ -1090,19 +1114,21 @@ function computeEdgeRoutesCore(
       ? [{ x: sx, y: (sy + ty) / 2 }, { x: tx, y: (sy + ty) / 2 }]
       : [{ x: (sx + tx) / 2, y: sy }, { x: (sx + tx) / 2, y: ty }]);
 
-    routes.set(e.id, { sourceIri, targetIri, exitX: frac.exitX, exitY: frac.exitY, entryX: frac.entryX, entryY: frac.entryY, points, far: false });
+    routes.set(e.id, { sourceIri, targetIri, exitX: frac.exitX, exitY: frac.exitY, entryX: frac.entryX, entryY: frac.entryY, points, far: false, colorIri: e.childIri });
   }
 
   return routes;
 }
 
-/** One independent corner-to-corner path for an off-axis/bridge edge (spec §8.2). */
+/** One independent corner-to-corner path for an off-axis/bridge edge (spec §8.2). A bridge is a
+ *  single edge to a single other-end node, so it takes that node's (`colorIri`) colour. */
 function renderBridge(
   parent: Position,
   child: Position,
   kind: 'composition' | 'generalization',
   w: number,
   h: number,
+  colorIri: string,
 ): RenderedSegment {
   // Composition: path drawn parent(whole) -> child(part), marker-start at parent.
   // Generalization: path drawn child(subtype) -> parent(supertype), marker-end at parent.
@@ -1120,5 +1146,5 @@ function renderBridge(
     ? `M${sx},${sy} L${sx},${(sy + ty) / 2} L${tx},${(sy + ty) / 2} L${tx},${ty}`
     : `M${sx},${sy} L${(sx + tx) / 2},${sy} L${(sx + tx) / 2},${ty} L${tx},${ty}`;
 
-  return { d, kind, marker: kind === 'composition' ? 'start' : 'end' };
+  return { d, kind, marker: kind === 'composition' ? 'start' : 'end', colorIri };
 }

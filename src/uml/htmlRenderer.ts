@@ -54,13 +54,20 @@ function renderExcludedNotes(excludedRelations: ExcludedRelation[], diagramBotto
 // noticeably smaller default arrowhead size (`drawioRenderer.ts`'s startSize/endSize=10 below) —
 // the viewBox/path/refX/refY stay in their original coordinate system; only the box the browser
 // scales that artwork into shrinks, so the diamond/triangle shape itself is unchanged, just smaller.
+// The marker paths use `context-stroke` (the stroke colour of the edge that references the marker)
+// so the diamond/triangle at the hub end matches the colour of its own line — which is now the
+// connected node's colour (see `renderDiagramFragment`). `context-stroke`/`context-fill` are
+// supported in the Chromium webview and in browsers where an exported .svg opens; the PNG export
+// path renders from draw.io (which tints its own arrowheads by strokeColor), not from this SVG, so
+// nothing in the production pipeline depends on a renderer that lacks `context-stroke`. The diamond
+// stays filled (composition) and the triangle stays hollow (generalization).
 const SVG_DEFS = `
   <defs>
     <marker id="diamond" viewBox="0 0 20 12" markerWidth="12" markerHeight="7.2" refX="19" refY="6" orient="auto-start-reverse">
-      <path d="M1,6 L10,1 L19,6 L10,11 Z" fill="var(--uml-composition-color, #8A9990)" stroke="var(--uml-composition-stroke, #6E7D74)" stroke-width="0.75" />
+      <path d="M1,6 L10,1 L19,6 L10,11 Z" fill="context-stroke" stroke="context-stroke" stroke-width="0.75" />
     </marker>
     <marker id="triangle" viewBox="0 0 18 16" markerWidth="10.8" markerHeight="9.6" refX="17" refY="8" orient="auto">
-      <path d="M1,1 L17,8 L1,15 Z" fill="var(--uml-generalization-fill, #F7F9F7)" stroke="var(--uml-generalization-color, #3A3F3B)" stroke-width="1.2" />
+      <path d="M1,1 L17,8 L1,15 Z" fill="var(--uml-generalization-fill, #F7F9F7)" stroke="context-stroke" stroke-width="1.2" />
     </marker>
   </defs>`;
 
@@ -96,16 +103,24 @@ export function renderDiagramFragment(
   const farEdgeRoutes = computeFarEdgeRoutes(nodes, edges, direction);
   const segments = computeEdgeSegments(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction, farEdgeRoutes);
   const branchColors = computeBranchColors(nodes, edges);
+  const nodeByIri = new Map(nodes.map(n => [n.iri, n]));
 
   const paths = segments.map(seg => {
-    const strokeVar = seg.kind === 'composition' ? 'var(--uml-composition-color, #8A9990)' : 'var(--uml-generalization-color, #3A3F3B)';
+    // Draw each edge in its `colorIri` node's colour — the target when a bus goes to one node, the
+    // source (parent) when it fans out to several — so a viewer can follow a line to the box it
+    // connects to. Use the node's border/stroke shade (same hue as its background but legible as a
+    // thin line, unlike the very light fill), falling back to the per-kind default colour when the
+    // node has no assigned branch colour.
+    const kindDefault = seg.kind === 'composition' ? 'var(--uml-composition-color, #8A9990)' : 'var(--uml-generalization-color, #3A3F3B)';
+    const node = seg.colorIri ? nodeByIri.get(seg.colorIri) : undefined;
+    const stroke = node ? colorFor(node, branchColors).stroke : kindDefault;
     const marker = seg.marker === 'start' ? 'marker-start="url(#diamond)"'
       : seg.marker === 'end' ? 'marker-end="url(#triangle)"'
         : '';
     // A "far" (dual-relationship) edge spans several rows/columns by construction — dashing it
     // signals that length is an intentional secondary relationship, not a layout glitch.
     const dash = seg.far ? 'stroke-dasharray="6 4" ' : '';
-    return `<path d="${seg.d}" fill="none" stroke="${strokeVar}" stroke-width="1.6" ${dash}${marker} />`;
+    return `<path d="${seg.d}" fill="none" stroke="${stroke}" stroke-width="1.6" ${dash}${marker} />`;
   }).join('');
 
   let maxX = 0;
@@ -165,9 +180,13 @@ export function renderStandaloneSvg(
   const farEdgeRoutes = computeFarEdgeRoutes(nodes, edges, direction);
   const segments = computeEdgeSegments(positions, edges, NODE_WIDTH, NODE_HEIGHT, direction, farEdgeRoutes);
   const branchColors = computeBranchColors(nodes, edges);
+  const nodeByIri = new Map(nodes.map(n => [n.iri, n]));
 
   const paths = segments.map(seg => {
-    const stroke = seg.kind === 'composition' ? '#8A9990' : '#3A3F3B';
+    // Colour each edge by its `colorIri` node's border shade — see `renderDiagramFragment`.
+    const kindDefault = seg.kind === 'composition' ? '#8A9990' : '#3A3F3B';
+    const node = seg.colorIri ? nodeByIri.get(seg.colorIri) : undefined;
+    const stroke = node ? colorFor(node, branchColors).stroke : kindDefault;
     const marker = seg.marker === 'start' ? 'marker-start="url(#diamond)"'
       : seg.marker === 'end' ? 'marker-end="url(#triangle)"'
         : '';
