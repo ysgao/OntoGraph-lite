@@ -28,12 +28,12 @@ export interface ExtractResult {
    *  since a lateralized variant (e.g. "Left kidney") is usually structural noise next to the
    *  reference concept ("Kidney") in a UML breakdown diagram. */
   lateralizedIris: string[];
-}
-
-interface ReverseIndexEntry {
-  childIri: string;
-  kind: 'bare' | 'restriction';
-  propertyIri?: string;
+  /** IRIs of rendered nodes whose label starts with "Entire " — populated only by
+   *  `extractInferredUmlDiagram` (spec 032-uml-inferred-subtypes, Inferred view). Undefined for
+   *  `extractUmlDiagram` (Stated view), which has no "entire concept" exclusion concept at all —
+   *  see that function's own anchor-resolution handling of "Entire X" instead. Callers seed the
+   *  default node-exclusion set with this alongside `lateralizedIris` when in Inferred mode. */
+  entireIris?: string[];
 }
 
 /** Every class's own parsed conjuncts (merging structured `superClassIris`/`equivalentClassIris`
@@ -56,6 +56,12 @@ function buildConjunctsByClass(model: OntologyModel): Map<string, Conjunct[]> {
   }
 
   return conjunctsByClass;
+}
+
+interface ReverseIndexEntry {
+  childIri: string;
+  kind: 'bare' | 'restriction';
+  propertyIri?: string;
 }
 
 /** Inverts `conjunctsByClass` by target IRI so downward BFS can look up "who points at me" in
@@ -147,6 +153,21 @@ function labelFor(model: OntologyModel, iri: string, preferredLang: string): str
   const cls = model.classes.get(iri);
   const raw = cls ? getLabel(cls, preferredLang) : (iri.split(/[#/]/).pop() || iri);
   return stripEntirePrefix(raw);
+}
+
+/** Strips a "structure of " prefix or a " structure" suffix (case-insensitive) from a label —
+ *  e.g. "Kidney structure" or "Structure of kidney" both display as "Kidney" in the Inferred view
+ *  (spec 032-uml-inferred-subtypes). Re-capitalizes the first letter of what remains, same
+ *  convention as `stripEntirePrefix`. Inferred-view-only: the Stated view's `labelFor` above is
+ *  unaffected — "Entire X" substitution and "X structure" simplification are two independent
+ *  display rules that only ever apply in their own respective view. Checks the "structure of "
+ *  prefix first so a label matching neither pattern falls through unchanged; a label that somehow
+ *  matched both (unlikely — "structure of X structure") would only have the prefix stripped. */
+export function stripStructureLabel(label: string): string {
+  const prefixMatch = label.match(/^structure of\s+(.+)$/i);
+  const rest = prefixMatch ? prefixMatch[1] : label.match(/^(.+?)\s+structure$/i)?.[1];
+  if (rest === undefined || rest.length === 0) { return label; }
+  return rest[0].toUpperCase() + rest.slice(1);
 }
 
 /** Property IRIs backing an excluded relation are usually object properties, but the model
@@ -323,6 +344,162 @@ export function extractUmlDiagram(
     .map(n => n.iri);
 
   return { nodes, edges, excludedRelations, nodeCapReached, lateralizedIris };
+}
+
+export interface InferredExtractOptions {
+  /** Overridable for tests; production callers should omit this and take the default. */
+  maxNodes?: number;
+  preferredLang?: string;
+}
+
+function inferredLabelFor(model: OntologyModel, iri: string, preferredLang: string): string {
+  const cls = model.classes.get(iri);
+  const raw = cls ? getLabel(cls, preferredLang) : (iri.split(/[#/]/).pop() || iri);
+  return stripStructureLabel(raw);
+}
+
+/** Inverts an `inferredSubClasses`-shaped map (parent IRI → child IRIs) into child IRI → parent
+ *  IRIs, so the Inferred view's one-hop ancestor pre-pass (mirroring `extractUmlDiagram`'s own
+ *  pre-pass, see below) can look up "who is `iri` inferred to be a direct subtype of" without
+ *  rescanning the whole map per lookup. */
+function buildInferredParentsIndex(inferredSubClasses: Map<string, Set<string>>): Map<string, string[]> {
+  const parentsOf = new Map<string, string[]>();
+  for (const [parentIri, childIris] of inferredSubClasses) {
+    for (const childIri of childIris) {
+      let list = parentsOf.get(childIri);
+      if (!list) { list = []; parentsOf.set(childIri, list); }
+      list.push(parentIri);
+    }
+  }
+  return parentsOf;
+}
+
+/**
+ * Mechanically extracts an INFERRED-view UML diagram rooted at `focusIri`: generalization
+ * (is-a) relationships derived PURELY from the reasoner's classified hierarchy
+ * (`model.inferredSubClasses`) — never mixed with `extractUmlDiagram`'s asserted-axiom traversal
+ * (spec 032-uml-inferred-subtypes, second refinement). Composition ("part of") relationships are
+ * never included in this view — there is no equivalent "inferred part-of" hierarchy on the model,
+ * and this view is generalization-only by design. `focusIri` is used AS-IS as the diagram root —
+ * unlike `extractUmlDiagram`, there is no "All or part of" anchor-hop to an "Entire X" continuant,
+ * since that mechanism is itself part-of/composition-flavored and doesn't apply here.
+ *
+ * Two "entities to auto-hide by default" categories are surfaced (`lateralizedIris`/`entireIris`),
+ * mirroring `extractUmlDiagram`'s own `lateralizedIris`; the caller (`src/commands/
+ * generateUmlDiagram.ts`) seeds the node-exclusion set with both, revealable via the same
+ * "show full subhierarchy" toggle used for the Stated view:
+ *  - **Lateralized** classes (own a "Laterality some Left/Right" restriction) — same check as the
+ *    Stated view, since this inspects a class's own asserted definition, not its traversal source.
+ *  - **"Entire X"** classes (label starts with "Entire ") — noise in a pure is-a breakdown of a
+ *    "structure"-style entity; unlike the Stated view, this view does not substitute or anchor on
+ *    them, it just optionally hides them by default alongside lateralized variants.
+ *
+ * A no-op (single-node result) when `model.isClassified` is false — there is no inferred hierarchy
+ * to walk. Never itself triggers classification.
+ */
+export function extractInferredUmlDiagram(
+  model: OntologyModel,
+  focusIri: string,
+  depth: number,
+  options: InferredExtractOptions = {},
+): ExtractResult {
+  const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES;
+  const preferredLang = options.preferredLang ?? 'en';
+  const rootIri = focusIri;
+
+  // Defensive guard, matching the established pattern elsewhere on this model (e.g.
+  // `openVisualization.ts`): `model.inferredSubClasses` is only ever populated alongside
+  // `isClassified` by `classifyOntology()`, but a stale/leftover map from before a reload
+  // shouldn't be walked as if it were current — never triggers classification either way.
+  const inferredSubClasses = model.isClassified ? model.inferredSubClasses : new Map<string, Set<string>>();
+
+  // Only used to detect (a) whether a given inferred pair is ALSO directly asserted, for the
+  // solid-vs-dashed distinction within this fully-inferred view (a relationship confirmed by both
+  // reasoning AND a direct axiom is still worth distinguishing from a reasoner-only one), and
+  // (b) a node's own Laterality restriction for `lateralizedIris`. Never used to determine SCOPE —
+  // scope here comes exclusively from `inferredSubClasses` above.
+  const conjunctsByClass = buildConjunctsByClass(model);
+  const inferredParentsOf = buildInferredParentsIndex(inferredSubClasses);
+
+  const nodeDepth = new Map<string, number>();
+  nodeDepth.set(rootIri, 0);
+  const hiddenRelationsFrom = new Set<string>();
+  const edgeMap = new Map<string, DiagramEdge>();
+  let nodeCapReached = false;
+
+  const tryAddNode = (iri: string, atDepth: number): 'added' | 'existing' | 'capped' => {
+    if (nodeDepth.has(iri)) { return 'existing'; }
+    if (nodeDepth.size >= maxNodes) { return 'capped'; }
+    nodeDepth.set(iri, atDepth);
+    return 'added';
+  };
+
+  const isAlsoAsserted = (parentIri: string, childIri: string): boolean =>
+    (conjunctsByClass.get(childIri) ?? []).some(c => c.kind === 'bare' && c.targetIri === parentIri);
+
+  const addInferredEdge = (parentIri: string, childIri: string): void => {
+    const id = `${parentIri}|${childIri}|generalization|`;
+    if (!edgeMap.has(id)) {
+      edgeMap.set(id, {
+        id, parentIri, childIri, kind: 'generalization',
+        isInferred: isAlsoAsserted(parentIri, childIri) ? undefined : true,
+      });
+    }
+  };
+
+  // 1. Direct inferred ancestors of the root ONLY — one hop, depth -1, same rationale as
+  // `extractUmlDiagram`'s own ancestor pre-pass (own row, never expanded further).
+  for (const parentIri of inferredParentsOf.get(rootIri) ?? []) {
+    const result = tryAddNode(parentIri, -1);
+    if (result === 'capped') { hiddenRelationsFrom.add(rootIri); nodeCapReached = true; continue; }
+    addInferredEdge(parentIri, rootIri);
+  }
+
+  // 2. Downward BFS from the root, `depth` hops, via `inferredSubClasses` directly — no
+  // reverse-index inversion needed, since it's already keyed parent → children.
+  let frontier = [rootIri];
+  for (let hop = 0; hop < depth; hop++) {
+    const next: string[] = [];
+
+    for (const iri of frontier) {
+      const iriDepth = nodeDepth.get(iri)!;
+      for (const childIri of inferredSubClasses.get(iri) ?? []) {
+        const result = tryAddNode(childIri, iriDepth + 1);
+        if (result === 'capped') { hiddenRelationsFrom.add(iri); nodeCapReached = true; continue; }
+        addInferredEdge(iri, childIri);
+        if (result === 'added') { next.push(childIri); }
+      }
+    }
+
+    frontier = next;
+    if (frontier.length === 0) { break; }
+  }
+
+  // Nodes queued for a hop that never ran (depth exhausted) still have further descendants —
+  // flag them so the diagram can indicate "more exists", same as `extractUmlDiagram`.
+  for (const iri of frontier) {
+    if ((inferredSubClasses.get(iri)?.size ?? 0) > 0) { hiddenRelationsFrom.add(iri); }
+  }
+
+  const rawNodes: DiagramNode[] = [...nodeDepth.entries()].map(([iri, nDepth]) => ({
+    iri,
+    label: inferredLabelFor(model, iri, preferredLang),
+    depth: nDepth,
+    isRoot: iri === rootIri,
+    hasHiddenRelations: hiddenRelationsFrom.has(iri),
+  }));
+
+  const edges = removeRedundantEdges([...edgeMap.values()]);
+  const nodes = renumberDepthsLongestPath(rawNodes, edges);
+
+  const lateralizedIris = nodes
+    .filter(n => !n.isRoot && isLateralized(conjunctsByClass.get(n.iri) ?? []))
+    .map(n => n.iri);
+  const entireIris = nodes
+    .filter(n => !n.isRoot && /^entire\s+/i.test(n.label))
+    .map(n => n.iri);
+
+  return { nodes, edges, excludedRelations: [], nodeCapReached, lateralizedIris, entireIris };
 }
 
 /** Drops a direct parent→child edge when an alternate path already connects them through some

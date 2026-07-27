@@ -4,6 +4,8 @@ import type { ExclusionMode } from './exclusionControl';
 import { buildRequestDirectionChangeMessage, DEFAULT_DIRECTION } from './directionControl';
 import type { LayoutDirection } from './directionControl';
 import { buildRequestToggleLateralizedMessage } from './lateralizedControl';
+import { buildRequestSetViewModeMessage } from './viewModeControl';
+import type { ViewMode } from './viewModeControl';
 
 // ── Types (mirrored from UmlDiagramMessages.ts — can't import from src/ in IIFE bundle) ──
 
@@ -21,6 +23,7 @@ interface UpdateDiagramMessage {
   canvasWidth: number;
   canvasHeight: number;
   includeLateralized: boolean;
+  viewMode: ViewMode;
 }
 interface SelectNodeMessage { type: 'selectNode'; iri: string; }
 
@@ -55,6 +58,12 @@ let exclusionsCurrentlyApplied = false;
 // `updateDiagram` message so the "Show full subhierarchy" button's label/pressed-state can't
 // drift out of sync with what's actually on screen.
 let includeLateralized = false;
+
+// Which of the two, mutually exclusive views is shown ("stated" vs "inferred", spec
+// 032-uml-inferred-subtypes) — 'stated' by default for a fresh focus, mirrored from the host's
+// own `viewMode` on every `updateDiagram` message so the switch control can't drift out of sync
+// with what's on screen.
+let viewMode: ViewMode = 'stated';
 
 // ── DOM ──────────────────────────────────────────────────────────────────────
 // The diagram itself (node divs + SVG edge overlay) is computed entirely on the extension host
@@ -151,6 +160,13 @@ document.body.innerHTML = `
   <button id="btn-regenerate" title="Regenerate diagram without the marked nodes" disabled>Regenerate (0 marked)</button>
   <button id="btn-reset-exclusions" title="Restore all previously removed nodes" disabled>Reset exclusions</button>
   <button id="btn-toggle-lateralized" title="Lateralized classes (e.g. Left/Right variants) are hidden by default — click to show the full subhierarchy" aria-pressed="false">Show full subhierarchy</button>
+  <label title="Stated: subtypes from directly-written axioms only (default). Inferred: a SEPARATE diagram built entirely from the reasoner's classified hierarchy — generalization only, no part-of, lateralized/&quot;Entire X&quot; classes hidden by default.">
+    View:
+    <select id="view-mode-select">
+      <option value="stated" selected>Stated</option>
+      <option value="inferred">Inferred</option>
+    </select>
+  </label>
   <span id="cap-banner">⚠ Node limit reached — some relationships are not shown</span>
   <span id="stats"></span>
 </div>
@@ -169,6 +185,7 @@ const excludeModeEl = document.getElementById('exclude-mode') as HTMLSelectEleme
 const regenerateBtn = document.getElementById('btn-regenerate') as HTMLButtonElement;
 const resetExclusionsBtn = document.getElementById('btn-reset-exclusions') as HTMLButtonElement;
 const toggleLateralizedBtn = document.getElementById('btn-toggle-lateralized') as HTMLButtonElement;
+const viewModeSelect = document.getElementById('view-mode-select') as HTMLSelectElement;
 
 function updateRegenerateButton(): void {
   regenerateBtn.disabled = markedIris.size === 0;
@@ -196,6 +213,8 @@ function render(msg: UpdateDiagramMessage): void {
   directionSelect.value = msg.direction;
   includeLateralized = msg.includeLateralized;
   updateToggleLateralizedButton();
+  viewMode = msg.viewMode;
+  viewModeSelect.value = viewMode;
 
   // Every fresh render is a new extraction — previously-marked nodes are gone from the DOM
   // already (either removed or promoted), so any stale marking state is meaningless.
@@ -309,6 +328,12 @@ toggleLateralizedBtn.addEventListener('click', () => {
   includeLateralized = !includeLateralized;
   updateToggleLateralizedButton();
   vscode.postMessage(buildRequestToggleLateralizedMessage(currentFocusIri, currentDepth, currentDirection, includeLateralized));
+});
+
+viewModeSelect.addEventListener('change', () => {
+  if (!currentFocusIri) { return; }
+  viewMode = viewModeSelect.value as ViewMode;
+  vscode.postMessage(buildRequestSetViewModeMessage(currentFocusIri, currentDepth, currentDirection, viewMode));
 });
 
 // ── Signal ready ──────────────────────────────────────────────────────────────

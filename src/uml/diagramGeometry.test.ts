@@ -9,8 +9,10 @@ function positions(entries: Record<string, Position>): Map<string, Position> {
   return new Map(Object.entries(entries));
 }
 
-function edge(parentIri: string, childIri: string, kind: 'composition' | 'generalization', propertyIri?: string): DiagramEdge {
-  return { id: `${parentIri}|${childIri}|${kind}`, parentIri, childIri, kind, propertyIri };
+function edge(
+  parentIri: string, childIri: string, kind: 'composition' | 'generalization', propertyIri?: string, isInferred?: boolean,
+): DiagramEdge {
+  return { id: `${parentIri}|${childIri}|${kind}`, parentIri, childIri, kind, propertyIri, isInferred };
 }
 
 describe('pickConnectionFractions', () => {
@@ -658,5 +660,58 @@ describe('entry-port fan-out: a node entered by two edges gets two distinct, non
     const rightPort = portOf('parentRight|C|composition', false);
     expect(leftPort).toBeLessThan(midPort);
     expect(midPort).toBeLessThan(rightPort);
+  });
+});
+
+describe('computeEdgeSegments — isInferred flagging (spec 032-uml-inferred-subtypes, Decision 6)', () => {
+  it('flags ONLY the inferred child\'s own per-child stem, never the shared parent-stem/bus segments, for a mixed asserted+inferred group', () => {
+    const pos = positions({
+      root: { x: 500, y: 0 },
+      a: { x: 300, y: 140 },
+      b: { x: 500, y: 140 },
+      c: { x: 700, y: 140 },
+    });
+    const edges = [
+      edge('root', 'a', 'generalization'),
+      edge('root', 'b', 'generalization'),
+      edge('root', 'c', 'generalization', undefined, true), // c is inferred-only
+    ];
+    const result = computeEdgeSegments(pos, edges, W, H);
+
+    // The shared parent-to-bus stem (marker='end') never carries isInferred, regardless of one
+    // sibling child being inferred-only.
+    const parentStem = result.find(s => s.marker === 'end')!;
+    expect(parentStem.isInferred).toBeFalsy();
+
+    // Exactly one segment (c's own per-child descending stem) should be flagged.
+    const flagged = result.filter(s => s.isInferred);
+    expect(flagged).toHaveLength(1);
+    // That segment must be the one whose path ends at c's box (y=140, x=700) — c's own stem.
+    expect(flagged[0].d.endsWith('700,140')).toBe(true);
+  });
+
+  it('flags a far child\'s own stem when its edge is inferred-only', () => {
+    const pos = positions({
+      shallow: { x: 300, y: 0 },
+      deepParent: { x: 700, y: 140 },
+      shared: { x: 500, y: 280 },
+    });
+    const edges = [
+      edge('shallow', 'shared', 'generalization'),
+      edge('deepParent', 'shared', 'generalization', undefined, true), // far, inferred-only
+    ];
+    const farEdgeRoutes = new Map<string, Position[]>([['deepParent|shared|generalization', [{ x: 700, y: 200 }]]]);
+    const result = computeEdgeSegments(pos, edges, W, H, 'TB', farEdgeRoutes);
+
+    const farSegments = result.filter(s => s.far);
+    expect(farSegments.length).toBeGreaterThan(0);
+    expect(farSegments.every(s => s.isInferred)).toBe(true);
+  });
+
+  it('does not flag anything when no edge in the group is inferred', () => {
+    const pos = positions({ root: { x: 500, y: 0 }, a: { x: 300, y: 140 }, b: { x: 700, y: 140 } });
+    const edges = [edge('root', 'a', 'generalization'), edge('root', 'b', 'generalization')];
+    const result = computeEdgeSegments(pos, edges, W, H);
+    expect(result.some(s => s.isInferred)).toBe(false);
   });
 });

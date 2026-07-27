@@ -33,6 +33,14 @@ export interface DiagramEdge {
   childIri: string;
   kind: 'composition' | 'generalization';
   propertyIri?: string;
+  /** True only when this edge has no supporting asserted axiom (no asserted `SubClassOf`/
+   *  `EquivalentClasses` conjunct produced it) — it exists solely because the reasoner's
+   *  classified hierarchy (`OntologyModel.inferredSubClasses`) reports it. An edge that is both
+   *  asserted AND reasoner-confirmed is `false`/absent (asserted takes priority). Always
+   *  `'generalization'` when `true`, since inferred data is exclusively subClassOf-derived.
+   *  Optional (not just defaulted) so every pre-existing edge-construction call site — none of
+   *  which know about reasoning — stays valid unchanged; absent is equivalent to `false`. */
+  isInferred?: boolean;
 }
 
 /** A relationship seen during extraction but not rendered because it used an

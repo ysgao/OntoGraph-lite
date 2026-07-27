@@ -83,6 +83,12 @@ export interface RenderedSegment {
    *  targets and no single target colour applies. Renderers resolve it to that node's colour;
    *  a segment whose `colorIri` node has no assigned colour falls back to a neutral default. */
   colorIri?: string;
+  /** True only for a segment that maps 1:1 to a single reasoner-inferred-only `DiagramEdge`
+   *  (spec 032-uml-inferred-subtypes, Decision 6) — a near/far child's own descending stem, a
+   *  fan-in bus's per-parent stem, or an off-axis bridge. NEVER set on a shared parent-to-bus
+   *  stem or shared horizontal bus line — those represent multiple sibling edges collectively,
+   *  so attributing one edge's flag to them would mislabel an asserted sibling's own line. */
+  isInferred?: boolean;
 }
 
 /**
@@ -776,6 +782,7 @@ function computeEdgeSegmentsCore(
   farEdgeRoutes?: Map<string, Position[]>,
 ): RenderedSegment[] {
   const segments: RenderedSegment[] = [];
+  const edgesById = new Map(edges.map(e => [e.id, e]));
 
   interface Group {
     parentIri: string;
@@ -814,7 +821,7 @@ function computeEdgeSegmentsCore(
   // through its reserved dummy columns) from being merged into a shared bus with an unrelated
   // parent at a different layer — doing so would run the shared bus's stem straight through
   // whatever sits at the layers in between.
-  const fanInCandidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number }> = [];
+  const fanInCandidates: Array<{ parentIri: string; childIri: string; kind: 'composition' | 'generalization'; px: number; pyBottom: number; edgeId?: string }> = [];
   for (const [groupKey, g] of busGroups) {
     if (g.childIris.length !== 1) { continue; }
     const childIri = g.childIris[0];
@@ -824,6 +831,7 @@ function computeEdgeSegmentsCore(
     fanInCandidates.push({
       parentIri: g.parentIri, childIri, kind: g.kind,
       px: placements.get(groupKey)!.px, pyBottom: positions.get(g.parentIri)!.y + nodeHeight,
+      edgeId,
     });
   }
   const fanInGroups = computeFanInGroups(fanInCandidates, placements);
@@ -960,7 +968,11 @@ function computeEdgeSegmentsCore(
       // grow past the old length-based skip threshold.)
       const sx = nearStemX(childIri);
       const points = [{ x: sx, y: busY }, { x: sx, y: c.y }];
-      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, colorIri: groupColorIri });
+      const nearEdgeId = g.edgeIdByChild.get(childIri);
+      segments.push({
+        d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, colorIri: groupColorIri,
+        isInferred: nearEdgeId ? edgesById.get(nearEdgeId)?.isInferred : undefined,
+      });
     }
 
     farChildIris.forEach((childIri, farIndex) => {
@@ -1001,7 +1013,10 @@ function computeEdgeSegmentsCore(
       const marker = (markerOnFirstFarChild && farIndex === 0)
         ? (g.kind === 'composition' ? 'start' : 'end')
         : undefined;
-      segments.push({ d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true, marker, colorIri: groupColorIri });
+      segments.push({
+        d: points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' '), kind: g.kind, far: true, marker, colorIri: groupColorIri,
+        isInferred: edgeId ? edgesById.get(edgeId)?.isInferred : undefined,
+      });
     });
   }
 
@@ -1011,10 +1026,11 @@ function computeEdgeSegmentsCore(
   for (const group of fanInGroups.values()) {
     const childPos = positions.get(group.childIri)!;
     for (const parent of group.parents) {
+      const isInferred = parent.edgeId ? edgesById.get(parent.edgeId)?.isInferred : undefined;
       segments.push(
         group.kind === 'composition'
-          ? { d: `M${parent.px},${parent.pyBottom} L${parent.px},${group.busY}`, kind: 'composition', marker: 'start', colorIri: group.childIri }
-          : { d: `M${parent.px},${group.busY} L${parent.px},${parent.pyBottom}`, kind: 'generalization', marker: 'end', colorIri: group.childIri },
+          ? { d: `M${parent.px},${parent.pyBottom} L${parent.px},${group.busY}`, kind: 'composition', marker: 'start', colorIri: group.childIri, isInferred }
+          : { d: `M${parent.px},${group.busY} L${parent.px},${parent.pyBottom}`, kind: 'generalization', marker: 'end', colorIri: group.childIri, isInferred },
       );
     }
     const xs = group.parents.map(p => p.px);
@@ -1030,7 +1046,7 @@ function computeEdgeSegmentsCore(
     const p = positions.get(e.parentIri);
     const c = positions.get(e.childIri);
     if (!p || !c) { continue; }
-    segments.push(renderBridge(p, c, e.kind, nodeWidth, nodeHeight, e.childIri));
+    segments.push(renderBridge(p, c, e.kind, nodeWidth, nodeHeight, e.childIri, e.isInferred));
   }
 
   return segments;
@@ -1331,6 +1347,7 @@ function renderBridge(
   w: number,
   h: number,
   colorIri: string,
+  isInferred?: boolean,
 ): RenderedSegment {
   // Composition: path drawn parent(whole) -> child(part), marker-start at parent.
   // Generalization: path drawn child(subtype) -> parent(supertype), marker-end at parent.
@@ -1348,5 +1365,5 @@ function renderBridge(
     ? `M${sx},${sy} L${sx},${(sy + ty) / 2} L${tx},${(sy + ty) / 2} L${tx},${ty}`
     : `M${sx},${sy} L${(sx + tx) / 2},${sy} L${(sx + tx) / 2},${ty} L${tx},${ty}`;
 
-  return { d, kind, marker: kind === 'composition' ? 'start' : 'end', colorIri };
+  return { d, kind, marker: kind === 'composition' ? 'start' : 'end', colorIri, isInferred };
 }

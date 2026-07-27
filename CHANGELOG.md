@@ -3,6 +3,11 @@
 All notable changes to OntoGraph Lite are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.8] — 2026-07-27
+
+### Added
+- **UML diagrams gain a "Stated / Inferred" view switch.** The Stated view behaves exactly as before — subtypes from directly-written axioms only. The new Inferred view shows a completely separate diagram built entirely from the reasoner's classified hierarchy (run "OntoGraph: Classify Ontology" first): every subtype the reasoner concluded, including ones with no direct axiom stating them, connected by generalization lines only — no part-of relationships appear in this view. A relationship that exists only because of reasoning renders as a dashed line; one that's also directly asserted renders solid. Lateralized (Left/Right) variants and "Entire X" concepts are hidden by default in the Inferred view, revealable via the same control already used to reveal lateralized classes, and labels like "Kidney structure" or "Structure of kidney" display simply as "Kidney". Switching views — or generating a diagram at all — never triggers a background classification run.
+
 ## [0.3.7] — 2026-07-25
 
 ### Changed

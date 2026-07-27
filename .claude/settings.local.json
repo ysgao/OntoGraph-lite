@@ -130,7 +130,9 @@
       "Bash(sips -g pixelWidth -g pixelHeight __TRACKED_VAR__/x-TB.png)",
       "Bash(sips -c 654 1200 --cropOffset 0 0 __TRACKED_VAR__/x-TB.png --out __TRACKED_VAR__/x-TB-crop.png)",
       "Bash(sips -c 300 900 --cropOffset 300 1150 __TRACKED_VAR__/x-TB.png --out __TRACKED_VAR__/x-cw.png)",
-      "Bash(rsvg-convert -z 1 /private/tmp/claude-501/-Users-yoga-JavaApp-OntoGraph-lite/c30d2ea7-d56e-43fd-8b94-3fcb1cdc30ad/scratchpad/trace-TB.svg -o /private/tmp/claude-501/-Users-yoga-JavaApp-OntoGraph-lite/c30d2ea7-d56e-43fd-8b94-3fcb1cdc30ad/scratchpad/trace-full.png)"
+      "Bash(rsvg-convert -z 1 /private/tmp/claude-501/-Users-yoga-JavaApp-OntoGraph-lite/c30d2ea7-d56e-43fd-8b94-3fcb1cdc30ad/scratchpad/trace-TB.svg -o /private/tmp/claude-501/-Users-yoga-JavaApp-OntoGraph-lite/c30d2ea7-d56e-43fd-8b94-3fcb1cdc30ad/scratchpad/trace-full.png)",
+      "Bash(~/.specify/extensions/git/scripts/bash/auto-commit.sh after_implement)",
+      "Bash(echo \"exit:$?\")"
     ]
   },
   "skillOverrides": {
