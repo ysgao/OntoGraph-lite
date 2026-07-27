@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ParserRegistry } from '../parser/ParserRegistry';
-import type { OntologyModel } from '../model/OntologyModel';
-import { extractUmlDiagram, stripEntirePrefix } from './partOfGraph';
+import { createEmptyModel } from '../model/OntologyModel';
+import type { OntologyModel, OWLClass } from '../model/OntologyModel';
+import { extractUmlDiagram, extractInferredUmlDiagram, stripEntirePrefix, stripStructureLabel } from './partOfGraph';
 
 const FIXTURE_PATH = path.join(__dirname, '..', '..', 'test-ontologies', 'uml-fixture.ofn');
 const NS = 'http://example.org/uml-fixture#';
@@ -30,6 +31,27 @@ describe('stripEntirePrefix', () => {
 
   it('does not strip "Entire" appearing mid-label, only at the start', () => {
     expect(stripEntirePrefix('Structure of entire liver')).toBe('Structure of entire liver');
+  });
+});
+
+describe('stripStructureLabel', () => {
+  it('strips a trailing " structure" and re-capitalizes what remains', () => {
+    expect(stripStructureLabel('Kidney structure')).toBe('Kidney');
+    expect(stripStructureLabel('bone structure')).toBe('Bone');
+  });
+
+  it('strips a leading "structure of " and re-capitalizes what remains', () => {
+    expect(stripStructureLabel('Structure of liver')).toBe('Liver');
+    expect(stripStructureLabel('structure of the eye')).toBe('The eye');
+  });
+
+  it('leaves a label matching neither pattern unchanged', () => {
+    expect(stripStructureLabel('Kidney')).toBe('Kidney');
+    expect(stripStructureLabel('Left kidney')).toBe('Left kidney');
+  });
+
+  it('prefers the "structure of " prefix check when a label could arguably match either pattern', () => {
+    expect(stripStructureLabel('Structure of eye structure')).toBe('Eye structure');
   });
 });
 
@@ -326,5 +348,187 @@ describe('extractUmlDiagram', () => {
     expect(result.edges).toContainEqual(expect.objectContaining({
       parentIri: `${NS}DepthFixChainC`, childIri: `${NS}DepthFixShared`, kind: 'generalization',
     }));
+  });
+});
+
+function makeClass(iri: string, superClassIris: string[] = []): OWLClass {
+  return {
+    iri,
+    type: 'class',
+    labels: { en: [iri.split('#').pop() ?? iri] },
+    annotations: {},
+    superClassIris,
+    equivalentClassIris: [],
+    disjointClassIris: [],
+    superClassExpressions: [],
+    equivalentClassExpressions: [],
+    gciExpressions: [],
+  };
+}
+
+describe('extractUmlDiagram (Stated view) — unaffected by the reasoner-inferred hierarchy (spec 032-uml-inferred-subtypes, second refinement)', () => {
+  it('never includes a subtype that exists only in model.inferredSubClasses, even when the model is classified — Stated and Inferred are never mixed', () => {
+    const model = createEmptyModel('test.ofn');
+    const a = makeClass('http://ex.org#A');
+    const b = makeClass('http://ex.org#B'); // no asserted superClassIris — inferred-only
+    model.classes.set(a.iri, a);
+    model.classes.set(b.iri, b);
+    model.isClassified = true;
+    model.inferredSubClasses.set(a.iri, new Set([b.iri]));
+
+    const result = extractUmlDiagram(model, a.iri, 1, { compositionProperties: [] });
+
+    expect(result.nodes.map(n => n.iri)).not.toContain(b.iri);
+    expect(result.edges.some(e => e.childIri === b.iri)).toBe(false);
+    // extractUmlDiagram (Stated) never sets isInferred/entireIris at all — those only exist on
+    // extractInferredUmlDiagram's output.
+    expect(result.entireIris).toBeUndefined();
+  });
+});
+
+describe('extractInferredUmlDiagram (Inferred view, spec 032-uml-inferred-subtypes second refinement)', () => {
+  it('includes a subtype that has no asserted axiom but IS in model.inferredSubClasses, when the model is classified', () => {
+    const model = createEmptyModel('test.ofn');
+    const a = makeClass('http://ex.org#A');
+    const b = makeClass('http://ex.org#B'); // no asserted superClassIris — inferred-only
+    model.classes.set(a.iri, a);
+    model.classes.set(b.iri, b);
+    model.isClassified = true;
+    model.inferredSubClasses.set(a.iri, new Set([b.iri]));
+
+    const result = extractInferredUmlDiagram(model, a.iri, 1);
+
+    expect(result.nodes.map(n => n.iri)).toContain(b.iri);
+    expect(result.edges).toContainEqual(expect.objectContaining({
+      parentIri: a.iri, childIri: b.iri, kind: 'generalization', isInferred: true,
+    }));
+  });
+
+  it('renders a relationship that is BOTH asserted AND reasoner-confirmed as isInferred falsy (still confirmed by reasoning, but not reasoner-ONLY)', () => {
+    const model = createEmptyModel('test.ofn');
+    const a = makeClass('http://ex.org#A');
+    const c = makeClass('http://ex.org#C', [a.iri]); // asserted subtype of A
+    model.classes.set(a.iri, a);
+    model.classes.set(c.iri, c);
+    model.isClassified = true;
+    model.inferredSubClasses.set(a.iri, new Set([c.iri])); // reasoner also confirms it
+
+    const result = extractInferredUmlDiagram(model, a.iri, 1);
+
+    const edgesToC = result.edges.filter(e => e.parentIri === a.iri && e.childIri === c.iri);
+    expect(edgesToC).toHaveLength(1);
+    expect(edgesToC[0].isInferred).toBeFalsy();
+  });
+
+  it('is a no-op (single root node) when the model is not classified, even though inferredSubClasses has stale/leftover data', () => {
+    const model = createEmptyModel('test.ofn');
+    const a = makeClass('http://ex.org#A');
+    const b = makeClass('http://ex.org#B');
+    model.classes.set(a.iri, a);
+    model.classes.set(b.iri, b);
+    // isClassified remains false
+    model.inferredSubClasses.set(a.iri, new Set([b.iri]));
+
+    const result = extractInferredUmlDiagram(model, a.iri, 1);
+
+    expect(result.nodes.map(n => n.iri)).toEqual([a.iri]);
+  });
+
+  it('never produces a composition edge — this view is generalization-only, no "part of" concept exists here', () => {
+    const model = createEmptyModel('test.ofn');
+    const a = makeClass('http://ex.org#A');
+    const b = makeClass('http://ex.org#B');
+    model.classes.set(a.iri, a);
+    model.classes.set(b.iri, b);
+    model.isClassified = true;
+    model.inferredSubClasses.set(a.iri, new Set([b.iri]));
+
+    const result = extractInferredUmlDiagram(model, a.iri, 1);
+
+    expect(result.edges.every(e => e.kind === 'generalization')).toBe(true);
+    expect(result.excludedRelations).toEqual([]);
+  });
+
+  it('does not anchor-hop to an "All or part of" target — the focus entity itself is always the root, unlike the Stated view', () => {
+    const model = loadFixture();
+    model.isClassified = true;
+    model.inferredSubClasses.set(`${NS}ClinicalStructure`, new Set([`${NS}Isolated`]));
+
+    const result = extractInferredUmlDiagram(model, `${NS}ClinicalStructure`, 1);
+
+    const root = result.nodes.find(n => n.isRoot);
+    expect(root?.iri).toBe(`${NS}ClinicalStructure`);
+  });
+
+  it('shows the root\'s own direct inferred parent(s) as a one-hop ancestor pre-pass, same rationale as the Stated view', () => {
+    const model = createEmptyModel('test.ofn');
+    const parent = makeClass('http://ex.org#Parent');
+    const child = makeClass('http://ex.org#Child');
+    model.classes.set(parent.iri, parent);
+    model.classes.set(child.iri, child);
+    model.isClassified = true;
+    model.inferredSubClasses.set(parent.iri, new Set([child.iri]));
+
+    const result = extractInferredUmlDiagram(model, child.iri, 1);
+
+    expect(result.nodes.map(n => n.iri)).toContain(parent.iri);
+    expect(result.edges).toContainEqual(expect.objectContaining({
+      parentIri: parent.iri, childIri: child.iri, kind: 'generalization',
+    }));
+  });
+
+  it('flags a reasoner-inferred-only subtype as lateralized, exactly like the Stated view would (own conjuncts check, FR-006)', () => {
+    const model = createEmptyModel('test.ofn');
+    const root = makeClass('http://ex.org#Root');
+    const lateralLeft: OWLClass = {
+      ...makeClass('http://ex.org#LateralLeft'),
+      superClassExpressions: ['http://snomed.info/id/272741003 some http://snomed.info/id/7771000'],
+    };
+    model.classes.set(root.iri, root);
+    model.classes.set(lateralLeft.iri, lateralLeft);
+    model.isClassified = true;
+    model.inferredSubClasses.set(root.iri, new Set([lateralLeft.iri]));
+
+    const result = extractInferredUmlDiagram(model, root.iri, 1);
+
+    // extractInferredUmlDiagram always includes the node itself — default EXCLUSION from the
+    // rendered diagram is applied one layer up by generateUmlDiagram.ts (see
+    // src/commands/generateUmlDiagram.test.ts for the end-to-end exclusion assertion).
+    expect(result.nodes.map(n => n.iri)).toContain(lateralLeft.iri);
+    expect(result.lateralizedIris).toContain(lateralLeft.iri);
+  });
+
+  it('flags a class whose label starts with "Entire " as an entire-concept, for default exclusion', () => {
+    const model = createEmptyModel('test.ofn');
+    const root = makeClass('http://ex.org#Root');
+    const entireKidney: OWLClass = { ...makeClass('http://ex.org#EntireKidney'), labels: { en: ['Entire kidney'] } };
+    model.classes.set(root.iri, root);
+    model.classes.set(entireKidney.iri, entireKidney);
+    model.isClassified = true;
+    model.inferredSubClasses.set(root.iri, new Set([entireKidney.iri]));
+
+    const result = extractInferredUmlDiagram(model, root.iri, 1);
+
+    expect(result.entireIris).toContain(entireKidney.iri);
+    // Label is NOT stripped in the Inferred view (no anchor-substitution mechanism here) — shown
+    // verbatim if ever revealed.
+    expect(result.nodes.find(n => n.iri === entireKidney.iri)?.label).toBe('Entire kidney');
+  });
+
+  it('simplifies a "X structure" or "Structure of X" label down to just "X"', () => {
+    const model = createEmptyModel('test.ofn');
+    const root = makeClass('http://ex.org#Root');
+    const kidneyStructure: OWLClass = { ...makeClass('http://ex.org#KidneyStructure'), labels: { en: ['Kidney structure'] } };
+    const structureOfLiver: OWLClass = { ...makeClass('http://ex.org#StructureOfLiver'), labels: { en: ['Structure of liver'] } };
+    model.classes.set(root.iri, root);
+    model.classes.set(kidneyStructure.iri, kidneyStructure);
+    model.classes.set(structureOfLiver.iri, structureOfLiver);
+    model.isClassified = true;
+    model.inferredSubClasses.set(root.iri, new Set([kidneyStructure.iri, structureOfLiver.iri]));
+
+    const result = extractInferredUmlDiagram(model, root.iri, 1);
+
+    expect(result.nodes.find(n => n.iri === kidneyStructure.iri)?.label).toBe('Kidney');
+    expect(result.nodes.find(n => n.iri === structureOfLiver.iri)?.label).toBe('Liver');
   });
 });

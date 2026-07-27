@@ -164,6 +164,29 @@ describe('renderDrawio', () => {
     expect(nearCellMatch?.[1]).not.toContain('dashed=1;dashPattern=6 4;');
   });
 
+  it('dashes a reasoner-inferred-only edge with its OWN distinct pattern, not the far-edge one (spec 032-uml-inferred-subtypes)', () => {
+    const nodes = [
+      node('urn:root', 'Root', 500, 0, { isRoot: true, depth: 0 }),
+      node('urn:asserted', 'Asserted', 300, 140, { depth: 1 }),
+      node('urn:inferred', 'Inferred', 700, 140, { depth: 1 }),
+    ];
+    const edges: DiagramEdge[] = [
+      { id: 'e1', parentIri: 'urn:root', childIri: 'urn:asserted', kind: 'generalization' },
+      { id: 'e2', parentIri: 'urn:root', childIri: 'urn:inferred', kind: 'generalization', isInferred: true },
+    ];
+    const xml = renderDrawio(nodes, edges, []);
+
+    expect(xml).toContain('dashed=1;dashPattern=3 3;');
+    expect(xml).not.toContain('dashed=1;dashPattern=6 4;'); // no far edges here — only the inferred pattern
+
+    // Generalization edges route source=child, target=parent (subtype -> supertype).
+    const inferredCellMatch = /<mxCell id="e\d+" style="([^"]*)"[^>]*source="n2" target="n0"/.exec(xml);
+    expect(inferredCellMatch?.[1]).toContain('dashed=1;dashPattern=3 3;');
+
+    const assertedCellMatch = /<mxCell id="e\d+" style="([^"]*)"[^>]*source="n1" target="n0"/.exec(xml);
+    expect(assertedCellMatch?.[1]).not.toContain('dashed=1;dashPattern=3 3;');
+  });
+
   it('gives every mxCell an explicit exitX/exitY/entryX/entryY — never a floating connector', () => {
     const nodes = [node('urn:root', 'Root', 0, 0, { isRoot: true }), node('urn:child', 'Child', 0, 140)];
     const edges: DiagramEdge[] = [

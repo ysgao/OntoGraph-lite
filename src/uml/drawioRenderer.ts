@@ -55,7 +55,9 @@ function nodeStyle(n: DiagramNode, branchColors: Map<string, NodeColor>): string
     + `align=center;verticalAlign=middle;${extra}`;
 }
 
-function edgeStyle(kind: 'composition' | 'generalization', points: ConnectionPoints, far: boolean, strokeColor: string): string {
+function edgeStyle(
+  kind: 'composition' | 'generalization', points: ConnectionPoints, far: boolean, strokeColor: string, isInferred?: boolean,
+): string {
   // No `edgeStyle=` key here (deliberately): mxGraph's `orthogonalEdgeStyle` computes its own
   // route between the fixed exit/entry points with no notion of sibling boxes, and would
   // happily draw a line straight through an unrelated node — the reported "edges overlap the
@@ -65,7 +67,13 @@ function edgeStyle(kind: 'composition' | 'generalization', points: ConnectionPoi
   // `far` (a dual-relationship edge spanning several rows/columns, see EdgeRoute.far) gets the
   // same dash style `nodeStyle()` uses for `hasHiddenRelations`, for visual-language consistency
   // between "this box has more hidden relations" and "this edge is a distant/secondary one".
-  const base = 'rounded=0;html=1;fontSize=10;fontColor=#4B564F;' + (far ? 'dashed=1;dashPattern=6 4;' : '');
+  // `isInferred` (spec 032-uml-inferred-subtypes) is a DIFFERENT concept — routing distance vs.
+  // axiom provenance, which can co-occur on the same edge — so it gets its own, visually and
+  // programmatically distinct dash pattern (`3 3`, tighter than `far`'s `6 4`) rather than
+  // reusing it; `far` takes precedence in the (rare) case both apply, since a far edge already
+  // reads as dashed and a second pattern on the exact same line would be redundant/confusing.
+  const base = 'rounded=0;html=1;fontSize=10;fontColor=#4B564F;'
+    + (far ? 'dashed=1;dashPattern=6 4;' : isInferred ? 'dashed=1;dashPattern=3 3;' : '');
   // `strokeColor` is the connected node's own border colour (see renderDrawio) so the line — and,
   // since draw.io tints arrowheads by strokeColor, its diamond/triangle too — matches the box it
   // leads to. startSize/endSize=10 (down from an earlier 16) matches draw.io's own, noticeably
@@ -134,7 +142,7 @@ export function renderDrawio(
 
     const waypoints = route.points.map(p => `<mxPoint x="${p.x}" y="${p.y}" />`).join('');
     cells.push(
-      `<mxCell id="e${eid}" style="${edgeStyle(e.kind, route, route.far, strokeColor)}" edge="1" parent="1" `
+      `<mxCell id="e${eid}" style="${edgeStyle(e.kind, route, route.far, strokeColor, e.isInferred)}" edge="1" parent="1" `
       + `source="${sourceId}" target="${targetId}"><mxGeometry relative="1" as="geometry">`
       + `<Array as="points">${waypoints}</Array></mxGeometry></mxCell>`,
     );

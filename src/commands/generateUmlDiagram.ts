@@ -4,7 +4,7 @@ import * as os from 'os';
 import { promises as fsp } from 'fs';
 import type { OntologyModel } from '../model/OntologyModel';
 import { getLabel } from '../model/OntologyModel';
-import { extractUmlDiagram } from '../uml/partOfGraph';
+import { extractUmlDiagram, extractInferredUmlDiagram } from '../uml/partOfGraph';
 import { computeLayout } from '../uml/layout';
 import { renderDrawio } from '../uml/drawioRenderer';
 import { renderDiagramFragment, renderStandaloneSvg } from '../uml/htmlRenderer';
@@ -13,9 +13,9 @@ import { applyNodeExclusions } from '../uml/nodeExclusion';
 import type { ExclusionMode } from '../uml/nodeExclusion';
 import type { DiagramNode, DiagramEdge, ExcludedRelation, LayoutDirection } from '../uml/diagramModel';
 import type {
-  UpdateDiagramMessage, WebviewToExt,
+  UpdateDiagramMessage, WebviewToExt, ViewMode,
   RequestDiagramMessage, RequestDepthChangeMessage, RequestDirectionChangeMessage, RequestExportMessage,
-  RequestRegenerateMessage, ResetExclusionsMessage, RequestToggleLateralizedMessage,
+  RequestRegenerateMessage, ResetExclusionsMessage, RequestToggleLateralizedMessage, RequestSetViewModeMessage,
 } from '../views/UmlDiagramMessages';
 
 // Singleton panel — reuse rather than open multiple, same convention as openVisualization.ts.
@@ -52,6 +52,15 @@ let currentExclusionMode: ExclusionMode = 'subtree';
 // time.
 let currentIncludeLateralized = false;
 
+// Which of the two, mutually EXCLUSIVE views is shown (spec 032-uml-inferred-subtypes, second
+// refinement: Stated and Inferred are never mixed into one diagram). 'stated' (asserted axioms
+// only, via `extractUmlDiagram` — completely unchanged from before this feature existed) is the
+// default for a fresh focus session. 'inferred' switches to a SEPARATE diagram built entirely from
+// the reasoner's classified hierarchy (`extractInferredUmlDiagram`) — generalization-only, no
+// composition/part-of, rooted at the focus entity directly (no "All or part of" anchor-hop).
+// Switched via the webview's "Stated / Inferred" control (`requestSetViewMode`).
+let currentViewMode: ViewMode = 'stated';
+
 interface ExtractOptions {
   maxNodes?: number;
   preferredLang?: string;
@@ -61,10 +70,12 @@ interface ExtractOptions {
    *  (`ontograph.umlDiagram.defaultDirection`), so a call site that omits it matches what a
    *  freshly opened UML diagram shows. */
   direction?: LayoutDirection;
-  /** When false (the default), lateralized classes are added to the effective exclusion set for
-   *  THIS extraction, on top of whatever `excludeIris` the caller supplied — see
-   *  `currentIncludeLateralized`. */
+  /** When false (the default), lateralized classes (and, in Inferred mode, "Entire X" classes —
+   *  see `extractAndLayout`) are added to the effective exclusion set for THIS extraction, on top
+   *  of whatever `excludeIris` the caller supplied — see `currentIncludeLateralized`. */
   includeLateralized?: boolean;
+  /** Which view to extract — see `currentViewMode`. Defaults to `'stated'`. */
+  viewMode?: ViewMode;
 }
 
 interface LaidOutDiagram {
@@ -83,15 +94,16 @@ function extractAndLayout(
   compositionProperties: string[],
   options: ExtractOptions = {},
 ): LaidOutDiagram {
-  const extracted = extractUmlDiagram(model, focusIri, depth, {
-    compositionProperties,
-    maxNodes: options.maxNodes,
-    preferredLang: options.preferredLang,
-  });
+  const extracted = options.viewMode === 'inferred'
+    ? extractInferredUmlDiagram(model, focusIri, depth, { maxNodes: options.maxNodes, preferredLang: options.preferredLang })
+    : extractUmlDiagram(model, focusIri, depth, { compositionProperties, maxNodes: options.maxNodes, preferredLang: options.preferredLang });
 
   const excludeIris = new Set(options.excludeIris ?? []);
   if (!options.includeLateralized) {
     for (const iri of extracted.lateralizedIris) { excludeIris.add(iri); }
+    // "Entire X" classes are an Inferred-view-only default exclusion (Stated has no equivalent
+    // concept — it anchors on/substitutes them instead, see `extractUmlDiagram`'s own handling).
+    for (const iri of extracted.entireIris ?? []) { excludeIris.add(iri); }
   }
 
   const { nodes, edges } = excludeIris.size > 0
@@ -140,6 +152,7 @@ export function buildDiagramMessage(
     canvasWidth,
     canvasHeight,
     includeLateralized: options.includeLateralized ?? false,
+    viewMode: options.viewMode ?? 'stated',
   };
 }
 
@@ -156,6 +169,7 @@ function sendDiagram(
     exclusionMode: currentExclusionMode,
     direction,
     includeLateralized: currentIncludeLateralized,
+    viewMode: currentViewMode,
   });
   void p.webview.postMessage(msg);
 }
@@ -189,6 +203,7 @@ export function generateUmlDiagram(
     currentExcludeIris = new Set();
     currentExclusionMode = 'subtree';
     currentIncludeLateralized = false;
+    currentViewMode = 'stated';
   }
 
   if (panel) {
@@ -220,6 +235,7 @@ export function generateUmlDiagram(
     currentExcludeIris = new Set();
     currentExclusionMode = 'subtree';
     currentIncludeLateralized = false;
+    currentViewMode = 'stated';
   }, null, context.subscriptions);
 
   panel.webview.onDidReceiveMessage(
@@ -253,6 +269,10 @@ export function generateUmlDiagram(
       } else if (msg.type === 'requestToggleLateralized') {
         const r = msg as RequestToggleLateralizedMessage;
         currentIncludeLateralized = r.include;
+        sendDiagram(panel!, currentModel, r.iri, r.depth, r.direction, currentCompositionProperties);
+      } else if (msg.type === 'requestSetViewMode') {
+        const r = msg as RequestSetViewModeMessage;
+        currentViewMode = r.mode;
         sendDiagram(panel!, currentModel, r.iri, r.depth, r.direction, currentCompositionProperties);
       } else if (msg.type === 'nodeClicked') {
         // intentional no-op — reserved for future navigation, not required for v1
@@ -339,6 +359,7 @@ export async function exportUmlDiagram(
     exclusionMode: isCurrentFocus ? currentExclusionMode : undefined,
     direction,
     includeLateralized: isCurrentFocus ? currentIncludeLateralized : false,
+    viewMode: isCurrentFocus ? currentViewMode : 'stated',
   });
 
   if (format === 'png') {

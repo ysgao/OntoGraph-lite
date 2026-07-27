@@ -3,6 +3,13 @@ import type { ExclusionMode } from '../uml/nodeExclusion';
 
 export type { LayoutDirection };
 
+/** Which of the two, mutually EXCLUSIVE UML diagram views is shown (spec 032-uml-inferred-
+ *  subtypes, second refinement — Stated and Inferred are never mixed into one diagram). `'stated'`
+ *  (asserted axioms only) is the default for a fresh focus session. `'inferred'` shows a SEPARATE
+ *  diagram built entirely from the reasoner's classified hierarchy — generalization-only, no
+ *  composition/part-of, default-excluding lateralized and "Entire X" classes. */
+export type ViewMode = 'stated' | 'inferred';
+
 // ── Extension → Webview ─────────────────────────────────────────────────────
 
 export interface UpdateDiagramMessage {
@@ -29,6 +36,10 @@ export interface UpdateDiagramMessage {
    *  default at EVERY depth (recomputed fresh on every render, not seeded once) unless this is
    *  `true`. */
   includeLateralized: boolean;
+  /** Echoes the host's current Stated/Inferred view-mode switch state (spec
+   *  032-uml-inferred-subtypes) — lets the webview keep its switch control in sync, same
+   *  convention as `includeLateralized`. `'stated'` is the default for a fresh focus session. */
+  viewMode: ViewMode;
 }
 
 export interface SelectNodeMessage {
@@ -116,9 +127,26 @@ export interface RequestToggleLateralizedMessage {
   include: boolean;
 }
 
+/** Sent when the user switches the "Stated / Inferred" view-mode control — switches to a
+ *  completely SEPARATE diagram (spec 032-uml-inferred-subtypes, second refinement): `'stated'`
+ *  (the default for a fresh focus session) shows asserted axioms only, exactly as before this
+ *  feature existed; `'inferred'` shows a diagram built entirely from the reasoner's classified
+ *  hierarchy (generalization-only, no composition/part-of, default-excluding lateralized and
+ *  "Entire X" classes). A no-op when the ontology hasn't been classified — switching to
+ *  `'inferred'` then shows an empty-below-root diagram rather than triggering classification.
+ *  Independent of `RequestToggleLateralizedMessage` and `RequestRegenerateMessage`'s exclusion
+ *  set — each is its own dedicated control. */
+export interface RequestSetViewModeMessage {
+  type: 'requestSetViewMode';
+  iri: string;
+  depth: number;
+  direction: LayoutDirection;
+  mode: ViewMode;
+}
+
 export type ExtToWebview = UpdateDiagramMessage | SelectNodeMessage | ExportCompleteMessage;
 export type WebviewToExt  = ReadyMessage | RequestDiagramMessage
                            | RequestDepthChangeMessage | RequestDirectionChangeMessage
                            | NodeClickedMessage | RequestExportMessage
                            | RequestRegenerateMessage | ResetExclusionsMessage
-                           | RequestToggleLateralizedMessage;
+                           | RequestToggleLateralizedMessage | RequestSetViewModeMessage;

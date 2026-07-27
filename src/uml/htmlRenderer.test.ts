@@ -115,6 +115,25 @@ describe('renderDiagramFragment', () => {
     const nearSegment = /<path d="M465,390 L635,390"[^>]*\/>/.exec(frag.svg);
     expect(nearSegment?.[0]).not.toContain('stroke-dasharray');
   });
+
+  it('dashes a reasoner-inferred-only edge with its OWN distinct pattern, not the far-edge one (spec 032-uml-inferred-subtypes)', () => {
+    const nodes = [
+      node('urn:root', 'Root', 500, 0, { isRoot: true, depth: 0 }),
+      node('urn:asserted', 'Asserted', 300, 140, { depth: 1 }),
+      node('urn:inferred', 'Inferred', 700, 140, { depth: 1 }),
+    ];
+    const edges: DiagramEdge[] = [
+      { id: 'e1', parentIri: 'urn:root', childIri: 'urn:asserted', kind: 'generalization' },
+      { id: 'e2', parentIri: 'urn:root', childIri: 'urn:inferred', kind: 'generalization', isInferred: true },
+    ];
+    const frag = renderDiagramFragment(nodes, edges, []);
+
+    expect(frag.svg).toContain('stroke-dasharray="3 3"');
+    expect(frag.svg).not.toContain('stroke-dasharray="6 4"'); // no far edges here — only the inferred pattern should appear
+    // The asserted sibling's own per-child stem must not carry any dash.
+    const assertedSegment = /<path d="M300,\d+ L300,140"[^>]*\/>/.exec(frag.svg);
+    expect(assertedSegment?.[0]).not.toContain('stroke-dasharray');
+  });
 });
 
 describe('renderDiagramFragment — direction: LR', () => {

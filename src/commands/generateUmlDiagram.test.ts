@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ParserRegistry } from '../parser/ParserRegistry';
-import type { OntologyModel } from '../model/OntologyModel';
+import type { OntologyModel, OWLClass } from '../model/OntologyModel';
 import type { ExtensionContext } from 'vscode';
 import { buildDiagramMessage, exportUmlDiagramDrawio, exportUmlDiagram, generateUmlDiagram } from './generateUmlDiagram';
 
@@ -93,6 +93,18 @@ describe('buildDiagramMessage', () => {
       expect(['composition', 'generalization']).toContain(edge.kind);
     }
     expect(msg.edges.length).toBeGreaterThan(0);
+  });
+
+  it('never invokes any vscode command (in particular, never triggers classification) while building a diagram message, whether or not the model is already classified (spec 032 FR-002)', () => {
+    const unclassified = loadFixture();
+    buildDiagramMessage(unclassified, `${NS}GenSuper`, 1, []);
+    expect(mockExecuteCommand).not.toHaveBeenCalled();
+
+    const classified = loadFixture();
+    classified.isClassified = true;
+    classified.inferredSubClasses.set(`${NS}GenSuper`, new Set([`${NS}GenSub`]));
+    buildDiagramMessage(classified, `${NS}GenSuper`, 1, []);
+    expect(mockExecuteCommand).not.toHaveBeenCalled();
   });
 
   it('includes excludedRelations in the message so the webview can render them (FR-010)', () => {
@@ -418,6 +430,137 @@ describe('generateUmlDiagram — node exclusion regeneration', () => {
     // "Laterality some Side" is the generic reference concept, not a side-specific variant — it
     // must stay visible.
     expect(iris).toContain(`${NS}LateralSide`);
+  });
+
+  function addInferredOnlyChild(model: OntologyModel, parentIri: string, childIri: string, label = 'Inferred only child'): void {
+    model.classes.set(childIri, {
+      iri: childIri, type: 'class', labels: { en: [label] }, annotations: {},
+      superClassIris: [], equivalentClassIris: [], disjointClassIris: [],
+      superClassExpressions: [], equivalentClassExpressions: [], gciExpressions: [],
+    });
+    model.isClassified = true;
+    model.inferredSubClasses.set(parentIri, new Set([childIri]));
+  }
+
+  it('is absent by default ("stated" view mode) — the Inferred view is a SEPARATE diagram, not merged in', () => {
+    const model = loadFixture();
+    const inferredOnlyIri = `${NS}InferredOnlyChild`;
+    addInferredOnlyChild(model, `${NS}GenSuper`, inferredOnlyIri);
+
+    generateUmlDiagram(fakeContext, model, `${NS}GenSuper`);
+    const handler = getMessageHandler();
+    handler({ type: 'ready' });
+
+    const [msg] = mockPostMessage.mock.calls[0] as [{ nodes: Array<{ iri: string }>; viewMode: string }];
+    expect(msg.nodes.map(n => n.iri)).not.toContain(inferredOnlyIri);
+    expect(msg.viewMode).toBe('stated');
+  });
+
+  it('requestSetViewMode(mode: "inferred") switches to the Inferred view and echoes viewMode on the message', () => {
+    const model = loadFixture();
+    const inferredOnlyIri = `${NS}InferredOnlyChild`;
+    addInferredOnlyChild(model, `${NS}GenSuper`, inferredOnlyIri);
+
+    generateUmlDiagram(fakeContext, model, `${NS}GenSuper`);
+    const handler = getMessageHandler();
+    handler({ type: 'ready' });
+
+    mockPostMessage.mockClear();
+    handler({ type: 'requestSetViewMode', iri: `${NS}GenSuper`, depth: 2, direction: 'TB', mode: 'inferred' });
+
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    const [msg] = mockPostMessage.mock.calls[0] as [{ nodes: Array<{ iri: string }>; viewMode: string }];
+    expect(msg.nodes.map(n => n.iri)).toContain(inferredOnlyIri);
+    expect(msg.viewMode).toBe('inferred');
+  });
+
+  it('the Inferred view mode persists across a subsequent depth change, same as the lateralized toggle does', () => {
+    const model = loadFixture();
+    const inferredOnlyIri = `${NS}InferredOnlyChild`;
+    addInferredOnlyChild(model, `${NS}GenSuper`, inferredOnlyIri);
+
+    generateUmlDiagram(fakeContext, model, `${NS}GenSuper`);
+    const handler = getMessageHandler();
+    handler({ type: 'ready' });
+    handler({ type: 'requestSetViewMode', iri: `${NS}GenSuper`, depth: 2, direction: 'TB', mode: 'inferred' });
+
+    mockPostMessage.mockClear();
+    handler({ type: 'requestDepthChange', iri: `${NS}GenSuper`, depth: 1, direction: 'TB' });
+
+    const [msg] = mockPostMessage.mock.calls[0] as [{ nodes: Array<{ iri: string }> }];
+    expect(msg.nodes.map(n => n.iri)).toContain(inferredOnlyIri);
+  });
+
+  it('resets the view mode back to "stated" when a different entity becomes the focus', () => {
+    const model = loadFixture();
+    const inferredOnlyIri = `${NS}InferredOnlyChild`;
+    addInferredOnlyChild(model, `${NS}GenSuper`, inferredOnlyIri);
+
+    generateUmlDiagram(fakeContext, model, `${NS}GenSuper`);
+    const handler = getMessageHandler();
+    handler({ type: 'ready' });
+    handler({ type: 'requestSetViewMode', iri: `${NS}GenSuper`, depth: 2, direction: 'TB', mode: 'inferred' });
+
+    generateUmlDiagram(fakeContext, model, `${NS}Root`);
+    mockPostMessage.mockClear();
+    generateUmlDiagram(fakeContext, model, `${NS}GenSuper`);
+
+    const [msg] = mockPostMessage.mock.calls[0] as [{ nodes: Array<{ iri: string }>; viewMode: string }];
+    expect(msg.nodes.map(n => n.iri)).not.toContain(inferredOnlyIri);
+    expect(msg.viewMode).toBe('stated');
+  });
+
+  it('auto-excludes a reasoner-inferred-only LATERALIZED subtype from the Inferred view by default, and reveals it via the existing lateralized toggle', () => {
+    const model = loadFixture();
+    const inferredLateralIri = `${NS}InferredLateralLeft`;
+    addInferredOnlyChild(model, `${NS}LateralParent`, inferredLateralIri, 'Inferred lateral left');
+    model.classes.get(inferredLateralIri)!.superClassExpressions = ['http://snomed.info/id/272741003 some http://snomed.info/id/7771000'];
+
+    generateUmlDiagram(fakeContext, model, `${NS}LateralParent`);
+    const handler = getMessageHandler();
+    handler({ type: 'ready' });
+    handler({ type: 'requestSetViewMode', iri: `${NS}LateralParent`, depth: 2, direction: 'TB', mode: 'inferred' });
+
+    const [inferredMsg] = mockPostMessage.mock.calls[mockPostMessage.mock.calls.length - 1] as [{ nodes: Array<{ iri: string }> }];
+    expect(inferredMsg.nodes.map(n => n.iri)).not.toContain(inferredLateralIri);
+
+    handler({ type: 'requestToggleLateralized', iri: `${NS}LateralParent`, depth: 2, direction: 'TB', include: true });
+    const [revealedMsg] = mockPostMessage.mock.calls[mockPostMessage.mock.calls.length - 1] as [{ nodes: Array<{ iri: string }> }];
+    expect(revealedMsg.nodes.map(n => n.iri)).toContain(inferredLateralIri);
+  });
+
+  it('auto-excludes an "Entire X" class from the Inferred view by default, and reveals it via the existing lateralized toggle', () => {
+    const model = loadFixture();
+    const entireIri = `${NS}InferredEntireKidney`;
+    addInferredOnlyChild(model, `${NS}GenSuper`, entireIri, 'Entire kidney');
+
+    generateUmlDiagram(fakeContext, model, `${NS}GenSuper`);
+    const handler = getMessageHandler();
+    handler({ type: 'ready' });
+    handler({ type: 'requestSetViewMode', iri: `${NS}GenSuper`, depth: 2, direction: 'TB', mode: 'inferred' });
+
+    const [inferredMsg] = mockPostMessage.mock.calls[mockPostMessage.mock.calls.length - 1] as [{ nodes: Array<{ iri: string }> }];
+    expect(inferredMsg.nodes.map(n => n.iri)).not.toContain(entireIri);
+
+    handler({ type: 'requestToggleLateralized', iri: `${NS}GenSuper`, depth: 2, direction: 'TB', include: true });
+    const [revealedMsg] = mockPostMessage.mock.calls[mockPostMessage.mock.calls.length - 1] as [{ nodes: Array<{ iri: string }> }];
+    expect(revealedMsg.nodes.map(n => n.iri)).toContain(entireIri);
+  });
+
+  it('never produces a composition edge in the Inferred view, even when the model has configured composition properties', () => {
+    const model = loadFixture();
+    const inferredOnlyIri = `${NS}InferredOnlyChild`;
+    addInferredOnlyChild(model, `${NS}Root`, inferredOnlyIri);
+    // beforeEach already configures `umlDiagram.compositionProperties` to [`${NS}partOf`] — the
+    // Inferred view must ignore it entirely, unlike the Stated view.
+
+    generateUmlDiagram(fakeContext, model, `${NS}Root`);
+    const handler = getMessageHandler();
+    handler({ type: 'ready' });
+    handler({ type: 'requestSetViewMode', iri: `${NS}Root`, depth: 2, direction: 'TB', mode: 'inferred' });
+
+    const [msg] = mockPostMessage.mock.calls[mockPostMessage.mock.calls.length - 1] as [{ edges: Array<{ kind: string }> }];
+    expect(msg.edges.every(e => e.kind === 'generalization')).toBe(true);
   });
 
   it('resetExclusions does NOT reveal lateralized nodes — that is the dedicated "Show full subhierarchy" toggle\'s job, not a general reset', () => {

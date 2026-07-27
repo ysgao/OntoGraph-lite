@@ -119,7 +119,11 @@ export function renderDiagramFragment(
         : '';
     // A "far" (dual-relationship) edge spans several rows/columns by construction — dashing it
     // signals that length is an intentional secondary relationship, not a layout glitch.
-    const dash = seg.far ? 'stroke-dasharray="6 4" ' : '';
+    // `isInferred` (spec 032-uml-inferred-subtypes) is a different concept — axiom provenance, not
+    // routing distance — so it gets its own, distinct pattern rather than reusing `far`'s; `far`
+    // wins if both apply (a far edge already reads as dashed; two patterns on one line would just
+    // be visual noise).
+    const dash = seg.far ? 'stroke-dasharray="6 4" ' : seg.isInferred ? 'stroke-dasharray="3 3" ' : '';
     return `<path d="${seg.d}" fill="none" stroke="${stroke}" stroke-width="1.6" ${dash}${marker} />`;
   }).join('');
 
@@ -190,7 +194,7 @@ export function renderStandaloneSvg(
     const marker = seg.marker === 'start' ? 'marker-start="url(#diamond)"'
       : seg.marker === 'end' ? 'marker-end="url(#triangle)"'
         : '';
-    const dash = seg.far ? 'stroke-dasharray="6 4" ' : '';
+    const dash = seg.far ? 'stroke-dasharray="6 4" ' : seg.isInferred ? 'stroke-dasharray="3 3" ' : '';
     return `<path d="${seg.d}" fill="none" stroke="${stroke}" stroke-width="1.6" ${dash}${marker} />`;
   }).join('');
 

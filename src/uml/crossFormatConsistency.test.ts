@@ -57,4 +57,25 @@ describe('cross-format layout consistency (spec FR-006/SC-004)', () => {
     expect(farSegmentCount).toBeGreaterThan(0);
     expect(farSegmentCount).toBe(farRouteCount);
   });
+
+  it('flags exactly the same edge as reasoner-inferred-only in both renderers, using a pattern distinct from and not conflated with the far-edge pattern (spec 032-uml-inferred-subtypes)', () => {
+    // A -> A1 is an ordinary near (adjacent-layer) edge in the fixture, untouched by far-edge
+    // routing — marking it isInferred exercises the NEW pattern in isolation from the fixture's
+    // existing genuinely-far edges.
+    const inferredEdges = edges.map(e => (e.parentIri === 'A' && e.childIri === 'A1' ? { ...e, isInferred: true } : e));
+
+    const fragment = renderDiagramFragment(laidOutNodes, inferredEdges, [], direction);
+    const drawio = renderDrawio(laidOutNodes, inferredEdges, [], direction);
+
+    const inferredSegmentCount = (fragment.svg.match(/stroke-dasharray="3 3"/g) ?? []).length;
+    const inferredRouteCount = (drawio.match(/dashed=1;dashPattern=3 3;/g) ?? []).length;
+    expect(inferredSegmentCount).toBeGreaterThan(0);
+    expect(inferredSegmentCount).toBe(inferredRouteCount);
+
+    // The existing far-edge pattern count is unchanged by marking an unrelated near edge
+    // inferred — the two concepts don't conflate into one count.
+    const farSegmentCountBaseline = (renderDiagramFragment(laidOutNodes, edges, [], direction).svg.match(/stroke-dasharray="6 4"/g) ?? []).length;
+    const farSegmentCountWithInferred = (fragment.svg.match(/stroke-dasharray="6 4"/g) ?? []).length;
+    expect(farSegmentCountWithInferred).toBe(farSegmentCountBaseline);
+  });
 });
