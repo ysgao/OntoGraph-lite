@@ -3,6 +3,14 @@
 All notable changes to OntoGraph Lite are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.9] — 2026-07-31
+
+### Added
+- README now mentions [Open VSX](https://open-vsx.org/extension/ysgao/ontograph-lite) as an install source alongside the VS Code Marketplace, for VS Code forks (Antigravity, Cursor, Windsurf, etc.) that pull extensions from there instead.
+
+### Fixed
+- Entity Editor's Manchester Syntax expression fields (both editable and read-only) now theme correctly with VS Code's active color theme — editor and autocomplete-suggestion backgrounds previously fell back to the browser's default `field` color instead of following the theme, and keywords (`SubClassOf`, `some`, `and`, etc.) now get a distinct highlight color in both light and dark themes.
+
 ## [0.3.8] — 2026-07-27
 
 ### Added
