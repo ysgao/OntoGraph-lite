@@ -12,10 +12,10 @@ OntoGraph is a Protégé-like OWL 2 ontology editing, reasoning, and visualizati
 - **Inferred Hierarchy**: View classification results side-by-side with your asserted hierarchy.
 - **Entity Editor**: Edit axioms and annotations with a structured interface and Manchester Syntax support, including undo/redo.
 - **Graph Visualization**: Explore entity relationships visually with interactive neighborhood graphs.
-- **UML Diagram**: Right-click any class and choose "Generate UML Diagram" for a Protégé-independent, UML-style view rooted at that class — composition (part-of, filled diamond) and generalization (subtype, hollow triangle) connectors derived purely from the ontology's own axioms, with no AI/LLM involvement. Adjustable depth, layout direction, and node exclusion; export to draw.io, SVG, or PNG.
-- **DL Query**: Protégé-style DL Query panel — enter a Manchester Syntax class expression and browse results grouped by Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, and Instances. Classification runs automatically the first time it's needed.
+- **UML Diagram**: Right-click any class and choose "Generate UML Diagram" for a UML-style view rooted at that class — composition (part-of, filled diamond) and generalization (subtype, hollow triangle) connectors derived purely from the ontology's own axioms. Adjustable depth, layout direction, stated-vs-inferred views, and node exclusion; export to draw.io, SVG, or PNG.
+- **DL Query**: DL Query panel — enter a Manchester Syntax class expression and browse results grouped by Direct superclasses, Superclasses, Equivalent classes, Direct subclasses, Subclasses, and Instances. Classification runs automatically the first time DL Query is invoked.
 - **SPARQL Editor**: Execute SPARQL queries against your loaded ontology.
-- **SNOMED CT Scale**: Optimized for large-scale ontologies with tens of thousands of classes via Worker Thread parsing and ELK.
+- **SNOMED CT Scale**: Optimized for large-scale ontologies (tens of thousands of classes) via Worker Thread parsing and ELK reasoner.
 - **CLI for AI Tools**: `@ysgao/ontograph-cli` — a command-line interface for AI coding assistants (Claude Code, Codex) and developers to parse, search, validate, convert, and reason over OWL files. Core commands (`parse`, `search`, `validate`, `convert`, `stats`, `entity-info`) run standalone; `classify`/`check-consistency`/`dl-query` attach to a running VS Code instance.
 - **Standalone CLI**: `@ysgao/ontograph-cli-standalone` — a separate, zero-dependency package (macOS Apple Silicon only) that bundles its own Java runtime and reasoner, so `classify`/`check-consistency`/`dl-query` run against a local file with no VS Code and no system Java installed at all.
 
@@ -38,8 +38,9 @@ OntoGraph provides rich language support for OWL files via the Language Server P
 
 ### Installing the VS Code Extension
 
-#### From the Marketplace
+#### From the Marketplaces
 Install directly from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=ysgao.ontograph-lite), or search for **OntoGraph** in the VS Code Extensions view (`Ctrl+Shift+X`).
+Or install directly from [OpenVSX](https://open-vsx.org/extension/ysgao/ontograph-lite). Note that OpenVSX works with any VS Code fork such as Antigravity, Cursor, Windsurf, etc.
 
 #### From VSIX
 1. Download `ontograph-lite-x.x.x.vsix` from the [releases page](https://github.com/ysgao/OntoGraph-lite/releases).
@@ -73,7 +74,7 @@ ontograph --help
 
 `@ysgao/ontograph-cli-standalone` is a **separate** npm package (not a mode of the CLI above) that
 bundles its own Java 21 runtime and the reasoner JAR, so `classify`/`check-consistency`/`dl-query`
-work against a local ontology file with zero external dependencies. Currently macOS Apple Silicon
+work against a local ontology file with zero external dependencies. The commands are identical between both packages. Currently macOS Apple Silicon
 (arm64) only.
 
 ```bash
@@ -250,10 +251,6 @@ The CLI reads this file automatically. No configuration needed. If the file is a
 
 ### Need `classify`/`check-consistency`/`dl-query` without VS Code at all?
 
-Install [`@ysgao/ontograph-cli-standalone`](cli-standalone/README.md) instead (macOS Apple Silicon
-only) — it bundles its own Java runtime and reasoner, so those three commands take a `<file>`
-argument directly instead of attaching to a running VS Code bridge. The core commands above are
-identical between both packages.
 
 ---
 
