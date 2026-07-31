@@ -1,7 +1,7 @@
 import { createValueWidget, MULTILINE_IRIS } from './createValueWidget';
 import { createAnnotationDisplayElement } from './annotationValueDisplay';
 import { formatManchesterForDisplay, collectLogicalLines, findFormatBreaks, stripAndContinuations } from '../../src/utils/ManchesterFormatting';
-import { manchesterLanguage, vsCodeTheme, clickableEntityExtension, shiftRefsForFormat, type ExpressionEntityRef } from './manchesterCodeMirror';
+import { manchesterLanguage, vsCodeTheme, clickableEntityExtension, shiftRefsForFormat, type ExpressionEntityRef, manchesterHighlightStyle } from './manchesterCodeMirror';
 import { createReadOnlyExpressionEntry } from './readOnlyExpressionEntry';
 import { EditorSelection, EditorState } from '@codemirror/state';
 import {
@@ -231,6 +231,7 @@ function createEditor(parent: HTMLElement, initialDoc: string, entityRefs: Expre
       doc: initialDoc,
       extensions: [
         manchesterLanguage,
+        syntaxHighlighting(manchesterHighlightStyle),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         lineNumbers(),
         history(),
@@ -1714,6 +1715,14 @@ function injectStyles(): void {
       --radius-sm: 3px;
       --radius-md: 6px;
       --radius-pill: 20px;
+      --keyword-fg: #9e0000;
+    }
+
+    body.vscode-dark {
+      --keyword-fg: #ffb86c;
+    }
+    body.vscode-high-contrast {
+      --keyword-fg: #ffb86c;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1886,7 +1895,7 @@ function injectStyles(): void {
       transition: all 0.1s;
     }
     .expression-editor:hover { border-color: var(--link); background: rgba(128, 128, 128, 0.08); }
-    .expression-editor:focus-within { border-color: var(--link); background: field; }
+    .expression-editor:focus-within { border-color: var(--link); background: var(--input-bg); }
     .expression-add-btn { 
       background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); 
       border: none; border-radius: var(--radius-sm); padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; 
@@ -1966,6 +1975,7 @@ function injectStyles(): void {
     }
 
     .annotation-value-input {
+      background: var(--input-bg);
       color: var(--fg);
       border: 1px solid var(--input-border);
       padding: 8px 14px; border-radius: var(--radius-md);

@@ -8,6 +8,7 @@ import {
   clickableEntityExtension,
   shiftRefsForFormat,
   type ExpressionEntityRef,
+  manchesterHighlightStyle,
 } from './manchesterCodeMirror';
 
 /**
@@ -37,6 +38,7 @@ export function createReadOnlyExpressionEntry(
       doc: formatManchesterForDisplay(expr),
       extensions: [
         manchesterLanguage,
+        syntaxHighlighting(manchesterHighlightStyle),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         EditorView.lineWrapping,
         clickableEntityExtension(shiftRefsForFormat(expr, refs), onEntityClick),

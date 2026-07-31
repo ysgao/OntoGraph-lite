@@ -1,6 +1,7 @@
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { StateField } from '@codemirror/state';
-import { StreamLanguage, type StringStream } from '@codemirror/language';
+import { StreamLanguage, type StringStream, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
 import { findFormatBreaks } from '../../src/utils/ManchesterFormatting';
 
 export type EntityType = 'class' | 'objectProperty' | 'dataProperty' | 'annotationProperty' | 'individual';
@@ -59,6 +60,10 @@ export const manchesterLanguage = StreamLanguage.define({
   },
 });
 
+export const manchesterHighlightStyle = HighlightStyle.define([
+  { tag: t.keyword, color: 'var(--keyword-fg, #9e0000)' },
+]);
+
 export const vsCodeTheme = EditorView.theme({
   '&': {
     color: 'var(--vscode-editor-foreground)',
@@ -67,7 +72,7 @@ export const vsCodeTheme = EditorView.theme({
     fontSize: 'var(--vscode-editor-font-size, var(--vscode-font-size))',
   },
   '&.cm-focused': {
-    backgroundColor: 'field',
+    backgroundColor: 'var(--vscode-input-background)',
   },
   '.cm-content': { caretColor: 'var(--vscode-editorCursor-foreground)' },
   '.cm-cursor': { borderLeftColor: 'var(--vscode-editorCursor-foreground)' },
@@ -81,6 +86,15 @@ export const vsCodeTheme = EditorView.theme({
   },
   '.cm-activeLineGutter': { backgroundColor: 'var(--vscode-editor-lineHighlightBackground)' },
   '.cm-activeLine': { backgroundColor: 'var(--vscode-editor-lineHighlightBackground)' },
+  '.cm-tooltip': {
+    backgroundColor: 'var(--vscode-editorSuggestWidget-background, var(--vscode-editor-background))',
+    border: '1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.2)))',
+    color: 'var(--vscode-editorSuggestWidget-foreground, var(--vscode-editor-foreground))',
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    backgroundColor: 'var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, #094771)) !important',
+    color: 'var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-list-activeSelectionForeground, #fff)) !important',
+  },
 });
 
 /** Clickable entity decorations. `onEntityClick` is injected so this module has no vscode dependency. */
